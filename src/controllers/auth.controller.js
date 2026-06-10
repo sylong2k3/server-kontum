@@ -120,6 +120,19 @@ const googleCallback = async (req, res) => {
     res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
 };
 
+/**
+ * POST /api/v1/auth/google/mobile
+ * Body: { idToken }
+ */
+const googleMobileLogin = async (req, res) => {
+    const { idToken } = req.body;
+    const context = getRequestContext(req);
+
+    const result = await authService.googleMobileLogin({ idToken }, context);
+
+    OK(res, t('login_success', req.lang), result);
+};
+
 module.exports = {
     register,
     login,
@@ -128,4 +141,5 @@ module.exports = {
     changePassword,
     getMe,
     googleCallback,
+    googleMobileLogin,
 };

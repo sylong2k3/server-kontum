@@ -47,10 +47,16 @@ const logoutSchema = Joi.object({
         .allow(null, ''),
 });
 
+const googleMobileSchema = Joi.object({
+    idToken: Joi.string()
+        .required(),
+});
+
 module.exports = {
     registerSchema,
     loginSchema,
     refreshSchema,
     changePasswordSchema,
     logoutSchema,
+    googleMobileSchema,
 };

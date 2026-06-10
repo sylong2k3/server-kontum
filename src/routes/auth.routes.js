@@ -1,19 +1,3 @@
-/**
- * Auth Routes — Định tuyến tất cả endpoints xác thực
- *
- * Public routes (không cần token):
- *   POST /register      — Đăng ký
- *   POST /login         — Đăng nhập
- *   POST /refresh       — Gia hạn token
- *   GET  /google        — Redirect Google OAuth
- *   GET  /google/callback — Google callback
- *
- * Protected routes (cần access token):
- *   POST /logout            — Đăng xuất
- *   POST /change-password   — Đổi mật khẩu
- *   GET  /me                — Thông tin user hiện tại
- */
-
 const { Router } = require('express');
 const passport = require('passport');
 const asyncHandler = require('../helpers/async-handler');
@@ -26,6 +10,7 @@ const {
     refreshSchema,
     changePasswordSchema,
     logoutSchema,
+    googleMobileSchema,
 } = require('../validators/auth.validator');
 
 const router = Router();
@@ -71,6 +56,12 @@ router.get('/google/callback',
         failureRedirect: `${process.env.APP_URL || 'http://localhost:3000'}/auth/login?error=google_auth_failed`,
     }),
     asyncHandler(authController.googleCallback)
+);
+
+// Google login cho Mobile (Android & iOS)
+router.post('/google/mobile',
+    validate(googleMobileSchema),
+    asyncHandler(authController.googleMobileLogin)
 );
 
 // ═══════════════════════════════════════════════════════════════════════════

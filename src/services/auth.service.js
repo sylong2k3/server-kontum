@@ -466,6 +466,49 @@ const _logActivity = async (userId, action, status, context = {}, metadata = {})
     }
 };
 
+/**
+ * Đăng nhập Google cho Mobile (Android & iOS) bằng idToken
+ *
+ * @param {{ idToken: string }} data
+ * @param {{ ipAddress?: string, userAgent?: string, lang?: string }} context
+ * @returns {Promise<{ user: object, accessToken: string, refreshToken: string, isNewUser: boolean }>}
+ */
+const googleMobileLogin = async ({ idToken }, context = {}) => {
+    // 1. Gọi Google API để verify tokeninfo
+    let payload;
+    try {
+        const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+        if (!response.ok) {
+            throw new Error('Google tokeninfo verification failed');
+        }
+        payload = await response.json();
+    } catch (err) {
+        throw new Api401Error(t('invalid_token', context.lang));
+    }
+
+    // 2. Kiểm tra audience để tránh token spoofing
+    const allowedAudiences = [
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_ANDROID_CLIENT_ID,
+        process.env.GOOGLE_IOS_CLIENT_ID
+    ].filter(Boolean);
+
+    if (!allowedAudiences.includes(payload.aud)) {
+        throw new Api401Error(t('invalid_token', context.lang));
+    }
+
+    // 3. Map Google payload thành googleProfile format
+    const googleProfile = {
+        googleId: payload.sub,
+        email: payload.email,
+        fullName: payload.name || payload.email.split('@')[0],
+        avatarUrl: payload.picture || null,
+    };
+
+    // 4. Ủy nhiệm qua googleAuthCallback để login/tạo user và sinh tokens
+    return googleAuthCallback(googleProfile, context);
+};
+
 module.exports = {
     register,
     login,
@@ -473,5 +516,6 @@ module.exports = {
     logout,
     changePassword,
     googleAuthCallback,
+    googleMobileLogin,
     getMe,
 };
