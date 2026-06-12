@@ -1,6 +1,11 @@
 const app = require("./src/app");
 const db = require("./src/configs/database");
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
+const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
+const {
+  initWebSocketServer,
+  closeWebSocketServer,
+} = require("./src/realtime/websocket.server");
 require("dotenv").config();
 
 const PORT = process.env.PORT || 8881;
@@ -21,7 +26,7 @@ function printStartupBanner({ dbStatus }) {
   const lines = [
     "APP QUẢN LÝ GIS KONTUM",
     formatField("HTTP", `http://${publicHost}:${PORT}`),
-    formatField("WebSocket", `(disabled)`),
+    formatField("WebSocket", `ws://${publicHost}:${PORT}${WS_PATH}`),
     formatField("Environment", process.env.NODE_ENV || "development"),
     formatField("Database", process.env.DB_NAME || "(not configured)"),
     formatField(
@@ -65,6 +70,8 @@ async function gracefulShutdown(signal) {
   console.log(`\nReceived ${signal} signal. Shutting down server gracefully...`);
 
   tokenCleanupJob.stop();
+  notificationCleanupJob.stop();
+  closeWebSocketServer();
 
   if (server) {
     server.close(async () => {
@@ -102,8 +109,12 @@ const initializeAndStartServer = async () => {
       printStartupBanner({ dbStatus });
     });
 
+    // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
+    initWebSocketServer(server, { path: WS_PATH });
+
     if (IS_SINGLETON_WORKER) {
       tokenCleanupJob.start();
+      notificationCleanupJob.start();
     }
 
     process.on("unhandledRejection", (error) => {

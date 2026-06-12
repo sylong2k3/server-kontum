@@ -1,0 +1,395 @@
+{
+  "info": {
+    "name": "API Quản lý GIS Kon Tum",
+    "_postman_id": "b1f4e2a0-0000-4000-8000-kontumgisapi01",
+    "description": "Collection cho server-kontum: Auth, Users, Notifications.\n\nBiến dùng chung:\n- baseUrl: http://localhost:3005/api/v1\n- accessToken / refreshToken: tự lưu sau khi gọi Login hoặc Refresh.\n\nĐa số endpoint cần header Authorization: Bearer {{accessToken}} (đã cấu hình sẵn ở mức collection).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": { "type": "text/javascript", "exec": [""] }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3005/api/v1", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "userId", "value": "1", "type": "string" },
+    { "key": "notificationId", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Xác thực",
+      "item": [
+        {
+          "name": "Đăng ký",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password@123\",\n  \"fullName\": \"Nguyen Van A\",\n  \"phone\": \"0905123456\"\n}"
+            },
+            "description": "Đăng ký tài khoản. Nếu REQUIRE_EMAIL_VERIFICATION=true sẽ cần xác minh email trước khi đăng nhập."
+          }
+        },
+        {
+          "name": "Đăng nhập",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  if (json.data.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "  if (json.data.user && json.data.user.id) pm.collectionVariables.set('userId', String(json.data.user.id));",
+                  "}",
+                  "pm.test('Status 200', () => pm.response.code === 200);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password@123\"\n}"
+            },
+            "description": "Đăng nhập. Tự lưu accessToken & refreshToken vào biến collection."
+          }
+        },
+        {
+          "name": "Làm mới token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  if (json.data.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }
+          }
+        },
+        {
+          "name": "Quên mật khẩu",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["auth", "forgot-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@example.com\"\n}" }
+          }
+        },
+        {
+          "name": "Đặt lại mật khẩu",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["auth", "reset-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<reset-token-tu-email>\",\n  \"newPassword\": \"NewPassword@123\"\n}" }
+          }
+        },
+        {
+          "name": "Xác minh email",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/verify-email", "host": ["{{baseUrl}}"], "path": ["auth", "verify-email"] },
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<verify-token-tu-email>\"\n}" }
+          }
+        },
+        {
+          "name": "Gửi lại email xác minh",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/resend-verification", "host": ["{{baseUrl}}"], "path": ["auth", "resend-verification"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@example.com\"\n}" }
+          }
+        },
+        {
+          "name": "Đăng nhập Google (mở trình duyệt)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/auth/google", "host": ["{{baseUrl}}"], "path": ["auth", "google"] },
+            "description": "Redirect đăng nhập Google. Nên mở trên trình duyệt, không chạy trực tiếp trong Postman."
+          }
+        },
+        {
+          "name": "Đăng nhập Google (mobile)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/google/mobile", "host": ["{{baseUrl}}"], "path": ["auth", "google", "mobile"] },
+            "body": { "mode": "raw", "raw": "{\n  \"idToken\": \"<google-id-token>\"\n}" }
+          }
+        },
+        {
+          "name": "Đổi mã OAuth lấy token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/oauth/exchange", "host": ["{{baseUrl}}"], "path": ["auth", "oauth", "exchange"] },
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"<one-time-code>\"\n}" }
+          }
+        },
+        {
+          "name": "Thông tin tài khoản (me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] }
+          }
+        },
+        {
+          "name": "Đổi mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/change-password", "host": ["{{baseUrl}}"], "path": ["auth", "change-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"oldPassword\": \"Password@123\",\n  \"newPassword\": \"NewPassword@123\"\n}" }
+          }
+        },
+        {
+          "name": "Đăng xuất",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] },
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Người dùng",
+      "description": "Tất cả route cần đăng nhập. Một số route yêu cầu role: system_admin / so_nnmt / ubnd_tinh.",
+      "item": [
+        {
+          "name": "Xem hồ sơ cá nhân",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/users/me/profile", "host": ["{{baseUrl}}"], "path": ["users", "me", "profile"] }
+          }
+        },
+        {
+          "name": "Cập nhật hồ sơ cá nhân",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/users/me/profile", "host": ["{{baseUrl}}"], "path": ["users", "me", "profile"] },
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Nguyen Van A\",\n  \"phone\": \"0905123456\",\n  \"avatarUrl\": \"https://example.com/avatar.png\"\n}" }
+          }
+        },
+        {
+          "name": "Danh sách người dùng (admin/so_nnmt/ubnd_tinh)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users?page=1&pageSize=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" },
+                { "key": "roleCode", "value": "citizen", "disabled": true },
+                { "key": "isActive", "value": "true", "disabled": true },
+                { "key": "email", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Tạo người dùng (admin/so_nnmt)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/users", "host": ["{{baseUrl}}"], "path": ["users"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"newuser@example.com\",\n  \"password\": \"Password@123\",\n  \"fullName\": \"New User\",\n  \"phone\": \"0905123456\",\n  \"roleCode\": \"citizen\"\n}" }
+          }
+        },
+        {
+          "name": "Xem người dùng theo ID (admin/so_nnmt/ubnd_tinh)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}", "host": ["{{baseUrl}}"], "path": ["users", "{{userId}}"] }
+          }
+        },
+        {
+          "name": "Đổi vai trò người dùng (admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}/role", "host": ["{{baseUrl}}"], "path": ["users", "{{userId}}", "role"] },
+            "body": { "mode": "raw", "raw": "{\n  \"roleCode\": \"so_nnmt\"\n}" }
+          }
+        },
+        {
+          "name": "Khóa/Mở khóa người dùng (admin/so_nnmt)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}/active", "host": ["{{baseUrl}}"], "path": ["users", "{{userId}}", "active"] },
+            "body": { "mode": "raw", "raw": "{\n  \"isActive\": false\n}" }
+          }
+        },
+        {
+          "name": "Đặt lại mật khẩu người dùng (admin/so_nnmt)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}/reset-password", "host": ["{{baseUrl}}"], "path": ["users", "{{userId}}", "reset-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"newPassword\": \"Password@123\"\n}" }
+          }
+        },
+        {
+          "name": "Xóa người dùng (admin/so_nnmt)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}", "host": ["{{baseUrl}}"], "path": ["users", "{{userId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Thông báo",
+      "description": "Tất cả route cần đăng nhập. Route gửi thủ công cần role system_admin / so_nnmt.",
+      "item": [
+        {
+          "name": "Danh sách thông báo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications?page=1&pageSize=20&onlyUnread=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["notifications"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" },
+                { "key": "onlyUnread", "value": "false" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Số thông báo chưa đọc",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/notifications/unread-count", "host": ["{{baseUrl}}"], "path": ["notifications", "unread-count"] }
+          }
+        },
+        {
+          "name": "Đánh dấu đã đọc tất cả",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/notifications/read-all", "host": ["{{baseUrl}}"], "path": ["notifications", "read-all"] }
+          }
+        },
+        {
+          "name": "Đánh dấu đã đọc một thông báo",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/notifications/{{notificationId}}/read", "host": ["{{baseUrl}}"], "path": ["notifications", "{{notificationId}}", "read"] }
+          }
+        },
+        {
+          "name": "Xóa thông báo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/notifications/{{notificationId}}", "host": ["{{baseUrl}}"], "path": ["notifications", "{{notificationId}}"] }
+          }
+        },
+        {
+          "name": "Đăng ký thiết bị (FCM)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/notifications/devices", "host": ["{{baseUrl}}"], "path": ["notifications", "devices"] },
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<fcm-device-token>\",\n  \"platform\": \"android\",\n  \"deviceInfo\": { \"model\": \"Pixel 8\", \"os\": \"Android 14\" }\n}" },
+            "description": "platform: web | android | ios"
+          }
+        },
+        {
+          "name": "Hủy đăng ký thiết bị",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/notifications/devices", "host": ["{{baseUrl}}"], "path": ["notifications", "devices"] },
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"<fcm-device-token>\"\n}" }
+          }
+        },
+        {
+          "name": "Gửi thông báo - Tới người dùng (admin/so_nnmt)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/notifications/send", "host": ["{{baseUrl}}"], "path": ["notifications", "send"] },
+            "body": { "mode": "raw", "raw": "{\n  \"target\": \"user\",\n  \"userId\": {{userId}},\n  \"channel\": \"system\",\n  \"type\": \"announcement\",\n  \"title\": \"Xin chao\",\n  \"body\": \"Noi dung thong bao\",\n  \"data\": { \"ref\": 123 }\n}" }
+          }
+        },
+        {
+          "name": "Gửi thông báo - Toàn hệ thống (admin/so_nnmt)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/notifications/send", "host": ["{{baseUrl}}"], "path": ["notifications", "send"] },
+            "body": { "mode": "raw", "raw": "{\n  \"target\": \"all\",\n  \"channel\": \"system\",\n  \"type\": \"announcement\",\n  \"title\": \"Thong bao chung\",\n  \"body\": \"Gui toi tat ca nguoi dung\"\n}" }
+          }
+        },
+        {
+          "name": "Gửi thông báo - Theo vai trò (admin/so_nnmt)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/notifications/send", "host": ["{{baseUrl}}"], "path": ["notifications", "send"] },
+            "body": { "mode": "raw", "raw": "{\n  \"target\": \"role\",\n  \"roleCode\": \"so_nnmt\",\n  \"channel\": \"fire\",\n  \"type\": \"fire_warning\",\n  \"title\": \"Canh bao chay rung\",\n  \"body\": \"Nguy co chay rung cao\"\n}" }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 const passport = require('passport');
 const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const { Strategy: GoogleStrategy } = require('passport-google-oauth20');
-const { JWT_SECRET, JWT_ALGORITHM } = require('../utils/tokenManager');
+const { JWT_SECRET, JWT_ALGORITHM } = require('../utils/tokenManager.util');
 const userRepository = require('../repositories/user.repository');
 const tokenRepository = require('../repositories/token.repository');
 require('dotenv').config();
@@ -24,7 +24,7 @@ const initPassport = () => {
                         return done(null, false, { message: 'Token đã bị thu hồi' });
                     }
                 }
-                const user = await userRepository.findById(payload.userId);
+                const user = await userRepository.findByIdSafe(payload.userId);
                 if (!user) {
                     return done(null, false, { message: 'User không tồn tại' });
                 }

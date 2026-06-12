@@ -1,7 +1,7 @@
 const authService = require('../services/auth.service');
 const { OK, CREATED } = require('../core/success.response');
-const { getRequestContext } = require('../utils/context');
-const { t } = require('../utils/i18n');
+const { getRequestContext } = require('../utils/context.util');
+const { t } = require('../utils/i18n.util');
 
 const register = async (req, res) => {
     const { email, password, fullName, phone } = req.body;

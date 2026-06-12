@@ -7,7 +7,7 @@ const registerSchema = Joi.object({
         .trim()
         .required(),
     password: Joi.string()
-        .min(6)
+        .min(8)
         .max(128)
         .required(),
     fullName: Joi.string()
@@ -40,7 +40,7 @@ const changePasswordSchema = Joi.object({
     oldPassword: Joi.string()
         .required(),
     newPassword: Joi.string()
-        .min(6)
+        .min(8)
         .max(128)
         .required()
         .invalid(Joi.ref('oldPassword')),
@@ -69,7 +69,7 @@ const resetPasswordSchema = Joi.object({
     token: Joi.string()
         .required(),
     newPassword: Joi.string()
-        .min(6)
+        .min(8)
         .max(128)
         .required(),
 });

@@ -87,7 +87,7 @@ if (process.env.NODE_ENV === "development") {
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000000,
+  max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 1000,
   message: {
     success: false,
     message: "Too many requests, please try again after 15 minutes.",
@@ -97,7 +97,23 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Limiter chặt hơn cho nhóm xác thực (chống brute-force / dò mật khẩu).
+// Chỉ tính các request thất bại nên không ảnh hưởng người dùng hợp lệ.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 30,
+  skipSuccessfulRequests: true,
+  message: {
+    success: false,
+    message: "Too many authentication requests, please try again later.",
+    errors: ["TOO_MANY_AUTH_REQUESTS"],
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use("/api/", limiter);
+app.use("/api/v1/auth", authLimiter);
 
 app.get('/health', (req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });

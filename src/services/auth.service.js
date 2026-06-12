@@ -1,11 +1,11 @@
 const userRepository = require('../repositories/user.repository');
 const tokenRepository = require('../repositories/token.repository');
 const socialRepository = require('../repositories/social.repository');
-const { hashPassword, comparePassword, hashToken, generateRandomToken } = require('../utils/cryptoHelper');
-const { generateTokenPair, verifyRefreshToken } = require('../utils/tokenManager');
+const { hashPassword, comparePassword, hashToken, generateRandomToken } = require('../utils/cryptoHelper.util');
+const { generateTokenPair, verifyRefreshToken } = require('../utils/tokenManager.util');
 const { Api400Error, Api401Error, Api403Error, Api409Error, Api404Error } = require('../core/error.response');
-const { sendPasswordResetEmail, sendVerificationEmail } = require('../utils/mailer');
-const { t } = require('../utils/i18n');
+const { sendPasswordResetEmail, sendVerificationEmail } = require('../utils/mailer.util');
+const { t } = require('../utils/i18n.util');
 
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
@@ -84,7 +84,7 @@ const login = async ({ email, password }, context = {}) => {
 
     if (!user.is_active) {
         await _logActivity(user.id, 'login_failed', 'failure', context, { reason: 'account_inactive' });
-        throw new Api401Error(t('account_disabled', context.lang));
+        throw new Api401Error(t('incorrect_credentials', context.lang));
     }
 
     if (user.locked_until && new Date(user.locked_until) > new Date()) {
@@ -94,7 +94,8 @@ const login = async ({ email, password }, context = {}) => {
     }
 
     if (!user.password_hash) {
-        throw new Api401Error(t('google_only', context.lang));
+        await _logActivity(user.id, 'login_failed', 'failure', context, { reason: 'google_only' });
+        throw new Api401Error(t('incorrect_credentials', context.lang));
     }
 
     const isPasswordValid = await comparePassword(password, user.password_hash);
@@ -121,12 +122,12 @@ const login = async ({ email, password }, context = {}) => {
         );
     }
 
-    await userRepository.updateLoginSuccess(user.id, context.ipAddress);
-
     if (REQUIRE_EMAIL_VERIFICATION && !user.email_verified) {
         await _logActivity(user.id, 'login_failed', 'failure', context, { reason: 'email_not_verified' });
         throw new Api403Error(t('email_not_verified', context.lang));
     }
+
+    await userRepository.updateLoginSuccess(user.id, context.ipAddress);
 
     const tokens = generateTokenPair({
         userId: user.id,

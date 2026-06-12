@@ -1,49 +1,62 @@
 const userService = require('../services/user.service');
 const { OK, CREATED, OK_LIST } = require('../core/success.response');
-const { t } = require('../utils/i18n');
+const { t } = require('../utils/i18n.util');
+
+const buildActor = (req) => ({
+    id: req.user.id,
+    role: req.user.role,
+    lang: req.lang,
+    ipAddress: req.ip,
+    userAgent: req.get('user-agent'),
+});
 
 const listUsers = async (req, res) => {
     const { page, pageSize, roleCode, isActive, email } = req.query;
-    const actor = { role: req.user.role, lang: req.lang, id: req.user.id };
+    const actor = buildActor(req);
     const filter = { page, pageSize, roleCode, isActive, email };
     const { items, total } = await userService.listUsers(filter, actor);
-    OK_LIST(res, t('get_list_success', req.lang), items, { page: filter.page, limit: filter.pageSize, total });
+    OK_LIST(res, t('get_list_success', req.lang), items, {
+        page: filter.page,
+        limit: filter.pageSize,
+        total,
+        totalPages: Math.ceil(total / filter.pageSize),
+    });
 };
 
 const createUser = async (req, res) => {
-    const user = await userService.createUser(req.body, { role: req.user.role, lang: req.lang });
+    const user = await userService.createUser(req.body, buildActor(req));
     CREATED(res, t('user_created_success', req.lang), user);
 };
 
 const getUserById = async (req, res) => {
-    const user = await userService.getUserById(Number(req.params.id), { role: req.user.role, lang: req.lang });
+    const user = await userService.getUserById(Number(req.params.id), buildActor(req));
     OK(res, t('get_success', req.lang), user);
 };
 
 const changeUserRole = async (req, res) => {
     const user = await userService.changeUserRole(
-        Number(req.params.id), req.body.roleCode, { role: req.user.role, lang: req.lang }
+        Number(req.params.id), req.body.roleCode, buildActor(req)
     );
     OK(res, t('user_role_updated', req.lang), user);
 };
 
 const setUserActive = async (req, res) => {
     const result = await userService.setUserActive(
-        Number(req.params.id), req.body.isActive, { role: req.user.role, lang: req.lang, id: req.user.id }
+        Number(req.params.id), req.body.isActive, buildActor(req)
     );
     OK(res, req.body.isActive ? t('user_unlocked', req.lang) : t('user_locked', req.lang), result);
 };
 
 const resetUserPassword = async (req, res) => {
     const result = await userService.resetUserPassword(
-        Number(req.params.id), req.body.newPassword, { role: req.user.role, lang: req.lang }
+        Number(req.params.id), req.body.newPassword, buildActor(req)
     );
     OK(res, result.message, {});
 };
 
 const deleteUser = async (req, res) => {
     const result = await userService.deleteUser(
-        Number(req.params.id), { role: req.user.role, lang: req.lang, id: req.user.id }
+        Number(req.params.id), buildActor(req)
     );
     OK(res, result.message, {});
 };

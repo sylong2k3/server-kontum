@@ -1,6 +1,13 @@
 const { BaseError } = require('../core/error.response');
-const { t } = require('../utils/i18n');
+const { t } = require('../utils/i18n.util');
 const multer = require('multer');
+
+const PG_ERROR_MAP = {
+    '23505': { status: 409, error: 'UNIQUE_VIOLATION' },
+    '23503': { status: 400, error: 'FOREIGN_KEY_VIOLATION' },
+    '23502': { status: 400, error: 'NOT_NULL_VIOLATION' },
+    '22P02': { status: 400, error: 'INVALID_TEXT_REPRESENTATION' },
+};
 
 const notFoundHandler = (req, res, next) => {
     const error = new Error(`Route ${req.method} ${req.originalUrl} not found`);
@@ -70,6 +77,35 @@ const errorHandler = (err, req, res, next) => {
             success: false,
             message: err.message,
             errors: ['CORS_ERROR'],
+        });
+    }
+
+    // PostgreSQL error mapping (SQLSTATE codes) → trả lỗi 4xx rõ ràng thay vì 500
+    const PG_ERROR_MAP = {
+        '23505': { status: 409, key: 'resource_conflict', code: 'UNIQUE_VIOLATION' },     // unique_violation
+        '23503': { status: 400, key: 'invalid_reference', code: 'FK_VIOLATION' },          // foreign_key_violation
+        '23502': { status: 400, key: 'invalid_data', code: 'NOT_NULL_VIOLATION' },         // not_null_violation
+        '23514': { status: 400, key: 'invalid_data', code: 'CHECK_VIOLATION' },            // check_violation
+        '22P02': { status: 400, key: 'invalid_data', code: 'INVALID_TEXT_REPRESENTATION' },// invalid_text_representation
+        '22003': { status: 400, key: 'invalid_data', code: 'NUMERIC_OUT_OF_RANGE' },       // numeric_value_out_of_range
+        '22007': { status: 400, key: 'invalid_data', code: 'INVALID_DATETIME' },           // invalid_datetime_format
+    };
+
+    if (typeof err.code === 'string' && PG_ERROR_MAP[err.code]) {
+        const mapped = PG_ERROR_MAP[err.code];
+        return res.status(mapped.status).json({
+            success: false,
+            message: t(mapped.key, req.lang),
+            errors: [mapped.code],
+        });
+    }
+
+    const pgError = PG_ERROR_MAP[err.code];
+    if (pgError) {
+        return res.status(pgError.status).json({
+            success: false,
+            message: pgError.status === 409 ? t('email_in_use', req.lang) : t('invalid_data', req.lang),
+            errors: [pgError.error],
         });
     }
 

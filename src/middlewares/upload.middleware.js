@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 
 const { Api400Error } = require('../core/error.response');
-const { t } = require('../utils/i18n');
+const { t } = require('../utils/i18n.util');
 
 const MB = 1024 * 1024;
 
@@ -18,10 +18,9 @@ const FILE_CATEGORIES = {
             'image/gif',
             'image/webp',
             'image/bmp',
-            'image/svg+xml',
             'image/tiff',
         ],
-        extensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.tif', '.tiff'],
+        extensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff'],
     },
     video: {
         dir: 'videos',

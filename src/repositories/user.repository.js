@@ -26,8 +26,8 @@ const findByEmail = async (email) => {
 
 const create = async ({ email, passwordHash, fullName, phone, roleCode = 'citizen', avatarUrl }) => {
     const { rows } = await db.query(
-        `INSERT INTO auth.users (email, password_hash, full_name, phone, avatar_url, role_id)
-         VALUES ($1, $2, $3, $4, $5, (SELECT id FROM auth.roles WHERE code = $6))
+        `INSERT INTO auth.users (email, password_hash, full_name, phone, avatar_url, role_id, email_verified, email_verified_at)
+         VALUES ($1, $2, $3, $4, $5, (SELECT id FROM auth.roles WHERE code = $6 AND is_active = true), true, NOW())
          RETURNING id`,
         [email, passwordHash || null, fullName, phone || null, avatarUrl || null, roleCode]
     );
@@ -60,12 +60,12 @@ const incrementLoginAttempts = async (userId, maxAttempts = 5, lockMinutes = 15)
          SET login_attempts = login_attempts + 1,
              locked_until = CASE
                  WHEN login_attempts + 1 >= $2
-                 THEN NOW() + INTERVAL '${lockMinutes} minutes'
+                 THEN NOW() + INTERVAL '1 minute' * $3
                  ELSE locked_until
              END
          WHERE id = $1
          RETURNING login_attempts, locked_until`,
-        [userId, maxAttempts]
+        [userId, maxAttempts, lockMinutes]
     );
     return rows[0] || null;
 };
@@ -105,6 +105,8 @@ const findByIdSafe = async (userId) => {
     return rows[0] || null;
 };
 
+const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
+
 const _buildUserFilter = ({ roleCode, roleCodes, isActive, email }, startIdx = 1) => {
     const conditions = ['u.deleted_at IS NULL'];
     const params = [];
@@ -118,7 +120,10 @@ const _buildUserFilter = ({ roleCode, roleCodes, isActive, email }, startIdx = 1
         params.push(roleCode);
     }
     if (isActive !== undefined) { conditions.push(`u.is_active = $${idx++}`); params.push(isActive); }
-    if (email) { conditions.push(`LOWER(u.email) LIKE $${idx++}`); params.push(`%${email.toLowerCase()}%`); }
+    if (email) {
+        conditions.push(`LOWER(u.email) LIKE $${idx++} ESCAPE '\\'`);
+        params.push(`%${_escapeLike(email.toLowerCase())}%`);
+    }
 
     return {
         where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
@@ -163,8 +168,8 @@ const countAll = async ({ roleCode, roleCodes, isActive, email } = {}) => {
 const updateRole = async (userId, roleCode) => {
     const { rows } = await db.query(
         `UPDATE auth.users
-         SET role_id = (SELECT id FROM auth.roles WHERE code = $2)
-         WHERE id = $1
+         SET role_id = (SELECT id FROM auth.roles WHERE code = $2 AND is_active = true)
+         WHERE id = $1 AND deleted_at IS NULL
          RETURNING id`,
         [userId, roleCode]
     );
@@ -173,7 +178,7 @@ const updateRole = async (userId, roleCode) => {
 
 const updateActive = async (userId, isActive) => {
     const { rows } = await db.query(
-        `UPDATE auth.users SET is_active = $2 WHERE id = $1
+         `UPDATE auth.users SET is_active = $2 WHERE id = $1 AND deleted_at IS NULL
          RETURNING id, email, is_active, updated_at`,
         [userId, isActive]
     );
@@ -184,7 +189,7 @@ const updateTemporaryPassword = async (userId, passwordHash) => {
     const { rows } = await db.query(
         `UPDATE auth.users
          SET password_hash = $2, must_change_password = true, password_changed_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND deleted_at IS NULL
          RETURNING id, email, must_change_password, updated_at`,
         [userId, passwordHash]
     );
@@ -204,7 +209,7 @@ const updateProfile = async (userId, { fullName, phone, avatarUrl }) => {
 
     params.push(userId);
     const { rows } = await db.query(
-        `UPDATE auth.users SET ${sets.join(', ')} WHERE id = $${idx} RETURNING id`,
+        `UPDATE auth.users SET ${sets.join(', ')} WHERE id = $${idx} AND deleted_at IS NULL RETURNING id`,
         params
     );
     return rows[0] ? findByIdSafe(rows[0].id) : null;
@@ -221,10 +226,21 @@ const softDelete = async (userId) => {
     return rows[0] || null;
 };
 
+const countActiveUsersByRole = async (roleCode) => {
+    const { rows } = await db.query(
+        `SELECT COUNT(u.id)::int AS total
+         FROM auth.users u
+         INNER JOIN auth.roles r ON u.role_id = r.id
+         WHERE r.code = $1 AND u.deleted_at IS NULL AND u.is_active = true`,
+        [roleCode]
+    );
+    return rows[0]?.total || 0;
+};
+
 const findRoleByCode = async (code) => {
     const { rows } = await db.query(
         `SELECT id, code, name_vi, name_en, description_vi, description_en, permissions, sort_order, is_active
-         FROM auth.roles WHERE code = $1`,
+         FROM auth.roles WHERE code = $1 AND is_active = true`,
         [code]
     );
     return rows[0] || null;
@@ -255,6 +271,7 @@ module.exports = {
     updateTemporaryPassword,
     updateProfile,
     softDelete,
+    countActiveUsersByRole,
     findRoleByCode,
     findAllRoles,
 };
