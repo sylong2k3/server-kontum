@@ -8,16 +8,11 @@ const passport = require("passport");
 const cookieParser = require("cookie-parser");
 require("dotenv").config();
 
-// ── Modules Auth ────────────────────────────────────────────────────────
 const routes = require("./routes");
-const {
-  errorHandler,
-  notFoundHandler,
-} = require("./middlewares/error-handler");
+const { errorHandler, notFoundHandler } = require("./middlewares/error-handler");
 const { initPassport } = require("./configs/passport");
 const localeMiddleware = require("./middlewares/locale.middleware");
 
-// Initialize Passport strategies (JWT + Google OAuth)
 initPassport();
 
 const app = express();
@@ -75,17 +70,14 @@ app.use(localeMiddleware);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use("/uploads", express.static("public/uploads"));
-app.use(
-  compression({
+app.use(compression({
     filter: (req, res) => {
-      // Bypass compression for real-time Server-Sent Events (SSE)
-      if (req.headers["accept"] === "text/event-stream" || res.getHeader("Content-Type") === "text/event-stream") {
-        return false;
-      }
-      return compression.filter(req, res);
+        if (req.headers["accept"] === "text/event-stream" || res.getHeader("Content-Type") === "text/event-stream") {
+            return false;
+        }
+        return compression.filter(req, res);
     },
-  }),
-);
+}));
 
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
@@ -93,7 +85,6 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("combined"));
 }
 
-// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000000,
@@ -108,24 +99,21 @@ const limiter = rateLimit({
 
 app.use("/api/", limiter);
 
-// Health-check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: "OK", timestamp: new Date().toISOString() });
+    res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-// ── API Routes ──────────────────────────────────────────────────────────
 app.use("/api/v1", routes);
 
 app.get("/", (req, res) => {
-  res.json({
-    status: "success",
-    message: "Welcome to Kon Tum Server API",
-    version: "1.0.0",
-    timestamp: new Date().toISOString(),
-  });
+    res.json({
+        status: "success",
+        message: "Welcome to App Quản Lý GIS KONTUM",
+        version: "1.0.0",
+        timestamp: new Date().toISOString(),
+    });
 });
 
-// ── Error Handling ──────────────────────────────────────────────────────
 app.use(notFoundHandler);
 app.use(errorHandler);
 

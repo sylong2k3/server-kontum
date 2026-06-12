@@ -1,20 +1,5 @@
-/**
- * Social Repository — Data Access Layer cho bảng auth.social_accounts
- *
- * Quản lý đăng nhập qua bên thứ 3: Google, Facebook, GitHub, Apple, Microsoft
- * 1 user có thể liên kết nhiều provider, nhưng mỗi provider chỉ 1 account.
- */
-
 const db = require('../configs/database');
 
-/**
- * Tìm social account theo provider + provider_id
- * (Dùng trong OAuth callback — tìm user đã liên kết provider này chưa)
- *
- * @param {string} provider — 'google', 'facebook', 'github', ...
- * @param {string} providerId — ID từ provider
- * @returns {Promise<object|null>}
- */
 const findByProviderId = async (provider, providerId) => {
     const { rows } = await db.query(
         `SELECT sa.id, sa.user_id, sa.provider, sa.provider_id,
@@ -27,11 +12,6 @@ const findByProviderId = async (provider, providerId) => {
     return rows[0] || null;
 };
 
-/**
- * Tìm tất cả social accounts của 1 user
- * @param {number} userId
- * @returns {Promise<object[]>}
- */
 const findByUserId = async (userId) => {
     const { rows } = await db.query(
         `SELECT id, provider, provider_id, provider_email, provider_name,
@@ -44,23 +24,6 @@ const findByUserId = async (userId) => {
     return rows;
 };
 
-/**
- * Tạo liên kết social account mới
- *
- * @param {{
- *   userId: number,
- *   provider: string,
- *   providerId: string,
- *   providerEmail?: string,
- *   providerName?: string,
- *   providerAvatar?: string,
- *   accessToken?: string,
- *   refreshToken?: string,
- *   tokenExpiresAt?: Date,
- *   rawProfile?: object
- * }} data
- * @returns {Promise<object>}
- */
 const create = async (data) => {
     const { rows } = await db.query(
         `INSERT INTO auth.social_accounts
@@ -86,14 +49,6 @@ const create = async (data) => {
     return rows[0];
 };
 
-/**
- * Cập nhật thông tin social account (khi user login lại qua provider)
- *
- * @param {string} provider
- * @param {string} providerId
- * @param {{ providerEmail?: string, providerName?: string, providerAvatar?: string, accessToken?: string, refreshToken?: string, tokenExpiresAt?: Date, rawProfile?: object }} data
- * @returns {Promise<object|null>}
- */
 const updateByProviderId = async (provider, providerId, data) => {
     const { rows } = await db.query(
         `UPDATE auth.social_accounts
@@ -123,12 +78,6 @@ const updateByProviderId = async (provider, providerId, data) => {
     return rows[0] || null;
 };
 
-/**
- * Hủy liên kết social account (soft delete)
- * @param {number} userId
- * @param {string} provider
- * @returns {Promise<boolean>}
- */
 const unlinkProvider = async (userId, provider) => {
     const { rowCount } = await db.query(
         `UPDATE auth.social_accounts
@@ -139,12 +88,6 @@ const unlinkProvider = async (userId, provider) => {
     return rowCount > 0;
 };
 
-/**
- * Kiểm tra user đã liên kết provider nào chưa
- * @param {number} userId
- * @param {string} provider
- * @returns {Promise<boolean>}
- */
 const hasProvider = async (userId, provider) => {
     const { rows } = await db.query(
         `SELECT 1 FROM auth.social_accounts

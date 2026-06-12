@@ -7,7 +7,6 @@ const tokenRepository = require('../repositories/token.repository');
 require('dotenv').config();
 
 const initPassport = () => {
-    // ── JWT Strategy ─────────────────────────────────────────────────────
     const jwtOptions = {
         jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
         secretOrKey: JWT_SECRET,
@@ -32,15 +31,13 @@ const initPassport = () => {
                 if (!user.is_active) {
                     return done(null, false, { message: 'Tài khoản đã bị vô hiệu hóa' });
                 }
-                return done(null, {
-                    ...user,
-                    jti: payload.jti,
-                });
+                return done(null, { ...user, jti: payload.jti, exp: payload.exp });
             } catch (error) {
                 return done(error, false);
             }
         })
     );
+
     const googleClientId = process.env.GOOGLE_CLIENT_ID;
     const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
     const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL || '/api/v1/auth/google/callback';
@@ -57,15 +54,12 @@ const initPassport = () => {
                 },
                 async (accessToken, refreshToken, profile, done) => {
                     try {
-                        // Trả về Google profile để auth.service xử lý tiếp
-                        // (tìm/tạo user, generate tokens)
                         const googleProfile = {
                             googleId: profile.id,
                             email: profile.emails?.[0]?.value,
                             fullName: profile.displayName,
                             avatarUrl: profile.photos?.[0]?.value,
                         };
-
                         return done(null, googleProfile);
                     } catch (error) {
                         return done(error, false);

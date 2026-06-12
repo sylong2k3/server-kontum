@@ -1,53 +1,60 @@
-/**
- * Auth Service — Business Logic Layer cho xác thực
- *
- * Xử lý tất cả logic nghiệp vụ:
- * - Đăng ký tài khoản mới (email/password)
- * - Đăng nhập (email/password)
- * - Refresh access token
- * - Logout (blacklist + revoke)
- * - Đổi mật khẩu
- * - Google OAuth callback
- * - Lấy thông tin user hiện tại
- */
-
 const userRepository = require('../repositories/user.repository');
 const tokenRepository = require('../repositories/token.repository');
 const socialRepository = require('../repositories/social.repository');
-const { hashPassword, comparePassword, hashToken } = require('../utils/cryptoHelper');
-const { generateTokenPair, generateAccessToken, verifyRefreshToken } = require('../utils/tokenManager');
-const { Api400Error, Api401Error, Api409Error, Api404Error } = require('../core/error.response');
+const { hashPassword, comparePassword, hashToken, generateRandomToken } = require('../utils/cryptoHelper');
+const { generateTokenPair, verifyRefreshToken } = require('../utils/tokenManager');
+const { Api400Error, Api401Error, Api403Error, Api409Error, Api404Error } = require('../core/error.response');
+const { sendPasswordResetEmail, sendVerificationEmail } = require('../utils/mailer');
 const { t } = require('../utils/i18n');
 
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
+const RESET_TOKEN_EXPIRES_MINUTES = parseInt(process.env.RESET_TOKEN_EXPIRES_MINUTES, 10) || 15;
+const RESET_MAX_REQUESTS_PER_WINDOW = parseInt(process.env.RESET_MAX_REQUESTS, 10) || 3;
+const OAUTH_CODE_EXPIRES_SECONDS = parseInt(process.env.OAUTH_CODE_EXPIRES_SECONDS, 10) || 60;
+
+const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
+const EMAIL_VERIFICATION_EXPIRES_MINUTES = parseInt(process.env.EMAIL_VERIFICATION_EXPIRES_MINUTES, 10) || 60;
+const EMAIL_VERIFICATION_MAX_REQUESTS = parseInt(process.env.EMAIL_VERIFICATION_MAX_REQUESTS, 10) || 3;
+
+const DUMMY_PASSWORD_HASH = '$2b$12$12l7tm6QooEdqRW4HUyj9uFsD0VvZqZh8YrVLdjN2No.SKaXrfhl6';
+
+const PG_UNIQUE_VIOLATION = '23505';
 
 const register = async ({ email, password, fullName, phone }, context = {}) => {
-    // 1. Kiểm tra email trùng
     const existingUser = await userRepository.findByEmail(email);
     if (existingUser) {
         throw new Api409Error(t('email_in_use', context.lang));
     }
 
-    // 2. Hash mật khẩu
     const passwordHash = await hashPassword(password);
 
-    // 3. Tạo user
-    const user = await userRepository.create({
-        email,
-        passwordHash,
-        fullName,
-        phone,
-    });
+    let user;
+    try {
+        user = await userRepository.create({ email, passwordHash, fullName, phone });
+    } catch (err) {
+        if (err.code === PG_UNIQUE_VIOLATION) {
+            throw new Api409Error(t('email_in_use', context.lang));
+        }
+        throw err;
+    }
 
-    // 4. Tạo tokens
+    if (REQUIRE_EMAIL_VERIFICATION) {
+        await _createAndSendVerification(user, context);
+        await _logActivity(user.id, 'register', 'success', context, { requiresVerification: true });
+
+        return {
+            user: _sanitizeUser(user, context.lang),
+            requiresVerification: true,
+        };
+    }
+
     const tokens = generateTokenPair({
         userId: user.id,
         email: user.email,
         role: user.role,
     });
 
-    // 5. Lưu refresh token hash
     const refreshTokenHash = hashToken(tokens.refreshToken);
     await tokenRepository.saveRefreshToken({
         userId: user.id,
@@ -56,66 +63,42 @@ const register = async ({ email, password, fullName, phone }, context = {}) => {
         expiresAt: tokens.refreshExpiresAt,
     });
 
-    // 6. Cập nhật last login
     await userRepository.updateLoginSuccess(user.id, context.ipAddress);
-
-    // 7. Log activity
     await _logActivity(user.id, 'register', 'success', context);
 
     return {
         user: _sanitizeUser(user, context.lang),
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        requiresVerification: false,
     };
 };
 
-/**
- * Đăng nhập bằng email/password
- *
- * Flow:
- * 1. Tìm user theo email
- * 2. Kiểm tra tài khoản active + không bị lock
- * 3. So sánh mật khẩu
- * 4. Reset login attempts + cập nhật last login
- * 5. Tạo tokens + lưu refresh token
- * 6. Log activity
- *
- * @param {{ email: string, password: string }} data
- * @param {{ ipAddress?: string, userAgent?: string }} context
- * @returns {Promise<{ user: object, accessToken: string, refreshToken: string }>}
- */
 const login = async ({ email, password }, context = {}) => {
-    // 1. Tìm user
     const user = await userRepository.findByEmail(email);
     if (!user) {
-        // Log login failure (không có userId)
+        await comparePassword(password, DUMMY_PASSWORD_HASH);
         await _logActivity(null, 'login_failed', 'failure', context, { email });
         throw new Api401Error(t('incorrect_credentials', context.lang));
     }
 
-    // 2. Kiểm tra tài khoản
     if (!user.is_active) {
         await _logActivity(user.id, 'login_failed', 'failure', context, { reason: 'account_inactive' });
         throw new Api401Error(t('account_disabled', context.lang));
     }
 
-    // Kiểm tra lock
     if (user.locked_until && new Date(user.locked_until) > new Date()) {
         const remainingMinutes = Math.ceil((new Date(user.locked_until) - new Date()) / 60000);
         await _logActivity(user.id, 'login_failed', 'failure', context, { reason: 'account_locked' });
-        throw new Api401Error(
-            t('account_locked_mins', context.lang, { mins: remainingMinutes })
-        );
+        throw new Api401Error(t('account_locked_mins', context.lang, { mins: remainingMinutes }));
     }
 
-    // 3. Kiểm tra password
     if (!user.password_hash) {
         throw new Api401Error(t('google_only', context.lang));
     }
 
     const isPasswordValid = await comparePassword(password, user.password_hash);
     if (!isPasswordValid) {
-        // Tăng login attempts
         const result = await userRepository.incrementLoginAttempts(user.id, MAX_LOGIN_ATTEMPTS, LOCK_MINUTES);
         const attemptsLeft = MAX_LOGIN_ATTEMPTS - (result?.login_attempts || 0);
 
@@ -138,10 +121,13 @@ const login = async ({ email, password }, context = {}) => {
         );
     }
 
-    // 4. Reset login attempts + cập nhật last login
     await userRepository.updateLoginSuccess(user.id, context.ipAddress);
 
-    // 5. Tạo tokens
+    if (REQUIRE_EMAIL_VERIFICATION && !user.email_verified) {
+        await _logActivity(user.id, 'login_failed', 'failure', context, { reason: 'email_not_verified' });
+        throw new Api403Error(t('email_not_verified', context.lang));
+    }
+
     const tokens = generateTokenPair({
         userId: user.id,
         email: user.email,
@@ -156,7 +142,6 @@ const login = async ({ email, password }, context = {}) => {
         expiresAt: tokens.refreshExpiresAt,
     });
 
-    // 6. Log activity
     await _logActivity(user.id, 'login', 'success', context);
 
     return {
@@ -166,22 +151,7 @@ const login = async ({ email, password }, context = {}) => {
     };
 };
 
-/**
- * Refresh access token
- *
- * Flow:
- * 1. Verify refresh token JWT
- * 2. Hash token → tìm trong DB
- * 3. Kiểm tra user vẫn active
- * 4. Tạo access token mới
- * 5. Log activity
- *
- * @param {string} refreshToken — Refresh token string
- * @param {{ ipAddress?: string, userAgent?: string }} context
- * @returns {Promise<{ accessToken: string, user: object }>}
- */
 const refresh = async (refreshToken, context = {}) => {
-    // 1. Verify JWT
     let decoded;
     try {
         decoded = verifyRefreshToken(refreshToken);
@@ -189,143 +159,232 @@ const refresh = async (refreshToken, context = {}) => {
         throw new Api401Error(t('invalid_refresh_token', context.lang));
     }
 
-    // 2. Tìm trong DB
     const tokenHash = hashToken(refreshToken);
     const storedToken = await tokenRepository.findRefreshToken(tokenHash);
+
     if (!storedToken) {
+        if (decoded?.userId) {
+            await tokenRepository.deleteAllUserTokens(decoded.userId);
+            await _logActivity(decoded.userId, 'token_reuse_detected', 'failure', context);
+        }
         throw new Api401Error(t('refresh_token_revoked', context.lang));
     }
 
-    // 3. Kiểm tra user
     const user = await userRepository.findById(decoded.userId);
     if (!user || !user.is_active) {
-        // Revoke token nếu user không còn active
-        await tokenRepository.revokeRefreshToken(tokenHash);
+        await tokenRepository.deleteRefreshToken(tokenHash);
         throw new Api401Error(t('account_disabled', context.lang));
     }
 
-    // 4. Tạo access token mới
-    const accessTokenData = generateAccessToken({
+    await tokenRepository.deleteRefreshToken(tokenHash);
+
+    const tokens = generateTokenPair({
         userId: user.id,
         email: user.email,
         role: user.role,
     });
 
-    // 5. Log activity
+    const newRefreshHash = hashToken(tokens.refreshToken);
+    await tokenRepository.saveRefreshToken({
+        userId: user.id,
+        tokenHash: newRefreshHash,
+        deviceInfo: storedToken.device_info || _buildDeviceInfo(context),
+        expiresAt: tokens.refreshExpiresAt,
+    });
+
     await _logActivity(user.id, 'refresh_token', 'success', context);
 
     return {
-        accessToken: accessTokenData.token,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
         user: _sanitizeUser(user, context.lang),
     };
 };
 
-/**
- * Logout — Blacklist access token + Revoke refresh token
- *
- * @param {{ jti: string, accessExpiresAt?: Date }} accessTokenInfo
- * @param {string} [refreshToken] — Nếu có, revoke refresh token
- * @param {number} userId
- * @param {{ ipAddress?: string, userAgent?: string }} context
- * @returns {Promise<void>}
- */
 const logout = async (accessTokenInfo, refreshToken, userId, context = {}) => {
-    // Blacklist access token (dùng JTI)
     if (accessTokenInfo.jti) {
-        // Tính expiresAt từ JWT hoặc dùng mặc định 7 ngày
-        const expiresAt = accessTokenInfo.accessExpiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        const expiresAt = accessTokenInfo.exp
+            ? new Date(accessTokenInfo.exp * 1000)
+            : new Date(Date.now() + 60 * 60 * 1000);
         await tokenRepository.addToBlacklist(accessTokenInfo.jti, expiresAt);
     }
 
-    // Revoke refresh token nếu có
     if (refreshToken) {
         const tokenHash = hashToken(refreshToken);
         await tokenRepository.deleteRefreshToken(tokenHash);
     }
 
-    // Log activity
     await _logActivity(userId, 'logout', 'success', context);
 };
 
-/**
- * Đổi mật khẩu — Yêu cầu xác nhận mật khẩu cũ
- *
- * Flow:
- * 1. Tìm user + kiểm tra có password (không phải Google-only)
- * 2. Verify mật khẩu cũ
- * 3. Hash mật khẩu mới
- * 4. Cập nhật trong DB
- * 5. Xóa tất cả refresh tokens (force re-login tất cả devices)
- * 6. Log activity
- *
- * @param {number} userId
- * @param {{ oldPassword: string, newPassword: string }} data
- * @param {{ ipAddress?: string, userAgent?: string }} context
- * @returns {Promise<{ message: string }>}
- */
 const changePassword = async (userId, { oldPassword, newPassword }, context = {}) => {
-    // 1. Tìm user
     const user = await userRepository.findById(userId);
     if (!user) {
         throw new Api404Error(t('user_not_found', context.lang));
     }
 
     if (!user.password_hash) {
-        throw new Api400Error(
-            t('google_no_password', context.lang)
-        );
+        throw new Api400Error(t('google_no_password', context.lang));
     }
 
-    // 2. Verify mật khẩu cũ
     const isOldPasswordValid = await comparePassword(oldPassword, user.password_hash);
     if (!isOldPasswordValid) {
         await _logActivity(userId, 'change_password', 'failure', context, { reason: 'wrong_old_password' });
         throw new Api401Error(t('incorrect_old_password', context.lang));
     }
 
-    // 3. Kiểm tra mật khẩu mới khác mật khẩu cũ
     const isSamePassword = await comparePassword(newPassword, user.password_hash);
     if (isSamePassword) {
         throw new Api400Error(t('same_password', context.lang));
     }
 
-    // 4. Hash + cập nhật
     const newPasswordHash = await hashPassword(newPassword);
     await userRepository.updatePassword(userId, newPasswordHash);
 
-    // 5. Xóa tất cả refresh tokens → force re-login
     await tokenRepository.deleteAllUserTokens(userId);
-
-    // 6. Log activity
     await _logActivity(userId, 'change_password', 'success', context);
 
     return { message: t('password_changed_success', context.lang) };
 };
 
-/**
- * Google OAuth callback — Tìm hoặc tạo user từ Google profile
- *
- * Flow (dùng bảng auth.social_accounts):
- * 1. Tìm social account theo provider='google' + provider_id
- * 2. Nếu đã liên kết → lấy user, cập nhật thông tin provider
- * 3. Nếu chưa → tìm user theo email
- *    a. Email tồn tại → tạo social account liên kết
- *    b. Email chưa có → tạo user mới + social account
- * 4. Tạo tokens
- *
- * @param {{ googleId: string, email: string, fullName: string, avatarUrl?: string }} googleProfile
- * @param {{ ipAddress?: string, userAgent?: string }} context
- * @returns {Promise<{ user: object, accessToken: string, refreshToken: string, isNewUser: boolean }>}
- */
+const forgotPassword = async ({ email }, context = {}) => {
+    const genericMessage = t('reset_email_sent', context.lang);
+    const user = await userRepository.findByEmail(email);
+
+    if (!user || !user.is_active) {
+        await _logActivity(user?.id || null, 'password_reset_request', 'failure', context, {
+            email,
+            reason: user ? 'inactive' : 'not_found',
+        });
+        return { message: genericMessage };
+    }
+
+    if (!user.password_hash) {
+        await _logActivity(user.id, 'password_reset_request', 'failure', context, { reason: 'google_only' });
+        return { message: genericMessage };
+    }
+
+    const recentCount = await tokenRepository.countRecentResetRequests(user.id, RESET_TOKEN_EXPIRES_MINUTES);
+    if (recentCount >= RESET_MAX_REQUESTS_PER_WINDOW) {
+        await _logActivity(user.id, 'password_reset_request', 'failure', context, { reason: 'rate_limited' });
+        return { message: genericMessage };
+    }
+
+    await tokenRepository.invalidateUserResetTokens(user.id);
+
+    const rawToken = generateRandomToken(32);
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60 * 1000);
+
+    await tokenRepository.savePasswordResetToken({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+        requestIp: context.ipAddress,
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000';
+    const resetUrl = `${frontendUrl}/auth/reset-password?token=${rawToken}`;
+
+    try {
+        await sendPasswordResetEmail({
+            to: user.email,
+            fullName: user.full_name,
+            resetUrl,
+            expiresMinutes: RESET_TOKEN_EXPIRES_MINUTES,
+            lang: context.lang,
+        });
+    } catch (err) {
+        console.error('[AUTH] Failed to send reset email:', err.message);
+    }
+
+    await _logActivity(user.id, 'password_reset_request', 'success', context);
+
+    return { message: genericMessage };
+};
+
+const resetPassword = async ({ token, newPassword }, context = {}) => {
+    const tokenHash = hashToken(token);
+    const resetToken = await tokenRepository.findValidPasswordResetToken(tokenHash);
+    if (!resetToken) {
+        await _logActivity(null, 'password_reset_failed', 'failure', context, { reason: 'invalid_or_expired' });
+        throw new Api400Error(t('invalid_reset_token', context.lang));
+    }
+
+    const user = await userRepository.findById(resetToken.user_id);
+    if (!user || !user.is_active) {
+        await _logActivity(resetToken.user_id, 'password_reset_failed', 'failure', context, { reason: 'inactive' });
+        throw new Api400Error(t('invalid_reset_token', context.lang));
+    }
+
+    if (user.password_hash) {
+        const isSamePassword = await comparePassword(newPassword, user.password_hash);
+        if (isSamePassword) {
+            throw new Api400Error(t('same_password', context.lang));
+        }
+    }
+
+    const newPasswordHash = await hashPassword(newPassword);
+    await userRepository.updatePassword(user.id, newPasswordHash);
+
+    await tokenRepository.markPasswordResetTokenUsed(resetToken.id);
+    await tokenRepository.invalidateUserResetTokens(user.id);
+    await tokenRepository.deleteAllUserTokens(user.id);
+
+    await _logActivity(user.id, 'password_reset', 'success', context);
+
+    return { message: t('password_reset_success', context.lang) };
+};
+
+const verifyEmail = async ({ token }, context = {}) => {
+    const tokenHash = hashToken(token);
+    const verifToken = await tokenRepository.findValidEmailVerificationToken(tokenHash);
+    if (!verifToken) {
+        throw new Api400Error(t('invalid_verification_token', context.lang));
+    }
+
+    const user = await userRepository.findById(verifToken.user_id);
+    if (!user || !user.is_active) {
+        throw new Api400Error(t('invalid_verification_token', context.lang));
+    }
+
+    await userRepository.markEmailVerified(user.id);
+    await tokenRepository.markEmailVerificationTokenUsed(verifToken.id);
+    await tokenRepository.invalidateUserEmailVerificationTokens(user.id);
+
+    await _logActivity(user.id, 'email_verified', 'success', context);
+
+    return { message: t('email_verified_success', context.lang) };
+};
+
+const resendVerification = async ({ email }, context = {}) => {
+    const genericMessage = t('verification_email_sent', context.lang);
+    const user = await userRepository.findByEmail(email);
+
+    if (!user || !user.is_active || user.email_verified) {
+        return { message: genericMessage };
+    }
+
+    const recentCount = await tokenRepository.countRecentEmailVerificationRequests(
+        user.id,
+        EMAIL_VERIFICATION_EXPIRES_MINUTES
+    );
+    if (recentCount >= EMAIL_VERIFICATION_MAX_REQUESTS) {
+        return { message: genericMessage };
+    }
+
+    await _createAndSendVerification(user, context);
+
+    return { message: genericMessage };
+};
+
 const googleAuthCallback = async (googleProfile, context = {}) => {
     let user;
     let isNewUser = false;
 
-    // 1. Tìm social account đã liên kết
     const existingSocial = await socialRepository.findByProviderId('google', googleProfile.googleId);
 
     if (existingSocial) {
-        // 2. Đã liên kết → lấy user + cập nhật thông tin provider
         user = await userRepository.findById(existingSocial.user_id);
 
         await socialRepository.updateByProviderId('google', googleProfile.googleId, {
@@ -334,11 +393,9 @@ const googleAuthCallback = async (googleProfile, context = {}) => {
             providerAvatar: googleProfile.avatarUrl,
         });
     } else {
-        // 3. Chưa liên kết → tìm user theo email
         user = await userRepository.findByEmail(googleProfile.email);
 
         if (user) {
-            // 3a. User tồn tại → tạo social account liên kết
             await socialRepository.create({
                 userId: user.id,
                 provider: 'google',
@@ -348,14 +405,12 @@ const googleAuthCallback = async (googleProfile, context = {}) => {
                 providerAvatar: googleProfile.avatarUrl,
             });
 
-            // Cập nhật avatar nếu chưa có
             if (!user.avatar_url && googleProfile.avatarUrl) {
                 await userRepository.updateAvatar(user.id, googleProfile.avatarUrl);
             }
 
             await _logActivity(user.id, 'social_link', 'success', context, { provider: 'google' });
         } else {
-            // 3b. User chưa tồn tại → tạo user mới + social account
             user = await userRepository.create({
                 email: googleProfile.email,
                 fullName: googleProfile.fullName,
@@ -377,12 +432,15 @@ const googleAuthCallback = async (googleProfile, context = {}) => {
         }
     }
 
-    // Kiểm tra active
     if (!user || !user.is_active) {
         throw new Api401Error(t('account_disabled', context.lang));
     }
 
-    // 4. Tạo tokens
+    if (!user.email_verified) {
+        await userRepository.markEmailVerified(user.id);
+        user.email_verified = true;
+    }
+
     const tokens = generateTokenPair({
         userId: user.id,
         email: user.email,
@@ -397,7 +455,6 @@ const googleAuthCallback = async (googleProfile, context = {}) => {
         expiresAt: tokens.refreshExpiresAt,
     });
 
-    // Cập nhật last login
     await userRepository.updateLoginSuccess(user.id, context.ipAddress);
     await _logActivity(user.id, 'social_login', 'success', context, { provider: 'google' });
 
@@ -409,12 +466,38 @@ const googleAuthCallback = async (googleProfile, context = {}) => {
     };
 };
 
-/**
- * Lấy thông tin user hiện tại (cho endpoint /me)
- * @param {number} userId
- * @param {object} context
- * @returns {Promise<object>}
- */
+const createOAuthExchangeCode = async (authResult) => {
+    const rawCode = generateRandomToken(32);
+    const codeHash = hashToken(rawCode);
+    const expiresAt = new Date(Date.now() + OAUTH_CODE_EXPIRES_SECONDS * 1000);
+
+    await tokenRepository.saveOAuthExchangeCode({
+        codeHash,
+        userId: authResult.user.id,
+        accessToken: authResult.accessToken,
+        refreshToken: authResult.refreshToken,
+        isNewUser: authResult.isNewUser,
+        expiresAt,
+    });
+
+    return rawCode;
+};
+
+const exchangeOAuthCode = async ({ code }, context = {}) => {
+    const codeHash = hashToken(code);
+    const record = await tokenRepository.consumeOAuthExchangeCode(codeHash);
+
+    if (!record) {
+        throw new Api400Error(t('invalid_oauth_code', context.lang));
+    }
+
+    return {
+        accessToken: record.access_token,
+        refreshToken: record.refresh_token,
+        isNewUser: record.is_new_user,
+    };
+};
+
 const getMe = async (userId, context = {}) => {
     const user = await userRepository.findByIdSafe(userId);
     if (!user) {
@@ -423,22 +506,12 @@ const getMe = async (userId, context = {}) => {
     return _sanitizeUser(user, context.lang);
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  PRIVATE HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Loại bỏ các field nhạy cảm trước khi trả về client
- */
 const _sanitizeUser = (user, lang = 'vi') => {
     const { password_hash, login_attempts, locked_until, ...safeUser } = user;
     safeUser.role_name = lang === 'en' ? (safeUser.role_name_en || safeUser.role_name_vi) : safeUser.role_name_vi;
     return safeUser;
 };
 
-/**
- * Build device info từ request context
- */
 const _buildDeviceInfo = (context) => {
     return {
         ip: context.ipAddress || null,
@@ -447,9 +520,38 @@ const _buildDeviceInfo = (context) => {
     };
 };
 
-/**
- * Ghi log activity (fire-and-forget, không throw nếu lỗi)
- */
+const _createAndSendVerification = async (user, context = {}) => {
+    await tokenRepository.invalidateUserEmailVerificationTokens(user.id);
+
+    const rawToken = generateRandomToken(32);
+    const tokenHash = hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRES_MINUTES * 60 * 1000);
+
+    await tokenRepository.saveEmailVerificationToken({
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+        requestIp: context.ipAddress,
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000';
+    const verifyUrl = `${frontendUrl}/auth/verify-email?token=${rawToken}`;
+
+    try {
+        await sendVerificationEmail({
+            to: user.email,
+            fullName: user.full_name,
+            verifyUrl,
+            expiresMinutes: EMAIL_VERIFICATION_EXPIRES_MINUTES,
+            lang: context.lang,
+        });
+    } catch (err) {
+        console.error('[AUTH] Failed to send verification email:', err.message);
+    }
+
+    await _logActivity(user.id, 'email_verification_sent', 'success', context);
+};
+
 const _logActivity = async (userId, action, status, context = {}, metadata = {}) => {
     try {
         await tokenRepository.logActivity({
@@ -461,20 +563,11 @@ const _logActivity = async (userId, action, status, context = {}, metadata = {})
             metadata,
         });
     } catch (err) {
-        // Không throw — log activity failure không nên break main flow
         console.error('[AUTH] Activity log failed:', err.message);
     }
 };
 
-/**
- * Đăng nhập Google cho Mobile (Android & iOS) bằng idToken
- *
- * @param {{ idToken: string }} data
- * @param {{ ipAddress?: string, userAgent?: string, lang?: string }} context
- * @returns {Promise<{ user: object, accessToken: string, refreshToken: string, isNewUser: boolean }>}
- */
 const googleMobileLogin = async ({ idToken }, context = {}) => {
-    // 1. Gọi Google API để verify tokeninfo
     let payload;
     try {
         const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
@@ -486,7 +579,6 @@ const googleMobileLogin = async ({ idToken }, context = {}) => {
         throw new Api401Error(t('invalid_token', context.lang));
     }
 
-    // 2. Kiểm tra audience để tránh token spoofing
     const allowedAudiences = [
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_ANDROID_CLIENT_ID,
@@ -497,7 +589,19 @@ const googleMobileLogin = async ({ idToken }, context = {}) => {
         throw new Api401Error(t('invalid_token', context.lang));
     }
 
-    // 3. Map Google payload thành googleProfile format
+    const validIssuers = ['accounts.google.com', 'https://accounts.google.com'];
+    if (!validIssuers.includes(payload.iss)) {
+        throw new Api401Error(t('invalid_token', context.lang));
+    }
+
+    if (!payload.exp || Number(payload.exp) * 1000 < Date.now()) {
+        throw new Api401Error(t('invalid_token', context.lang));
+    }
+
+    if (!payload.email || (payload.email_verified !== true && payload.email_verified !== 'true')) {
+        throw new Api401Error(t('invalid_token', context.lang));
+    }
+
     const googleProfile = {
         googleId: payload.sub,
         email: payload.email,
@@ -505,7 +609,6 @@ const googleMobileLogin = async ({ idToken }, context = {}) => {
         avatarUrl: payload.picture || null,
     };
 
-    // 4. Ủy nhiệm qua googleAuthCallback để login/tạo user và sinh tokens
     return googleAuthCallback(googleProfile, context);
 };
 
@@ -515,7 +618,13 @@ module.exports = {
     refresh,
     logout,
     changePassword,
+    forgotPassword,
+    resetPassword,
+    verifyEmail,
+    resendVerification,
     googleAuthCallback,
+    createOAuthExchangeCode,
+    exchangeOAuthCode,
     googleMobileLogin,
     getMe,
 };

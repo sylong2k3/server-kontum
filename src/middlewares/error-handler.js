@@ -1,39 +1,16 @@
-/**
- * Error Handler Middleware
- *
- * Xử lý tất cả errors trong Express pipeline:
- * 1. notFoundHandler — Route không tồn tại → 404
- * 2. errorHandler — Xử lý BaseError (operational) + unexpected errors
- */
-
 const { BaseError } = require('../core/error.response');
 const { t } = require('../utils/i18n');
+const multer = require('multer');
 
-/**
- * 404 Not Found Handler
- * Mount SAU tất cả routes — bắt request không match route nào
- */
 const notFoundHandler = (req, res, next) => {
     const error = new Error(`Route ${req.method} ${req.originalUrl} not found`);
     error.status = 404;
     next(error);
 };
 
-/**
- * Global Error Handler
- * Mount CUỐI CÙNG trong middleware chain
- *
- * Phân biệt:
- * - BaseError (operational): lỗi business logic, trả message rõ ràng
- * - Unexpected Error: lỗi hệ thống, log chi tiết nhưng trả message chung
- */
 const errorHandler = (err, req, res, next) => {
-    // Nếu response đã gửi rồi thì delegate cho Express default handler
-    if (res.headersSent) {
-        return next(err);
-    }
+    if (res.headersSent) return next(err);
 
-    // ── Operational Error (BaseError subclass) ──────────────────────────
     if (err instanceof BaseError) {
         return res.status(err.status).json({
             success: false,
@@ -43,7 +20,26 @@ const errorHandler = (err, req, res, next) => {
         });
     }
 
-    // ── Joi Validation Error ────────────────────────────────────────────
+    if (err instanceof multer.MulterError) {
+        let message;
+        switch (err.code) {
+            case 'LIMIT_FILE_SIZE':
+                message = t('upload_file_too_large', req.lang);
+                break;
+            case 'LIMIT_FILE_COUNT':
+            case 'LIMIT_UNEXPECTED_FILE':
+                message = t('upload_too_many_files', req.lang);
+                break;
+            default:
+                message = t('upload_failed', req.lang);
+        }
+        return res.status(400).json({
+            success: false,
+            message,
+            errors: [err.code, err.field].filter(Boolean),
+        });
+    }
+
     if (err.isJoi) {
         const messages = err.details.map((d) => d.message);
         return res.status(400).json({
@@ -53,7 +49,6 @@ const errorHandler = (err, req, res, next) => {
         });
     }
 
-    // ── JWT Errors ──────────────────────────────────────────────────────
     if (err.name === 'JsonWebTokenError') {
         return res.status(401).json({
             success: false,
@@ -70,7 +65,6 @@ const errorHandler = (err, req, res, next) => {
         });
     }
 
-    // ── CORS Error ──────────────────────────────────────────────────────
     if (err.message && err.message.includes('CORS')) {
         return res.status(403).json({
             success: false,
@@ -79,7 +73,6 @@ const errorHandler = (err, req, res, next) => {
         });
     }
 
-    // ── Unexpected Error ────────────────────────────────────────────────
     const statusCode = err.status || err.statusCode || 500;
     console.error('[ERROR]', {
         method: req.method,

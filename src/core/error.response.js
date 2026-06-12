@@ -77,9 +77,6 @@ class Api404Error extends BaseError {
   }
 }
 
-/**
- * Satellite-specific error
- */
 class SatelliteError extends BaseError {
   constructor(
     message = "Lỗi xử lý ảnh vệ tinh",
@@ -91,9 +88,6 @@ class SatelliteError extends BaseError {
   }
 }
 
-/**
- * Earth Engine error
- */
 class EarthEngineError extends BaseError {
   constructor(
     message = "Lỗi từ Earth Engine",
@@ -105,9 +99,6 @@ class EarthEngineError extends BaseError {
   }
 }
 
-/**
- * Geometry validation error
- */
 class GeometryValidationError extends BaseError {
   constructor(
     message = "Geometry không hợp lệ",
@@ -119,9 +110,6 @@ class GeometryValidationError extends BaseError {
   }
 }
 
-/**
- * Date range validation error
- */
 class DateRangeValidationError extends BaseError {
   constructor(
     message = "Khoảng thời gian không hợp lệ",

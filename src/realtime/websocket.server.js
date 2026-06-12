@@ -50,7 +50,6 @@ function setupSocketState(ws, req) {
                 : String(rawPayload);
             const message = JSON.parse(payload);
 
-            // action: subscribe — client đăng ký nhận event của channel
             if (message.action === 'subscribe' && Array.isArray(message.channels)) {
                 message.channels
                     .map((ch) => String(ch).trim())
@@ -60,9 +59,6 @@ function setupSocketState(ws, req) {
                 safelySend(ws, createMessage('subscribed', {
                     channels: Array.from(ws._wsState.channels),
                 }));
-
-                // Dữ liệu capacity ban đầu lấy từ REST API /spots/map
-                // WebSocket chỉ push capacity_update / capacity_alert khi có log mới
             }
         } catch (_) {
             safelySend(ws, createMessage('error', {
@@ -90,7 +86,6 @@ function initWebSocketServer(server, options = {}) {
             return;
         }
 
-        // Token tuỳ chọn — cho phép kết nối ẩn danh (channel công khai như capacity)
         const token =
             (req.headers.authorization && req.headers.authorization.split(' ')[1]) ||
             requestUrl.searchParams.get('token');
@@ -129,14 +124,6 @@ function notifyUser(userId, event, data) {
     });
 }
 
-/**
- * Push event đến tất cả client đang subscribe channel.
- * Được gọi bởi capacity.service.js khi có log mới.
- *
- * Events:
- *  - capacity_update : { spot_id, visitor_count, capacity_pct, status, recorded_at }
- *  - capacity_alert  : { spot_id, status, capacity_pct, visitor_count, recorded_at }
- */
 function notifyChannel(channel, event, data) {
     const message = createMessage(event, data);
     clients.forEach((ws) => {

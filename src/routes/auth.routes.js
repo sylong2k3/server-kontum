@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const passport = require('passport');
+const rateLimit = require('express-rate-limit');
 const asyncHandler = require('../helpers/async-handler');
 const authController = require('../controllers/auth.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
@@ -11,81 +12,60 @@ const {
     changePasswordSchema,
     logoutSchema,
     googleMobileSchema,
+    forgotPasswordSchema,
+    resetPasswordSchema,
+    oauthExchangeSchema,
+    verifyEmailSchema,
+    resendVerificationSchema,
 } = require('../validators/auth.validator');
 
 const router = Router();
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  PUBLIC ROUTES (không cần xác thực)
-// ═══════════════════════════════════════════════════════════════════════════
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.',
+        errors: ['TOO_MANY_REQUESTS'],
+    },
+});
 
-// Đăng ký tài khoản mới
-router.post('/register',
-    validate(registerSchema),
-    asyncHandler(authController.register)
-);
+const passwordResetLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: parseInt(process.env.RESET_RATE_LIMIT, 10) || 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.',
+        errors: ['TOO_MANY_REQUESTS'],
+    },
+});
 
-// Đăng nhập
-router.post('/login',
-    validate(loginSchema),
-    asyncHandler(authController.login)
-);
+router.post('/register', authLimiter, validate(registerSchema), asyncHandler(authController.register));
+router.post('/login', authLimiter, validate(loginSchema), asyncHandler(authController.login));
+router.post('/refresh', validate(refreshSchema), asyncHandler(authController.refreshToken));
+router.post('/forgot-password', passwordResetLimiter, validate(forgotPasswordSchema), asyncHandler(authController.forgotPassword));
+router.post('/reset-password', passwordResetLimiter, validate(resetPasswordSchema), asyncHandler(authController.resetPassword));
+router.post('/verify-email', authLimiter, validate(verifyEmailSchema), asyncHandler(authController.verifyEmail));
+router.post('/resend-verification', passwordResetLimiter, validate(resendVerificationSchema), asyncHandler(authController.resendVerification));
 
-// Gia hạn access token
-router.post('/refresh',
-    validate(refreshSchema),
-    asyncHandler(authController.refreshToken)
-);
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  GOOGLE OAUTH ROUTES
-// ═══════════════════════════════════════════════════════════════════════════
-
-// Redirect đến Google consent screen
-router.get('/google',
-    passport.authenticate('google', {
-        scope: ['profile', 'email'],
-        session: false,
-    })
-);
-
-// Google callback → tạo/login user → redirect về frontend
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'], session: false }));
 router.get('/google/callback',
     passport.authenticate('google', {
         session: false,
-        failureRedirect: `${process.env.APP_URL || 'http://localhost:3000'}/auth/login?error=google_auth_failed`,
+        failureRedirect: `${process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000'}/auth/login?error=google_auth_failed`,
     }),
     asyncHandler(authController.googleCallback)
 );
+router.post('/google/mobile', authLimiter, validate(googleMobileSchema), asyncHandler(authController.googleMobileLogin));
+router.post('/oauth/exchange', authLimiter, validate(oauthExchangeSchema), asyncHandler(authController.oauthExchange));
 
-// Google login cho Mobile (Android & iOS)
-router.post('/google/mobile',
-    validate(googleMobileSchema),
-    asyncHandler(authController.googleMobileLogin)
-);
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  PROTECTED ROUTES (cần access token)
-// ═══════════════════════════════════════════════════════════════════════════
-
-// Đăng xuất
-router.post('/logout',
-    verifyToken,
-    validate(logoutSchema),
-    asyncHandler(authController.logout)
-);
-
-// Đổi mật khẩu
-router.post('/change-password',
-    verifyToken,
-    validate(changePasswordSchema),
-    asyncHandler(authController.changePassword)
-);
-
-// Lấy thông tin user hiện tại
-router.get('/me',
-    verifyToken,
-    asyncHandler(authController.getMe)
-);
+router.post('/logout', verifyToken, validate(logoutSchema), asyncHandler(authController.logout));
+router.post('/change-password', verifyToken, validate(changePasswordSchema), asyncHandler(authController.changePassword));
+router.get('/me', verifyToken, asyncHandler(authController.getMe));
 
 module.exports = router;

@@ -3,6 +3,8 @@ const Joi = require('joi');
 const registerSchema = Joi.object({
     email: Joi.string()
         .email()
+        .lowercase()
+        .trim()
         .required(),
     password: Joi.string()
         .min(6)
@@ -11,6 +13,7 @@ const registerSchema = Joi.object({
     fullName: Joi.string()
         .min(2)
         .max(255)
+        .trim()
         .required(),
     phone: Joi.string()
         .pattern(/^[0-9+\-\s()]{8,20}$/)
@@ -21,6 +24,8 @@ const registerSchema = Joi.object({
 const loginSchema = Joi.object({
     email: Joi.string()
         .email()
+        .lowercase()
+        .trim()
         .required(),
     password: Joi.string()
         .required(),
@@ -52,6 +57,41 @@ const googleMobileSchema = Joi.object({
         .required(),
 });
 
+const forgotPasswordSchema = Joi.object({
+    email: Joi.string()
+        .email()
+        .lowercase()
+        .trim()
+        .required(),
+});
+
+const resetPasswordSchema = Joi.object({
+    token: Joi.string()
+        .required(),
+    newPassword: Joi.string()
+        .min(6)
+        .max(128)
+        .required(),
+});
+
+const oauthExchangeSchema = Joi.object({
+    code: Joi.string()
+        .required(),
+});
+
+const verifyEmailSchema = Joi.object({
+    token: Joi.string()
+        .required(),
+});
+
+const resendVerificationSchema = Joi.object({
+    email: Joi.string()
+        .email()
+        .lowercase()
+        .trim()
+        .required(),
+});
+
 module.exports = {
     registerSchema,
     loginSchema,
@@ -59,4 +99,9 @@ module.exports = {
     changePasswordSchema,
     logoutSchema,
     googleMobileSchema,
+    forgotPasswordSchema,
+    resetPasswordSchema,
+    oauthExchangeSchema,
+    verifyEmailSchema,
+    resendVerificationSchema,
 };

@@ -3,133 +3,99 @@ const { OK, CREATED } = require('../core/success.response');
 const { getRequestContext } = require('../utils/context');
 const { t } = require('../utils/i18n');
 
-/**
- * POST /api/v1/auth/register
- * Body: { email, password, fullName, phone? }
- */
 const register = async (req, res) => {
     const { email, password, fullName, phone } = req.body;
     const context = getRequestContext(req);
-
-    const result = await authService.register(
-        { email, password, fullName, phone },
-        context
-    );
-    CREATED(res, t('register_success', req.lang), result);
+    const result = await authService.register({ email, password, fullName, phone }, context);
+    const message = result.requiresVerification
+        ? t('register_verify_email', req.lang)
+        : t('register_success', req.lang);
+    CREATED(res, message, result);
 };
 
-/**
- * POST /api/v1/auth/login
- * Body: { email, password }
- */
 const login = async (req, res) => {
     const { email, password } = req.body;
     const context = getRequestContext(req);
-
     const result = await authService.login({ email, password }, context);
-
     OK(res, t('login_success', req.lang), result);
 };
 
-/**
- * POST /api/v1/auth/refresh
- * Body: { refreshToken }
- */
 const refreshToken = async (req, res) => {
     const { refreshToken } = req.body;
     const context = getRequestContext(req);
-
     const result = await authService.refresh(refreshToken, context);
-
     OK(res, t('refresh_success', req.lang), result);
 };
 
-/**
- * POST /api/v1/auth/logout
- * Headers: Authorization: Bearer <accessToken>
- * Body: { refreshToken? }
- */
 const logout = async (req, res) => {
     const { refreshToken } = req.body;
     const context = getRequestContext(req);
-
-    // req.user.jti được attach bởi passport JWT strategy
-    const accessTokenInfo = {
-        jti: req.user.jti,
-    };
-
+    const accessTokenInfo = { jti: req.user.jti, exp: req.user.exp };
     await authService.logout(accessTokenInfo, refreshToken, req.user.id, context);
-
     OK(res, t('logout_success', req.lang));
 };
 
-/**
- * POST /api/v1/auth/change-password
- * Headers: Authorization: Bearer <accessToken>
- * Body: { oldPassword, newPassword }
- */
 const changePassword = async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     const context = getRequestContext(req);
-
-    const result = await authService.changePassword(
-        req.user.id,
-        { oldPassword, newPassword },
-        context
-    );
-
+    const result = await authService.changePassword(req.user.id, { oldPassword, newPassword }, context);
     OK(res, result.message);
 };
 
-/**
- * GET /api/v1/auth/me
- * Headers: Authorization: Bearer <accessToken>
- */
+const forgotPassword = async (req, res) => {
+    const { email } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.forgotPassword({ email }, context);
+    OK(res, result.message);
+};
+
+const resetPassword = async (req, res) => {
+    const { token, newPassword } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.resetPassword({ token, newPassword }, context);
+    OK(res, result.message);
+};
+
+const verifyEmail = async (req, res) => {
+    const { token } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.verifyEmail({ token }, context);
+    OK(res, result.message);
+};
+
+const resendVerification = async (req, res) => {
+    const { email } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.resendVerification({ email }, context);
+    OK(res, result.message);
+};
+
 const getMe = async (req, res) => {
     const context = getRequestContext(req);
     const user = await authService.getMe(req.user.id, context);
-
     OK(res, t('get_me_success', req.lang), { user });
 };
 
-/**
- * GET /api/v1/auth/google
- * Redirect đến Google consent screen
- * (Handled trực tiếp bởi passport trong routes)
- */
-
-/**
- * GET /api/v1/auth/google/callback
- * Google redirect về đây sau khi user cho phép
- */
 const googleCallback = async (req, res) => {
     const context = getRequestContext(req);
-
-    // req.user chứa Google profile (từ passport Google strategy)
     const result = await authService.googleAuthCallback(req.user, context);
-
-    // Redirect về frontend với tokens trong query params
-    // Frontend sẽ đọc tokens và lưu vào localStorage/cookie
-    const frontendUrl = process.env.APP_URL || 'http://localhost:3000';
-    const params = new URLSearchParams({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        isNewUser: result.isNewUser.toString(),
-    });
-
+    const code = await authService.createOAuthExchangeCode(result);
+    const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000';
+    const params = new URLSearchParams({ code, isNewUser: result.isNewUser.toString() });
     res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
 };
 
-/**
- * POST /api/v1/auth/google/mobile
- * Body: { idToken }
- */
+const oauthExchange = async (req, res) => {
+    const { code } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.exchangeOAuthCode({ code }, context);
+    OK(res, t('login_success', req.lang), result);
+};
+
 const googleMobileLogin = async (req, res) => {
     const { idToken } = req.body;
     const context = getRequestContext(req);
-
     const result = await authService.googleMobileLogin({ idToken }, context);
-
     OK(res, t('login_success', req.lang), result);
 };
 
@@ -139,7 +105,12 @@ module.exports = {
     refreshToken,
     logout,
     changePassword,
+    forgotPassword,
+    resetPassword,
+    verifyEmail,
+    resendVerification,
     getMe,
     googleCallback,
+    oauthExchange,
     googleMobileLogin,
 };
