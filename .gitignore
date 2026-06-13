@@ -5,4 +5,12 @@
 
 ggeServiceKey.json
 
+# Firebase service account (chứa private key — KHÔNG commit)
+firbase.json
+firebase.json
+*serviceAccount*.json
+
+# Tài khoản mẫu chứa mật khẩu dev — giữ local, không commit
+ACCOUNTS.md
+
 package-lock.json

@@ -1,12 +1,21 @@
 const jwt = require('jsonwebtoken');
-const { generateUUID } = require('./cryptoHelper');
+const { generateUUID } = require('./cryptoHelper.util');
 require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_SECRET_REFRESH = process.env.JWT_SECRET_REFRESH;
 const JWT_ALGORITHM = process.env.JWT_ALGORITHM || 'HS256';
-const JWT_ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || '7d';
+const JWT_ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || '15m';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+
+const validateJwtSecret = (name, value) => {
+    if (!value || value.length < 32 || /^your_|^change_me/i.test(value)) {
+        throw new Error(`${name} must be set to a strong secret with at least 32 characters`);
+    }
+};
+
+validateJwtSecret('JWT_SECRET', JWT_SECRET);
+validateJwtSecret('JWT_SECRET_REFRESH', JWT_SECRET_REFRESH);
 
 const generateAccessToken = (payload) => {
     const jti = generateUUID();

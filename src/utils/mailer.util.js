@@ -25,33 +25,6 @@ if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
     console.log('  ⚠ Mailer not configured — emails will be logged to console (dev only)');
 }
 
-const nodemailer = require('nodemailer');
-require('dotenv').config();
-
-let transporter = null;
-let isConfigured = false;
-
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = parseInt(process.env.SMTP_PORT, 10) || 587;
-const SMTP_SECURE = process.env.SMTP_SECURE === 'true';
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const MAIL_FROM = process.env.MAIL_FROM || process.env.SMTP_USER;
-const APP_NAME = process.env.APP_NAME || 'App';
-
-if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
-    transporter = nodemailer.createTransport({
-        host: SMTP_HOST,
-        port: SMTP_PORT,
-        secure: SMTP_SECURE,
-        auth: { user: SMTP_USER, pass: SMTP_PASS },
-    });
-    isConfigured = true;
-    console.log('  ✓ Mailer (SMTP) initialized');
-} else {
-    console.log('  ⚠ Mailer not configured — emails will be logged to console (dev only)');
-}
-
 const sendMail = async ({ to, subject, html, text }) => {
     if (!isConfigured) {
         if (process.env.NODE_ENV === 'production') {
@@ -138,4 +111,10 @@ const sendVerificationEmail = async ({ to, fullName, verifyUrl, expiresMinutes, 
     `;
 
     await sendMail({ to, subject, html, text });
+};
+
+module.exports = {
+    sendMail,
+    sendPasswordResetEmail,
+    sendVerificationEmail,
 };

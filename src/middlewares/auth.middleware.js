@@ -1,13 +1,13 @@
 const passport = require('passport');
 const { Api401Error, Api403Error } = require('../core/error.response');
-const { t } = require('../utils/i18n');
+const { t } = require('../utils/i18n.util');
 
 const verifyToken = (req, res, next) => {
     passport.authenticate('jwt', { session: false }, (err, user, info) => {
         if (err) return next(err);
-        if (!user) throw new Api401Error(info?.message || t('please_login', req.lang));
+        if (!user) return next(new Api401Error(info?.message || t('please_login', req.lang)));
         req.user = user;
-        next();
+        return next();
     })(req, res, next);
 };
 
@@ -23,6 +23,17 @@ const requireRole = (...roles) => {
         }
         next();
     };
+};
+
+const enforcePasswordChange = (req, res, next) => {
+    if (!req.user) throw new Api401Error(t('please_login', req.lang));
+    if (req.user.must_change_password === true) {
+        throw new Api403Error(
+            t('password_change_required', req.lang),
+            ['PASSWORD_CHANGE_REQUIRED']
+        );
+    }
+    next();
 };
 
 const optionalAuth = (req, res, next) => {
@@ -53,4 +64,4 @@ const requirePermission = (resource, action) => {
     };
 };
 
-module.exports = { verifyToken, requireRole, optionalAuth, hasPermission, requirePermission };
+module.exports = { verifyToken, requireRole, enforcePasswordChange, optionalAuth, hasPermission, requirePermission };

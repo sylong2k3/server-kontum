@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const TokenManager = require('../utils/tokenManager');
+const TokenManager = require('../utils/tokenManager.util');
 
 const clients = new Set();
 let wss = null;
@@ -14,7 +14,7 @@ function createMessage(event, data) {
 }
 
 function safelySend(ws, message) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {return false;}
 
     try {
         ws.send(message);
@@ -29,7 +29,7 @@ function cleanupClient(ws) {
 }
 
 function setupSocketState(ws, req) {
-    const userId = req._wsUser ? String(req._wsUser.id) : null;
+    const userId = req._wsUser ? String(req._wsUser.userId) : null;
 
     ws._wsState = {
         userId,
@@ -74,7 +74,7 @@ function setupSocketState(ws, req) {
 function initWebSocketServer(server, options = {}) {
     const path = options.path || '/ws';
 
-    if (wss) return;
+    if (wss) {return;}
 
     wss = new WebSocket.Server({ noServer: true });
 
@@ -92,7 +92,7 @@ function initWebSocketServer(server, options = {}) {
 
         if (token) {
             try {
-                req._wsUser = TokenManager.validateAccessToken(token);
+                req._wsUser = TokenManager.verifyAccessToken(token);
             } catch (_) {
                 socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
                 socket.destroy();
@@ -111,7 +111,7 @@ function initWebSocketServer(server, options = {}) {
 function broadcast(event, data) {
     const message = createMessage(event, data);
     clients.forEach((ws) => {
-        if (!safelySend(ws, message)) clients.delete(ws);
+        if (!safelySend(ws, message)) {clients.delete(ws);}
     });
 }
 
@@ -119,7 +119,7 @@ function notifyUser(userId, event, data) {
     const message = createMessage(event, data);
     clients.forEach((ws) => {
         if (ws._wsState?.userId === String(userId)) {
-            if (!safelySend(ws, message)) clients.delete(ws);
+            if (!safelySend(ws, message)) {clients.delete(ws);}
         }
     });
 }
@@ -128,7 +128,7 @@ function notifyChannel(channel, event, data) {
     const message = createMessage(event, data);
     clients.forEach((ws) => {
         if (ws._wsState?.channels?.has(channel)) {
-            if (!safelySend(ws, message)) clients.delete(ws);
+            if (!safelySend(ws, message)) {clients.delete(ws);}
         }
     });
 }

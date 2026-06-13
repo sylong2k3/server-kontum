@@ -1,5 +1,5 @@
 const { Api400Error } = require('../core/error.response');
-const { t } = require('../utils/i18n');
+const { t } = require('../utils/i18n.util');
 
 const validate = (schema, source = 'body') => {
     return (req, res, next) => {
