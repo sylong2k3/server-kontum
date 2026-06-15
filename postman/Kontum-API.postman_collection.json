@@ -685,6 +685,39 @@
           }
         },
         {
+          "name": "Cập nhật hồ sơ cá nhân",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Nguyen Van A\",\n  \"phone\": \"0905123456\",\n  \"avatarUrl\": \"https://example.com/avatar.png\"\n}"
+            },
+            "description": "Cập nhật họ tên, điện thoại, avatar của user đang đăng nhập."
+          }
+        },
+        {
           "name": "Đổi mật khẩu",
           "request": {
             "method": "POST",
@@ -801,74 +834,18 @@
       "description": "Tất cả route cần đăng nhập. Một số route yêu cầu role: system_admin / so_nnmt / ubnd_tinh.",
       "item": [
         {
-          "name": "Xem hồ sơ cá nhân",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/users/me/profile?lang={{lang}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "users",
-                "me",
-                "profile"
-              ],
-              "query": [
-                {
-                  "key": "lang",
-                  "value": "{{lang}}"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Cập nhật hồ sơ cá nhân",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/users/me/profile?lang={{lang}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "users",
-                "me",
-                "profile"
-              ],
-              "query": [
-                {
-                  "key": "lang",
-                  "value": "{{lang}}"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"fullName\": \"Nguyen Van A\",\n  \"phone\": \"0905123456\",\n  \"avatarUrl\": \"https://example.com/avatar.png\"\n}"
-            }
-          }
-        },
-        {
           "name": "Danh sách người dùng (admin/so_nnmt/ubnd_tinh)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users?page=1&limit=20&lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin?page=1&limit=20&lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users"
+                "users",
+                "admin"
               ],
               "query": [
                 {
@@ -913,12 +890,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users?lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users"
+                "users",
+                "admin"
               ],
               "query": [
                 {
@@ -939,12 +917,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin/{{userId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
+                "admin",
                 "{{userId}}"
               ],
               "query": [
@@ -967,12 +946,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}/role?lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin/{{userId}}/role?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
+                "admin",
                 "{{userId}}",
                 "role"
               ],
@@ -1000,12 +980,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}/active?lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin/{{userId}}/active?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
+                "admin",
                 "{{userId}}",
                 "active"
               ],
@@ -1033,12 +1014,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}/reset-password?lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin/{{userId}}/reset-password?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
+                "admin",
                 "{{userId}}",
                 "reset-password"
               ],
@@ -1061,12 +1043,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/users/admin/{{userId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
+                "admin",
                 "{{userId}}"
               ],
               "query": [
