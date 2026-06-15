@@ -11,15 +11,15 @@ const buildActor = (req) => ({
 });
 
 const listUsers = async (req, res) => {
-    const { page, pageSize, roleCode, isActive, email } = req.query;
+    const { page, limit, roleCode, isActive, email, sortBy, sortOrder } = req.query;
     const actor = buildActor(req);
-    const filter = { page, pageSize, roleCode, isActive, email };
+    const filter = { page, limit, roleCode, isActive, email, sortBy, sortOrder };
     const { items, total } = await userService.listUsers(filter, actor);
     OK_LIST(res, t('get_list_success', req.lang), items, {
         page: filter.page,
-        limit: filter.pageSize,
+        limit: filter.limit,
         total,
-        totalPages: Math.ceil(total / filter.pageSize),
+        totalPages: Math.ceil(total / filter.limit),
     });
 };
 
@@ -61,14 +61,5 @@ const deleteUser = async (req, res) => {
     OK(res, result.message, {});
 };
 
-const getOwnProfile = async (req, res) => {
-    const user = await userService.getOwnProfile(req.user.id, { lang: req.lang });
-    OK(res, t('get_me_success', req.lang), user);
-};
 
-const updateOwnProfile = async (req, res) => {
-    const user = await userService.updateOwnProfile(req.user.id, req.body, { lang: req.lang });
-    OK(res, t('profile_updated', req.lang), user);
-};
-
-module.exports = { listUsers, createUser, getUserById, changeUserRole, setUserActive, resetUserPassword, deleteUser, getOwnProfile, updateOwnProfile };
+module.exports = { listUsers, createUser, getUserById, changeUserRole, setUserActive, resetUserPassword, deleteUser };

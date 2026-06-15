@@ -248,6 +248,36 @@ const changePassword = async (userId, { oldPassword, newPassword }, context = {}
     return { message: t('password_changed_success', context.lang) };
 };
 
+const setPassword = async (userId, { newPassword }, context = {}) => {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+        throw new Api404Error(t('user_not_found', context.lang));
+    }
+
+    if (!user.is_active) {
+        throw new Api401Error(t('account_disabled', context.lang));
+    }
+
+    if (user.password_hash) {
+        throw new Api400Error(t('password_already_set', context.lang));
+    }
+
+    const hasActiveSocialAccount = await socialRepository.hasActiveProvider(userId);
+    if (!hasActiveSocialAccount) {
+        throw new Api400Error(t('password_setup_not_allowed', context.lang));
+    }
+
+    const newPasswordHash = await hashPassword(newPassword);
+    await userRepository.updatePassword(userId, newPasswordHash);
+    await tokenRepository.deleteAllUserTokens(userId);
+    await _logActivity(userId, 'set_password', 'success', context);
+
+    return {
+        message: t('password_set_success', context.lang),
+        data: { has_password: true },
+    };
+};
+
 const forgotPassword = async ({ email }, context = {}) => {
     const genericMessage = t('reset_email_sent', context.lang);
     const user = await userRepository.findByEmail(email);
@@ -507,10 +537,42 @@ const getMe = async (userId, context = {}) => {
     return _sanitizeUser(user, context.lang);
 };
 
+const updateMe = async (userId, data, context = {}) => {
+    const user = await userRepository.findById(userId);
+    if (!user) throw new Api404Error(t('user_not_found', context.lang));
+
+    const normalized = {
+        ...data,
+        phone: data.phone !== undefined ? (data.phone === '' ? null : data.phone) : undefined,
+        avatarUrl: data.avatarUrl !== undefined ? (data.avatarUrl === '' ? null : data.avatarUrl) : undefined,
+    };
+
+    const updated = await userRepository.updateProfile(userId, normalized);
+    await _logActivity(userId, 'update_profile', 'success', context);
+    return _sanitizeUser(updated, context.lang);
+};
+
 const _sanitizeUser = (user, lang = 'vi') => {
-    const { password_hash, login_attempts, locked_until, ...safeUser } = user;
-    safeUser.role_name = lang === 'en' ? (safeUser.role_name_en || safeUser.role_name_vi) : safeUser.role_name_vi;
-    return safeUser;
+    const roleName = lang === 'en'
+        ? (user.role_name_en || user.role_name_vi)
+        : user.role_name_vi;
+
+    return {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        phone: user.phone,
+        avatar_url: user.avatar_url,
+        role: {
+            code: user.role,
+            name: roleName,
+            permissions: user.role_permissions || {},
+        },
+        is_active: user.is_active,
+        email_verified: user.email_verified,
+        must_change_password: user.must_change_password || false,
+        has_password: Boolean(user.password_hash),
+    };
 };
 
 const _buildDeviceInfo = (context) => {
@@ -619,6 +681,7 @@ module.exports = {
     refresh,
     logout,
     changePassword,
+    setPassword,
     forgotPassword,
     resetPassword,
     verifyEmail,
@@ -628,4 +691,5 @@ module.exports = {
     exchangeOAuthCode,
     googleMobileLogin,
     getMe,
+    updateMe,
 };

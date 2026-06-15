@@ -132,10 +132,26 @@ const _buildUserFilter = ({ roleCode, roleCodes, isActive, email }, startIdx = 1
     };
 };
 
-const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, pageSize = 20 } = {}) => {
+const USER_SORT_COLUMNS = {
+    id: 'u.id',
+    created_at: 'u.created_at',
+    updated_at: 'u.updated_at',
+    email: 'u.email',
+    full_name: 'u.full_name',
+    phone: 'u.phone',
+    last_login_at: 'u.last_login_at',
+};
+
+const _normalizeSort = (sortBy = 'created_at', sortOrder = 'DESC') => ({
+    sortColumn: USER_SORT_COLUMNS[sortBy] || USER_SORT_COLUMNS.created_at,
+    sortDirection: String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC',
+});
+
+const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC' } = {}) => {
     const { where, params, nextIdx } = _buildUserFilter({ roleCode, roleCodes, isActive, email });
-    const offset = (page - 1) * pageSize;
-    params.push(pageSize, offset);
+    const offset = (page - 1) * limit;
+    const { sortColumn, sortDirection } = _normalizeSort(sortBy, sortOrder);
+    params.push(limit, offset);
 
     const { rows } = await db.query(
         `SELECT u.id, u.email, u.full_name, u.phone, u.avatar_url,
@@ -145,7 +161,7 @@ const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, pageSiz
          FROM auth.users u
          INNER JOIN auth.roles r ON u.role_id = r.id
          ${where}
-         ORDER BY u.created_at DESC
+         ORDER BY ${sortColumn} ${sortDirection}, u.id DESC
          LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
         params
     );

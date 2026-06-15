@@ -10,6 +10,7 @@ const {
     loginSchema,
     refreshSchema,
     changePasswordSchema,
+    setPasswordSchema,
     logoutSchema,
     googleMobileSchema,
     forgotPasswordSchema,
@@ -17,6 +18,7 @@ const {
     oauthExchangeSchema,
     verifyEmailSchema,
     resendVerificationSchema,
+    updateProfileSchema,
 } = require('../validators/auth.validator');
 
 const router = Router();
@@ -66,6 +68,8 @@ router.post('/oauth/exchange', authLimiter, validate(oauthExchangeSchema), async
 
 router.post('/logout', verifyToken, validate(logoutSchema), asyncHandler(authController.logout));
 router.post('/change-password', verifyToken, validate(changePasswordSchema), asyncHandler(authController.changePassword));
+router.post('/set-password', verifyToken, validate(setPasswordSchema), asyncHandler(authController.setPassword));
 router.get('/me', verifyToken, asyncHandler(authController.getMe));
+router.patch('/me', verifyToken, validate(updateProfileSchema), asyncHandler(authController.updateMe));
 
 module.exports = router;

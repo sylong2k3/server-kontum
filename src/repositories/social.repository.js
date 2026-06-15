@@ -97,6 +97,16 @@ const hasProvider = async (userId, provider) => {
     return rows.length > 0;
 };
 
+const hasActiveProvider = async (userId) => {
+    const { rows } = await db.query(
+        `SELECT 1 FROM auth.social_accounts
+         WHERE user_id = $1 AND is_active = true
+         LIMIT 1`,
+        [userId]
+    );
+    return rows.length > 0;
+};
+
 module.exports = {
     findByProviderId,
     findByUserId,
@@ -104,4 +114,5 @@ module.exports = {
     updateByProviderId,
     unlinkProvider,
     hasProvider,
+    hasActiveProvider,
 };

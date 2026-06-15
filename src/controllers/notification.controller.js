@@ -11,12 +11,11 @@ const buildActor = (req) => ({
 });
 
 const listNotifications = async (req, res) => {
-    const { page, pageSize, onlyUnread } = req.query;
-    const { items, total } = await notificationService.listNotifications(buildActor(req), {
-        page, pageSize, onlyUnread,
-    });
+    const { page, limit, onlyUnread, isRead, channel, type, audience, sortBy, sortOrder } = req.query;
+    const filter = { page, limit, onlyUnread, isRead, channel, type, audience, sortBy, sortOrder };
+    const { items, total } = await notificationService.listNotifications(buildActor(req), filter);
     OK_LIST(res, t('get_list_success', req.lang), items, {
-        page, limit: pageSize, total, totalPages: Math.ceil(total / pageSize),
+        page, limit, total, totalPages: Math.ceil(total / limit),
     });
 };
 

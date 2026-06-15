@@ -46,6 +46,13 @@ const changePasswordSchema = Joi.object({
         .invalid(Joi.ref('oldPassword')),
 });
 
+const setPasswordSchema = Joi.object({
+    newPassword: Joi.string()
+        .min(8)
+        .max(128)
+        .required(),
+});
+
 const logoutSchema = Joi.object({
     refreshToken: Joi.string()
         .optional()
@@ -92,11 +99,18 @@ const resendVerificationSchema = Joi.object({
         .required(),
 });
 
+const updateProfileSchema = Joi.object({
+    fullName: Joi.string().min(2).max(255).trim().optional(),
+    phone: Joi.string().pattern(/^[0-9+\-\s()]{8,20}$/).optional().allow(null, ''),
+    avatarUrl: Joi.string().uri().max(2048).optional().allow(null, ''),
+});
+
 module.exports = {
     registerSchema,
     loginSchema,
     refreshSchema,
     changePasswordSchema,
+    setPasswordSchema,
     logoutSchema,
     googleMobileSchema,
     forgotPasswordSchema,
@@ -104,4 +118,5 @@ module.exports = {
     oauthExchangeSchema,
     verifyEmailSchema,
     resendVerificationSchema,
+    updateProfileSchema,
 };

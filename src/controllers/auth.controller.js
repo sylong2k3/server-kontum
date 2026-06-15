@@ -42,6 +42,13 @@ const changePassword = async (req, res) => {
     OK(res, result.message);
 };
 
+const setPassword = async (req, res) => {
+    const { newPassword } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.setPassword(req.user.id, { newPassword }, context);
+    OK(res, result.message, result.data);
+};
+
 const forgotPassword = async (req, res) => {
     const { email } = req.body;
     const context = getRequestContext(req);
@@ -76,6 +83,12 @@ const getMe = async (req, res) => {
     OK(res, t('get_me_success', req.lang), { user });
 };
 
+const updateMe = async (req, res) => {
+    const context = getRequestContext(req);
+    const user = await authService.updateMe(req.user.id, req.body, context);
+    OK(res, t('profile_updated', req.lang), user);
+};
+
 const googleCallback = async (req, res) => {
     const context = getRequestContext(req);
     const result = await authService.googleAuthCallback(req.user, context);
@@ -105,11 +118,13 @@ module.exports = {
     refreshToken,
     logout,
     changePassword,
+    setPassword,
     forgotPassword,
     resetPassword,
     verifyEmail,
     resendVerification,
     getMe,
+    updateMe,
     googleCallback,
     oauthExchange,
     googleMobileLogin,

@@ -22,22 +22,22 @@ const resetPasswordAdminSchema = Joi.object({
     newPassword: Joi.string().min(8).max(128).pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/).required(),
 });
 
-const updateProfileSchema = Joi.object({
-    fullName: Joi.string().min(2).max(255).trim().optional(),
-    phone: Joi.string().pattern(/^[0-9+\-\s()]{8,20}$/).optional().allow(null, ''),
-    avatarUrl: Joi.string().uri().max(2048).optional().allow(null, ''),
-});
 
 const listUsersSchema = Joi.object({
     page: Joi.number().integer().min(1).default(1),
-    pageSize: Joi.number().integer().min(1).max(100).default(20),
+    limit: Joi.number().integer().min(1).max(100).default(20),
     roleCode: Joi.string().valid(...VALID_ROLES).optional(),
     isActive: Joi.boolean().optional(),
     email: Joi.string().trim().max(255).optional().allow(''),
+    sortBy: Joi.string()
+        .valid('id', 'created_at', 'updated_at', 'email', 'full_name', 'phone', 'last_login_at')
+        .optional()
+        .default('created_at'),
+    sortOrder: Joi.string().valid('ASC', 'DESC', 'asc', 'desc').optional().default('DESC'),
 });
 
 const userIdParamsSchema = Joi.object({
     id: Joi.number().integer().positive().required(),
 });
 
-module.exports = { createUserSchema, updateRoleSchema, setActiveSchema, resetPasswordAdminSchema, updateProfileSchema, listUsersSchema, userIdParamsSchema };
+module.exports = { createUserSchema, updateRoleSchema, setActiveSchema, resetPasswordAdminSchema, listUsersSchema, userIdParamsSchema };
