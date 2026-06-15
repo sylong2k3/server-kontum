@@ -159,22 +159,6 @@ const deleteUser = async (userId, actor) => {
     return { message: t('user_deleted_success', actor.lang) };
 };
 
-const getOwnProfile = async (userId, context) => {
-    const user = await userRepository.findByIdSafe(userId);
-    if (!user) throw new Api404Error(t('user_not_found', context.lang));
-    return _sanitize(user);
-};
-
-const updateOwnProfile = async (userId, data, context) => {
-    await _getOrThrow(userId, context.lang);
-    const normalized = {
-        ...data,
-        phone: data.phone !== undefined ? _normalizeNullable(data.phone) : undefined,
-        avatarUrl: data.avatarUrl !== undefined ? _normalizeNullable(data.avatarUrl) : undefined,
-    };
-    const updated = await userRepository.updateProfile(userId, normalized);
-    return _sanitize(updated);
-};
 
 module.exports = {
     listUsers,
@@ -184,6 +168,4 @@ module.exports = {
     resetUserPassword,
     getUserById,
     deleteUser,
-    getOwnProfile,
-    updateOwnProfile,
 };

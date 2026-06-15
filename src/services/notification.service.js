@@ -99,9 +99,19 @@ const broadcastToRole = async (roleCode, { type, title, body, data = {}, channel
 //  TRUY VẤN PHÍA NGƯỜI DÙNG
 // ════════════════════════════════════════════════════════════════════════════
 
-const listNotifications = async (actor, { page = 1, pageSize = 20, onlyUnread = false }) => {
-    const limit = pageSize;
-    const offset = (page - 1) * pageSize;
+const listNotifications = async (actor, {
+    page = 1,
+    limit = 20,
+    onlyUnread = false,
+    isRead,
+    channel,
+    type,
+    audience,
+    sortBy = 'created_at',
+    sortOrder = 'DESC',
+}) => {
+    const offset = (page - 1) * limit;
+    const filter = { channel, type, audience, isRead: onlyUnread ? false : isRead, sortBy, sortOrder };
 
     const [items, total] = await Promise.all([
         notificationRepository.listForUser({
@@ -109,12 +119,12 @@ const listNotifications = async (actor, { page = 1, pageSize = 20, onlyUnread = 
             roleCode: actor.role,
             limit,
             offset,
-            onlyUnread,
+            filter,
         }),
         notificationRepository.countForUser({
             userId: actor.id,
             roleCode: actor.role,
-            onlyUnread,
+            filter,
         }),
     ]);
 

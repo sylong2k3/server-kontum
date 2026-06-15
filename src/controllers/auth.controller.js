@@ -83,6 +83,12 @@ const getMe = async (req, res) => {
     OK(res, t('get_me_success', req.lang), { user });
 };
 
+const updateMe = async (req, res) => {
+    const context = getRequestContext(req);
+    const user = await authService.updateMe(req.user.id, req.body, context);
+    OK(res, t('profile_updated', req.lang), user);
+};
+
 const googleCallback = async (req, res) => {
     const context = getRequestContext(req);
     const result = await authService.googleAuthCallback(req.user, context);
@@ -118,6 +124,7 @@ module.exports = {
     verifyEmail,
     resendVerification,
     getMe,
+    updateMe,
     googleCallback,
     oauthExchange,
     googleMobileLogin,

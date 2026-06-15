@@ -42,9 +42,66 @@ const create = async ({
  * Liệt kê thông báo của 1 user: gồm thông báo cá nhân + broadcast khớp vai trò,
  * kèm trạng thái đã đọc. Phân trang bằng limit/offset.
  */
-const listForUser = async ({ userId, roleCode, limit = 20, offset = 0, onlyUnread = false }) => {
-    const params = [userId, roleCode, limit, offset];
-    const unreadFilter = onlyUnread ? 'AND r.read_at IS NULL' : '';
+const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
+
+const _buildVisibleNotificationFilter = ({ userId, roleCode, filter = {} }) => {
+    const conditions = [
+        '(n.expires_at IS NULL OR n.expires_at > NOW())',
+        `(
+                 n.user_id = $1
+                 OR (n.user_id IS NULL AND n.audience = 'all')
+                 OR (n.user_id IS NULL AND n.audience = 'role' AND n.audience_role = $2)
+            )`,
+    ];
+    const params = [userId, roleCode];
+    let idx = 3;
+
+    if (filter.isRead !== undefined) {
+        conditions.push(filter.isRead ? 'r.read_at IS NOT NULL' : 'r.read_at IS NULL');
+    }
+    if (filter.channel) {
+        conditions.push(`LOWER(n.channel) LIKE $${idx++} ESCAPE '\\'`);
+        params.push(`%${_escapeLike(filter.channel.toLowerCase())}%`);
+    }
+    if (filter.type) {
+        conditions.push(`LOWER(n.type) LIKE $${idx++} ESCAPE '\\'`);
+        params.push(`%${_escapeLike(filter.type.toLowerCase())}%`);
+    }
+    if (filter.audience) {
+        conditions.push(`n.audience = $${idx++}`);
+        params.push(filter.audience);
+    }
+
+    return {
+        where: `WHERE ${conditions.join(' AND ')}`,
+        params,
+        nextIdx: idx,
+    };
+};
+
+const NOTIFICATION_SORT_COLUMNS = {
+    id: 'n.id',
+    created_at: 'n.created_at',
+    expires_at: 'n.expires_at',
+    channel: 'n.channel',
+    type: 'n.type',
+    audience: 'n.audience',
+    read_at: 'r.read_at',
+};
+
+const _normalizeSort = (sortBy = 'created_at', sortOrder = 'DESC') => {
+    const nullableSorts = ['read_at', 'expires_at'];
+    return {
+        sortColumn: NOTIFICATION_SORT_COLUMNS[sortBy] || NOTIFICATION_SORT_COLUMNS.created_at,
+        sortDirection: String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC',
+        nullsOrder: nullableSorts.includes(sortBy) ? 'NULLS LAST' : '',
+    };
+};
+
+const listForUser = async ({ userId, roleCode, limit = 20, offset = 0, filter = {} }) => {
+    const { where, params, nextIdx } = _buildVisibleNotificationFilter({ userId, roleCode, filter });
+    const { sortColumn, sortDirection, nullsOrder } = _normalizeSort(filter.sortBy, filter.sortOrder);
+    params.push(limit, offset);
 
     const { rows } = await db.query(
         `SELECT n.id, n.user_id, n.audience, n.audience_role, n.channel, n.type,
@@ -54,40 +111,30 @@ const listForUser = async ({ userId, roleCode, limit = 20, offset = 0, onlyUnrea
          FROM core.notifications n
          LEFT JOIN core.notification_reads r
                 ON r.notification_id = n.id AND r.user_id = $1
-         WHERE (n.expires_at IS NULL OR n.expires_at > NOW())
-           AND (
-                n.user_id = $1
-                OR (n.user_id IS NULL AND n.audience = 'all')
-                OR (n.user_id IS NULL AND n.audience = 'role' AND n.audience_role = $2)
-           )
-           ${unreadFilter}
-         ORDER BY n.created_at DESC
-         LIMIT $3 OFFSET $4`,
+         ${where}
+         ORDER BY ${sortColumn} ${sortDirection} ${nullsOrder}, n.id DESC
+         LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
         params
     );
     return rows;
 };
 
 /** Đếm tổng số thông báo (cho phân trang). */
-const countForUser = async ({ userId, roleCode, onlyUnread = false }) => {
-    const unreadFilter = onlyUnread
-        ? `AND NOT EXISTS (
-               SELECT 1 FROM core.notification_reads r
-               WHERE r.notification_id = n.id AND r.user_id = $1
-           )`
-        : '';
+const countForUser = async ({ userId, roleCode, onlyUnread = false, filter = {} }) => {
+    const normalizedFilter = onlyUnread ? { ...filter, isRead: false } : filter;
+    const { where, params } = _buildVisibleNotificationFilter({
+        userId,
+        roleCode,
+        filter: normalizedFilter,
+    });
 
     const { rows } = await db.query(
         `SELECT COUNT(*)::int AS count
          FROM core.notifications n
-         WHERE (n.expires_at IS NULL OR n.expires_at > NOW())
-           AND (
-                n.user_id = $1
-                OR (n.user_id IS NULL AND n.audience = 'all')
-                OR (n.user_id IS NULL AND n.audience = 'role' AND n.audience_role = $2)
-           )
-           ${unreadFilter}`,
-        [userId, roleCode]
+         LEFT JOIN core.notification_reads r
+                ON r.notification_id = n.id AND r.user_id = $1
+         ${where}`,
+        params
     );
     return rows[0]?.count || 0;
 };

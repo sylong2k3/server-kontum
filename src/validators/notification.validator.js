@@ -2,8 +2,17 @@ const Joi = require('joi');
 
 const listNotificationsSchema = Joi.object({
     page: Joi.number().integer().min(1).default(1),
-    pageSize: Joi.number().integer().min(1).max(100).default(20),
+    limit: Joi.number().integer().min(1).max(100).default(20),
     onlyUnread: Joi.boolean().default(false),
+    isRead: Joi.boolean().optional(),
+    channel: Joi.string().trim().max(50).optional().allow(''),
+    type: Joi.string().trim().max(50).optional().allow(''),
+    audience: Joi.string().valid('user', 'all', 'role').optional(),
+    sortBy: Joi.string()
+        .valid('id', 'created_at', 'expires_at', 'channel', 'type', 'audience', 'read_at')
+        .optional()
+        .default('created_at'),
+    sortOrder: Joi.string().valid('ASC', 'DESC', 'asc', 'desc').optional().default('DESC'),
 });
 
 const notificationIdParamsSchema = Joi.object({

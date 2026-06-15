@@ -18,6 +18,7 @@ const {
     oauthExchangeSchema,
     verifyEmailSchema,
     resendVerificationSchema,
+    updateProfileSchema,
 } = require('../validators/auth.validator');
 
 const router = Router();
@@ -69,5 +70,6 @@ router.post('/logout', verifyToken, validate(logoutSchema), asyncHandler(authCon
 router.post('/change-password', verifyToken, validate(changePasswordSchema), asyncHandler(authController.changePassword));
 router.post('/set-password', verifyToken, validate(setPasswordSchema), asyncHandler(authController.setPassword));
 router.get('/me', verifyToken, asyncHandler(authController.getMe));
+router.patch('/me', verifyToken, validate(updateProfileSchema), asyncHandler(authController.updateMe));
 
 module.exports = router;

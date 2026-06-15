@@ -53,10 +53,16 @@ const buildPagination = ({ page = 1, limit = 10, total = 0 }) => {
 };
 
 const OK_LIST = (res, message, items, pagination) => {
+    const pag = buildPagination(pagination);
     new Ok({
         message,
         data: { items },
-        metadata: { pagination: buildPagination(pagination) },
+        metadata: {
+            page: pag.page,
+            limit: pag.limit,
+            total: pag.total,
+            totalPages: pag.totalPages,
+        },
     }).send(res);
 };
 

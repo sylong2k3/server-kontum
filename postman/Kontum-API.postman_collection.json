@@ -2,7 +2,7 @@
   "info": {
     "name": "API Quản lý GIS Kon Tum",
     "_postman_id": "b1f4e2a0-0000-4000-8000-kontumgisapi01",
-    "description": "Collection cho server-kontum: Auth, Users, Notifications.\n\nBiến dùng chung:\n- baseUrl: http://localhost:3005/api/v1\n- accessToken / refreshToken: tự lưu sau khi gọi Login hoặc Refresh.\n\nĐa số endpoint cần header Authorization: Bearer {{accessToken}} (đã cấu hình sẵn ở mức collection).",
+    "description": "Collection cho server-kontum: Auth, Users, Notifications, News, Documents.\n\nBiến dùng chung:\n- baseUrl: http://localhost:3005/api/v1\n- accessToken / refreshToken: tự lưu sau khi gọi Login hoặc Refresh.\n\nĐa số endpoint cần header Authorization: Bearer {{accessToken}} (đã cấu hình sẵn ở mức collection).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -54,6 +54,26 @@
     },
     {
       "key": "lang",
+      "value": "vi",
+      "type": "string"
+    },
+    {
+      "key": "newsId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "newsSlug",
+      "value": "tin-moi-truong",
+      "type": "string"
+    },
+    {
+      "key": "documentId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "cmsLang",
       "value": "vi",
       "type": "string"
     }
@@ -843,7 +863,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users?page=1&pageSize=20&lang={{lang}}",
+              "raw": "{{baseUrl}}/users?page=1&limit=20&lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -856,7 +876,7 @@
                   "value": "1"
                 },
                 {
-                  "key": "pageSize",
+                  "key": "limit",
                   "value": "20"
                 },
                 {
@@ -1070,7 +1090,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/notifications?page=1&pageSize=20&onlyUnread=false&lang={{lang}}",
+              "raw": "{{baseUrl}}/notifications?page=1&limit=20&onlyUnread=false&lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1083,7 +1103,7 @@
                   "value": "1"
                 },
                 {
-                  "key": "pageSize",
+                  "key": "limit",
                   "value": "20"
                 },
                 {
@@ -1349,6 +1369,490 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"target\": \"role\",\n  \"roleCode\": \"so_nnmt\",\n  \"channel\": \"fire\",\n  \"type\": \"fire_warning\",\n  \"title\": \"Canh bao chay rung\",\n  \"body\": \"Nguy co chay rung cao\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tin tức",
+      "item": [
+        {
+          "name": "[Public] Danh sách tin tức",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news?page=1&limit=20&lang={{cmsLang}}&sortBy=created_at&sortOrder=DESC",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "created_at"
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "DESC"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Public] Chi tiết tin tức theo slug",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news/{{newsSlug}}?lang={{cmsLang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "{{newsSlug}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Chi tiết tin tức (đầy đủ vi+en)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news/admin/{{newsId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "admin",
+                "{{newsId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Tạo tin tức",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "lang",
+                  "value": "vi",
+                  "type": "text"
+                },
+                {
+                  "key": "title",
+                  "value": "Tin môi trường Kon Tum",
+                  "type": "text"
+                },
+                {
+                  "key": "summary",
+                  "value": "Tóm tắt tin tức",
+                  "type": "text"
+                },
+                {
+                  "key": "content",
+                  "value": "<p>Nội dung tin tức đầy đủ</p>",
+                  "type": "text"
+                },
+                {
+                  "key": "status",
+                  "value": "published",
+                  "type": "text"
+                },
+                {
+                  "key": "cover",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Cập nhật metadata tin tức (status/cover)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/news/admin/{{newsId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "admin",
+                "{{newsId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"published\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Upsert bản dịch EN tin tức",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/news/admin/{{newsId}}/translations/en?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "admin",
+                "{{newsId}}",
+                "translations",
+                "en"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Kon Tum Environmental News\",\n  \"summary\": \"News summary in English\",\n  \"content\": \"<p>Full content in English</p>\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Xóa tin tức",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news/{{newsId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "{{newsId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Báo cáo/Văn bản",
+      "item": [
+        {
+          "name": "[Public] Danh sách tài liệu",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/documents?page=1&limit=20&lang={{cmsLang}}&docType=bao_cao",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                },
+                {
+                  "key": "docType",
+                  "value": "bao_cao"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Public] Chi tiết tài liệu",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/documents/{{documentId}}?lang={{cmsLang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "{{documentId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Chi tiết tài liệu (đầy đủ vi+en)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/documents/admin/{{documentId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "admin",
+                "{{documentId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Upload tài liệu",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/documents?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "lang",
+                  "value": "vi",
+                  "type": "text"
+                },
+                {
+                  "key": "title",
+                  "value": "Báo cáo môi trường tháng 6",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Báo cáo tổng hợp môi trường",
+                  "type": "text"
+                },
+                {
+                  "key": "docType",
+                  "value": "bao_cao",
+                  "type": "text"
+                },
+                {
+                  "key": "isPublic",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Cập nhật metadata tài liệu",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents/admin/{{documentId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "admin",
+                "{{documentId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isPublic\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Upsert bản dịch EN tài liệu",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents/admin/{{documentId}}/translations/en?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "admin",
+                "{{documentId}}",
+                "translations",
+                "en"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Environmental Report June\",\n  \"description\": \"Monthly environmental summary report\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Xóa tài liệu",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/documents/{{documentId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "{{documentId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             }
           }
         }

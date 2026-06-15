@@ -99,6 +99,12 @@ const resendVerificationSchema = Joi.object({
         .required(),
 });
 
+const updateProfileSchema = Joi.object({
+    fullName: Joi.string().min(2).max(255).trim().optional(),
+    phone: Joi.string().pattern(/^[0-9+\-\s()]{8,20}$/).optional().allow(null, ''),
+    avatarUrl: Joi.string().uri().max(2048).optional().allow(null, ''),
+});
+
 module.exports = {
     registerSchema,
     loginSchema,
@@ -112,4 +118,5 @@ module.exports = {
     oauthExchangeSchema,
     verifyEmailSchema,
     resendVerificationSchema,
+    updateProfileSchema,
 };

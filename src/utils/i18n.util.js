@@ -71,6 +71,15 @@ const locales = {
         upload_no_file: 'Không có tệp nào được tải lên',
         upload_failed: 'Tải tệp lên thất bại',
 
+        news_not_found: 'Không tìm thấy tin tức',
+        news_created_success: 'Tạo tin tức thành công',
+        news_updated_success: 'Cập nhật tin tức thành công',
+        news_deleted_success: 'Đã xóa tin tức',
+        document_not_found: 'Không tìm thấy tài liệu',
+        document_created_success: 'Tạo tài liệu thành công',
+        document_updated_success: 'Cập nhật tài liệu thành công',
+        document_deleted_success: 'Đã xóa tài liệu',
+
         'any.required': 'Trường này là bắt buộc',
         'string.empty': 'Trường này không được để trống',
         'string.email': 'Email không hợp lệ',
@@ -155,6 +164,15 @@ const locales = {
         upload_too_many_files: 'The number of uploaded files exceeds the limit',
         upload_no_file: 'No file was uploaded',
         upload_failed: 'File upload failed',
+
+        news_not_found: 'News not found',
+        news_created_success: 'News created successfully',
+        news_updated_success: 'News updated successfully',
+        news_deleted_success: 'News deleted',
+        document_not_found: 'Document not found',
+        document_created_success: 'Document created successfully',
+        document_updated_success: 'Document updated successfully',
+        document_deleted_success: 'Document deleted',
 
         'any.required': 'This field is required',
         'string.empty': 'This field cannot be empty',
