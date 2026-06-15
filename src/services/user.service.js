@@ -18,7 +18,7 @@ const _assertNotLastActiveSystemAdmin = async (targetUser, lang) => {
     if (targetUser.role !== 'system_admin') return;
     const activeSystemAdmins = await userRepository.countActiveUsersByRole('system_admin');
     if (activeSystemAdmins <= 1) {
-        throw new Api400Error(t('invalid_data', lang), ['Cannot modify the last active system administrator']);
+        throw new Api400Error(t('invalid_data', lang), [t('cannot_modify_last_admin', lang)]);
     }
 };
 
@@ -102,7 +102,7 @@ const changeUserRole = async (userId, roleCode, actor) => {
     _assertSoNnmtScope(actor.role, roleCode, actor.lang);
     const user = await _getOrThrow(userId, actor.lang);
     _assertSoNnmtScope(actor.role, user.role, actor.lang);
-    if (actor.id === userId) throw new Api400Error(t('invalid_data', actor.lang), ['Cannot change your own role']);
+    if (actor.id === userId) throw new Api400Error(t('invalid_data', actor.lang), [t('cannot_change_own_role', actor.lang)]);
     if (user.role === 'system_admin' && roleCode !== 'system_admin') {
         await _assertNotLastActiveSystemAdmin(user, actor.lang);
     }

@@ -46,6 +46,13 @@ const changePasswordSchema = Joi.object({
         .invalid(Joi.ref('oldPassword')),
 });
 
+const setPasswordSchema = Joi.object({
+    newPassword: Joi.string()
+        .min(8)
+        .max(128)
+        .required(),
+});
+
 const logoutSchema = Joi.object({
     refreshToken: Joi.string()
         .optional()
@@ -97,6 +104,7 @@ module.exports = {
     loginSchema,
     refreshSchema,
     changePasswordSchema,
+    setPasswordSchema,
     logoutSchema,
     googleMobileSchema,
     forgotPasswordSchema,

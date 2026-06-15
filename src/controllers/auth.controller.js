@@ -42,6 +42,13 @@ const changePassword = async (req, res) => {
     OK(res, result.message);
 };
 
+const setPassword = async (req, res) => {
+    const { newPassword } = req.body;
+    const context = getRequestContext(req);
+    const result = await authService.setPassword(req.user.id, { newPassword }, context);
+    OK(res, result.message, result.data);
+};
+
 const forgotPassword = async (req, res) => {
     const { email } = req.body;
     const context = getRequestContext(req);
@@ -105,6 +112,7 @@ module.exports = {
     refreshToken,
     logout,
     changePassword,
+    setPassword,
     forgotPassword,
     resetPassword,
     verifyEmail,
