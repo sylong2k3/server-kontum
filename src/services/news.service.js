@@ -195,5 +195,55 @@ const deleteNews = async (actor, id, context = {}) => {
     if (!deleted) throw new Api404Error(t('news_not_found', context.lang));
     return { message: t('news_deleted_success', context.lang) };
 };
+const updateNewsFull = async (actor, id, payload, file, context = {}) => {
+    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));
 
-module.exports = { listNews, getNewsBySlug, getAdminNewsById, createNews, updateNewsMeta, upsertNewsTranslation, deleteNews };
+    const existing = await newsRepository.findById(id);
+    if (!existing) throw new Api404Error(t('news_not_found', context.lang));
+
+    // 1. Update metadata nếu có thay đổi
+    const metaPayload = {};
+    if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
+        metaPayload.status = payload.status;
+        if (payload.status === 'published' && existing.status !== 'published' && !existing.published_at) {
+            metaPayload.publishedAt = new Date();
+        }
+    }
+    if (file) {
+        metaPayload.coverUrl = `${file._relativeDir}/${file.filename}`;
+    } else if (Object.prototype.hasOwnProperty.call(payload, 'coverUrl')) {
+        metaPayload.coverUrl = payload.coverUrl;
+    }
+
+    if (Object.keys(metaPayload).length > 0) {
+        await newsRepository.updateMeta(id, metaPayload);
+    }
+
+    // 2. Upsert từng bản dịch
+    const translationResults = {};
+    for (const [lang, body] of Object.entries(payload.translations || {})) {
+        const resolvedLang = normalizeLang(lang);
+        const title = stripTags(body.title);
+        const summary = body.summary ? stripTags(body.summary) : null;
+        const content = sanitizeHtml(body.content);
+        const slug = await buildUniqueSlug(title, resolvedLang, id);
+
+        const translation = await newsRepository.upsertTranslation(id, resolvedLang, {
+            title, slug, summary, content,
+        });
+        translationResults[resolvedLang] = {
+            title: translation.title,
+            slug: translation.slug,
+            summary: translation.summary,
+        };
+    }
+
+    // 3. Trả về admin detail đầy đủ
+    const updated = await newsRepository.findAdminById(id);
+    return {
+        message: t('news_updated_success', context.lang),
+        news: toAdminDetail(updated),
+    };
+};
+
+module.exports = { listNews, getNewsBySlug, getAdminNewsById, createNews, updateNewsMeta, upsertNewsTranslation, deleteNews, updateNewsFull };

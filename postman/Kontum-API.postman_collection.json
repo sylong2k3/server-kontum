@@ -1542,9 +1542,9 @@
           }
         },
         {
-          "name": "[Admin] Upsert bản dịch EN tin tức",
+          "name": "[Admin] Cập nhật gộp tin tức (PUT)",
           "request": {
-            "method": "PATCH",
+            "method": "PUT",
             "header": [
               {
                 "key": "Content-Type",
@@ -1552,16 +1552,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/news/admin/{{newsId}}/translations/en?lang={{lang}}",
+              "raw": "{{baseUrl}}/news/admin/{{newsId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "news",
                 "admin",
-                "{{newsId}}",
-                "translations",
-                "en"
+                "{{newsId}}"
               ],
               "query": [
                 {
@@ -1572,7 +1570,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Kon Tum Environmental News\",\n  \"summary\": \"News summary in English\",\n  \"content\": \"<p>Full content in English</p>\"\n}"
+              "raw": "{\n  \"status\": \"published\",\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Tin môi trường Kon Tum cập nhật\",\n      \"summary\": \"Tóm tắt tin tức tiếng Việt\",\n      \"content\": \"<p>Nội dung tin tức tiếng Việt cập nhật</p>\"\n    },\n    \"en\": {\n      \"title\": \"Kon Tum Environmental News Updated\",\n      \"summary\": \"News summary in English\",\n      \"content\": \"<p>Full content in English updated</p>\"\n    }\n  }\n}"
             }
           }
         },
@@ -1782,9 +1780,9 @@
           }
         },
         {
-          "name": "[Admin] Upsert bản dịch EN tài liệu",
+          "name": "[Admin] Cập nhật gộp tài liệu (PUT)",
           "request": {
-            "method": "PATCH",
+            "method": "PUT",
             "header": [
               {
                 "key": "Content-Type",
@@ -1792,16 +1790,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/documents/admin/{{documentId}}/translations/en?lang={{lang}}",
+              "raw": "{{baseUrl}}/documents/admin/{{documentId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "documents",
                 "admin",
-                "{{documentId}}",
-                "translations",
-                "en"
+                "{{documentId}}"
               ],
               "query": [
                 {
@@ -1812,7 +1808,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Environmental Report June\",\n  \"description\": \"Monthly environmental summary report\"\n}"
+              "raw": "{\n  \"docType\": \"bao_cao\",\n  \"isPublic\": true,\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Báo cáo môi trường tháng 6 cập nhật\",\n      \"description\": \"Báo cáo tổng hợp môi trường tiếng Việt cập nhật\"\n    },\n    \"en\": {\n      \"title\": \"Environmental Report June Updated\",\n      \"description\": \"Monthly environmental summary report updated\"\n    }\n  }\n}"
             }
           }
         },

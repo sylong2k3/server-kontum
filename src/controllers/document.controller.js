@@ -57,4 +57,9 @@ const deleteDocument = async (req, res) => {
     OK(res, result.message, {});
 };
 
-module.exports = { listDocuments, getDocumentById, getAdminDocumentById, createDocument, updateDocumentMeta, upsertDocumentTranslation, deleteDocument };
+const updateDocumentFull = async (req, res) => {
+    const result = await documentService.updateDocumentFull(buildActor(req), Number(req.params.id), req.body, { lang: req.lang });
+    OK(res, result.message, result.document);
+};
+
+module.exports = { listDocuments, getDocumentById, getAdminDocumentById, createDocument, updateDocumentMeta, upsertDocumentTranslation, deleteDocument, updateDocumentFull };

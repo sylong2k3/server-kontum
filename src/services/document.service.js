@@ -162,5 +162,35 @@ const deleteDocument = async (actor, id, context = {}) => {
     if (!deleted) throw new Api404Error(t('document_not_found', context.lang));
     return { message: t('document_deleted_success', context.lang) };
 };
+const updateDocumentFull = async (actor, id, payload, context = {}) => {
+    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));
 
-module.exports = { listDocuments, getDocumentById, getAdminDocumentById, createDocument, updateDocumentMeta, upsertDocumentTranslation, deleteDocument };
+    const existing = await documentRepository.findRaw(id);
+    if (!existing) throw new Api404Error(t('document_not_found', context.lang));
+
+    // 1. Update metadata nếu có thay đổi
+    const metaPayload = {};
+    if (Object.prototype.hasOwnProperty.call(payload, 'docType')) metaPayload.docType = payload.docType;
+    if (Object.prototype.hasOwnProperty.call(payload, 'isPublic')) metaPayload.isPublic = payload.isPublic;
+
+    if (Object.keys(metaPayload).length > 0) {
+        await documentRepository.updateMeta(id, metaPayload);
+    }
+
+    // 2. Upsert từng bản dịch
+    for (const [lang, body] of Object.entries(payload.translations || {})) {
+        const resolvedLang = normalizeLang(lang);
+        const title = stripTags(body.title);
+        const description = body.description ? sanitizeHtml(body.description) : null;
+        await documentRepository.upsertTranslation(id, resolvedLang, { title, description });
+    }
+
+    // 3. Trả về admin detail đầy đủ
+    const updated = await documentRepository.findAdminById(id);
+    return {
+        message: t('document_updated_success', context.lang),
+        document: toAdminDetail(updated),
+    };
+};
+
+module.exports = { listDocuments, getDocumentById, getAdminDocumentById, createDocument, updateDocumentMeta, upsertDocumentTranslation, deleteDocument, updateDocumentFull };

@@ -8,10 +8,6 @@ const documentIdParamsSchema = Joi.object({
     id: Joi.number().integer().positive().required(),
 });
 
-const documentTranslationParamsSchema = Joi.object({
-    id: Joi.number().integer().positive().required(),
-    lang: Joi.string().valid('vi', 'en').required(),
-});
 
 // ─── List ─────────────────────────────────────────────────────────────────────
 
@@ -48,19 +44,27 @@ const updateDocumentMetaSchema = Joi.object({
     isPublic: Joi.boolean().optional(),
 }).min(1);
 
-// ─── Upsert bản dịch ─────────────────────────────────────────────────────────
-// PATCH /documents/admin/:id/translations/:lang
+// ─── Update gộp metadata + translations ──────────────────────────────────────
+// Dùng cho PUT /documents/admin/:id — admin sửa toàn bộ rồi bấm Lưu 1 lần.
 
-const upsertDocumentTranslationSchema = Joi.object({
+const docTranslationBodySchema = Joi.object({
     title: Joi.string().trim().min(5).max(255).required(),
     description: Joi.string().trim().max(2000).optional().allow('', null),
 });
 
+const updateDocumentFullSchema = Joi.object({
+    docType: Joi.string().valid('bao_cao', 'van_ban', 'pdf_map').optional(),
+    isPublic: Joi.boolean().optional(),
+    translations: Joi.object().pattern(
+        Joi.string().valid('vi', 'en'),
+        docTranslationBodySchema
+    ).min(1).required(),
+});
+
 module.exports = {
     documentIdParamsSchema,
-    documentTranslationParamsSchema,
     listDocumentsSchema,
     createDocumentSchema,
     updateDocumentMetaSchema,
-    upsertDocumentTranslationSchema,
+    updateDocumentFullSchema,
 };

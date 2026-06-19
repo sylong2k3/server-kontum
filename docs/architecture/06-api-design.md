@@ -182,16 +182,32 @@
 
 ## 9. CMS — `/api/v1/news`, `/api/v1/documents` *(EP-08)*
 
+### News
+
 | Method | Endpoint | Role | Mô tả |
 |--------|----------|------|-------|
-| GET | `/news` | public | Danh sách/tìm kiếm tin |
-| GET | `/news/:slug` | public | Chi tiết tin |
-| POST | `/news` | admin, so_nnmt | Tạo tin |
-| PATCH | `/news/:id` | admin, so_nnmt | Sửa tin |
-| DELETE | `/news/:id` | admin | Xóa tin |
+| GET | `/news` | public | Danh sách/tìm kiếm tin (đã published) |
+| GET | `/news/:slug` | public | Chi tiết tin theo slug (lang từ query/headers) |
+| GET | `/news/admin/:id` | admin, so_nnmt | Chi tiết tin kèm đầy đủ bản dịch |
+| POST | `/news` | admin, so_nnmt | Tạo tin mới (gồm metadata + bản dịch đầu tiên) |
+| PATCH | `/news/admin/:id` | admin, so_nnmt | Cập nhật metadata chung (status, cover) |
+| PUT | `/news/admin/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
+| DELETE | `/news/:id` | admin | Xóa tin (soft delete) |
 | POST | `/news/:id/comments` | citizen | Bình luận (chờ duyệt) |
-| GET | `/documents` | public* | Văn bản/báo cáo/PDF map |
-| POST | `/documents` | admin, so_nnmt | Upload văn bản |
+
+### Documents
+
+| Method | Endpoint | Role | Mô tả |
+|--------|----------|------|-------|
+| GET | `/documents` | public* | Danh sách tài liệu (doc_type, public only) |
+| GET | `/documents/:id` | public* | Chi tiết tài liệu (lang từ query/headers) |
+| GET | `/documents/admin/:id` | admin, so_nnmt | Chi tiết tài liệu kèm đầy đủ bản dịch |
+| POST | `/documents` | admin, so_nnmt | Upload tài liệu mới (metadata + bản dịch đầu tiên + file) |
+| PATCH | `/documents/admin/:id` | admin, so_nnmt | Cập nhật metadata chung (docType, isPublic) |
+| PUT | `/documents/admin/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
+| DELETE | `/documents/:id` | admin, so_nnmt | Xóa tài liệu (soft delete) |
+
+\* tài liệu `is_public=false` yêu cầu auth + RBAC.
 
 ---
 

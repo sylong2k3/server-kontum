@@ -8,10 +8,9 @@ const {
     listNewsSchema,
     newsIdParamsSchema,
     newsSlugParamsSchema,
-    newsTranslationParamsSchema,
     createNewsSchema,
     updateNewsMetaSchema,
-    upsertNewsTranslationSchema,
+    updateNewsFullSchema,
 } = require('../validators/news.validator');
 
 const router = Router();
@@ -45,15 +44,17 @@ router.patch(
     asyncHandler(newsController.updateNewsMeta)
 );
 
-// PATCH /news/admin/:id/translations/:lang — upsert bản dịch
-router.patch(
-    '/admin/:id/translations/:lang',
+// PUT /news/admin/:id — update gộp metadata + tất cả translations (1 request)
+router.put(
+    '/admin/:id',
     verifyToken,
     enforcePasswordChange,
     requireRole('system_admin', 'so_nnmt'),
-    validate(newsTranslationParamsSchema, 'params'),
-    validate(upsertNewsTranslationSchema),
-    asyncHandler(newsController.upsertNewsTranslation)
+    validate(newsIdParamsSchema, 'params'),
+    uploadImage.single('cover'),
+    handleUploadError,
+    validate(updateNewsFullSchema),
+    asyncHandler(newsController.updateNewsFull)
 );
 
 // POST /news — tạo tin mới (metadata + bản dịch đầu tiên)

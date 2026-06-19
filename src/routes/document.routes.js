@@ -6,11 +6,10 @@ const { validate } = require('../middlewares/validate.middleware');
 const { uploadDocument, handleUploadError } = require('../middlewares/upload.middleware');
 const {
     documentIdParamsSchema,
-    documentTranslationParamsSchema,
     listDocumentsSchema,
     createDocumentSchema,
     updateDocumentMetaSchema,
-    upsertDocumentTranslationSchema,
+    updateDocumentFullSchema,
 } = require('../validators/document.validator');
 
 const router = Router();
@@ -42,15 +41,15 @@ router.patch(
     asyncHandler(documentController.updateDocumentMeta)
 );
 
-// PATCH /documents/admin/:id/translations/:lang — upsert bản dịch
-router.patch(
-    '/admin/:id/translations/:lang',
+// PUT /documents/admin/:id — update gộp metadata + translations
+router.put(
+    '/admin/:id',
     verifyToken,
     enforcePasswordChange,
     requireRole('system_admin', 'so_nnmt'),
-    validate(documentTranslationParamsSchema, 'params'),
-    validate(upsertDocumentTranslationSchema),
-    asyncHandler(documentController.upsertDocumentTranslation)
+    validate(documentIdParamsSchema, 'params'),
+    validate(updateDocumentFullSchema),
+    asyncHandler(documentController.updateDocumentFull)
 );
 
 // POST /documents — upload tài liệu mới (metadata + bản dịch đầu tiên)

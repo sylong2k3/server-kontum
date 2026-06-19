@@ -181,7 +181,14 @@
 
 ### G1. CRUD tin tức (US-070)
 - **Quyền:** `system_admin`, `so_nnmt` (đăng chuyên ngành).
-- **Endpoints:** `POST /news`, `PATCH /news/:id`, `DELETE /news/:id` (admin), `GET /news`, `GET /news/:slug`.
+- **Endpoints:**
+  - `POST /news`: Tạo tin mới (metadata + bản dịch đầu tiên, upload cover).
+  - `GET /news/admin/:id`: Chi tiết tin phía admin (kèm đầy đủ bản dịch).
+  - `PATCH /news/admin/:id`: Cập nhật metadata chung (status, cover).
+  - `PUT /news/admin/:id`: Cập nhật gộp metadata + tất cả bản dịch.
+  - `DELETE /news/:id`: Xóa tin (soft delete).
+  - `GET /news`: Lấy danh sách tin public (chỉ lấy published).
+  - `GET /news/:slug`: Lấy chi tiết tin public theo slug.
 - **Đầu vào (POST):**
   | Field | Kiểu | Bắt buộc | Ràng buộc |
   |-------|------|:---:|-----------|
@@ -206,7 +213,14 @@
 <h id="h"></h>
 ## H. CMS: Văn bản & Bản đồ PDF (US-072, US-073)
 - **Quyền:** `system_admin`, `so_nnmt` (upload); public xem `is_public`.
-- **Endpoints:** `POST /documents`, `GET /documents?doc_type=&q=`, `GET /documents/:id`, `DELETE /documents/:id`.
+- **Endpoints:**
+  - `POST /documents`: Upload tài liệu mới (metadata + bản dịch đầu tiên + file).
+  - `GET /documents/admin/:id`: Chi tiết tài liệu phía admin (kèm đầy đủ bản dịch).
+  - `PATCH /documents/admin/:id`: Cập nhật metadata chung (docType, isPublic).
+  - `PUT /documents/admin/:id`: Cập nhật gộp metadata + tất cả bản dịch.
+  - `DELETE /documents/:id`: Xóa tài liệu (soft delete).
+  - `GET /documents`: Lấy danh sách tài liệu public (chỉ lấy public hoặc theo quyền).
+  - `GET /documents/:id`: Lấy chi tiết tài liệu public theo ID.
 - **Đầu vào (POST):** `title`, `doc_type` (`bao_cao|van_ban|pdf_map`), file (PDF/DOCX/XLSX, ≤ `UPLOAD_DOCUMENT_MAX_MB=20`MB), `is_public`.
 - **Quy tắc:** lưu file qua `uploadDocument` → `public/uploads/documents/YYYY/MM/`; DB lưu `file_url` tương đối; kiểm MIME thực (không chỉ đuôi file); `pdf_map` cho phép tải về + xem inline.
 - **Lỗi:** `415 UNSUPPORTED_FILE_TYPE`; vượt dung lượng.

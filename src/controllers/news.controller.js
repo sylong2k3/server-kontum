@@ -57,4 +57,9 @@ const deleteNews = async (req, res) => {
     OK(res, result.message, {});
 };
 
-module.exports = { listNews, getNewsBySlug, getAdminNewsById, createNews, updateNewsMeta, upsertNewsTranslation, deleteNews };
+const updateNewsFull = async (req, res) => {
+    const result = await newsService.updateNewsFull(buildActor(req), Number(req.params.id), req.body, req.file, { lang: req.lang });
+    OK(res, result.message, result.news);
+};
+
+module.exports = { listNews, getNewsBySlug, getAdminNewsById, createNews, updateNewsMeta, upsertNewsTranslation, deleteNews, updateNewsFull };

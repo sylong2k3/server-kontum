@@ -12,10 +12,6 @@ const newsSlugParamsSchema = Joi.object({
     slug: Joi.string().trim().min(1).max(255).required(),
 });
 
-const newsTranslationParamsSchema = Joi.object({
-    id: Joi.number().integer().positive().required(),
-    lang: Joi.string().valid('vi', 'en').required(),
-});
 
 // ─── List ─────────────────────────────────────────────────────────────────────
 
@@ -52,21 +48,30 @@ const updateNewsMetaSchema = Joi.object({
     coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
 }).min(1);
 
-// ─── Upsert bản dịch ─────────────────────────────────────────────────────────
-// Dùng cho PATCH /news/admin/:id/translations/:lang
 
-const upsertNewsTranslationSchema = Joi.object({
+// ─── Update gộp metadata + translations ──────────────────────────────────────
+// Dùng cho PUT /news/admin/:id — admin sửa toàn bộ rồi bấm Lưu 1 lần.
+
+const translationBodySchema = Joi.object({
     title: Joi.string().trim().min(5).max(255).required(),
     summary: Joi.string().trim().max(500).optional().allow('', null),
     content: Joi.string().min(1).required(),
 });
 
+const updateNewsFullSchema = Joi.object({
+    status: Joi.string().valid('draft', 'published').optional(),
+    coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
+    translations: Joi.object().pattern(
+        Joi.string().valid('vi', 'en'),
+        translationBodySchema
+    ).min(1).required(),
+});
+
 module.exports = {
     newsIdParamsSchema,
     newsSlugParamsSchema,
-    newsTranslationParamsSchema,
     listNewsSchema,
     createNewsSchema,
     updateNewsMetaSchema,
-    upsertNewsTranslationSchema,
+    updateNewsFullSchema,
 };
