@@ -1,5 +1,6 @@
 const app = require("./src/app");
 const db = require("./src/configs/database");
+const { initializeEarthEngine, isInitialized } = require("./src/configs/gge");
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
 const {
@@ -12,7 +13,8 @@ const PORT = process.env.PORT || 8881;
 const HOST = process.env.HOST || "0.0.0.0";
 const WS_PATH = "/ws";
 
-const IS_SINGLETON_WORKER = !process.env.CLUSTER_WORKER_ID || process.env.CLUSTER_WORKER_ID === "0";
+const IS_SINGLETON_WORKER =
+  !process.env.CLUSTER_WORKER_ID || process.env.CLUSTER_WORKER_ID === "0";
 
 let server;
 let isShuttingDown = false;
@@ -21,7 +23,7 @@ function formatField(label, value) {
   return `${label.padEnd(14)}: ${value}`;
 }
 
-function printStartupBanner({ dbStatus }) {
+function printStartupBanner({ dbStatus, earthEngineStatus }) {
   const publicHost = HOST === "0.0.0.0" ? "localhost" : HOST;
   const lines = [
     "APP QUẢN LÝ GIS KONTUM",
@@ -35,7 +37,7 @@ function printStartupBanner({ dbStatus }) {
     ),
     formatField("PostgreSQL", dbStatus),
     formatField("File Storage", "✓ Local (public/uploads)"),
-    formatField("Earth Engine", `✗ Uninitialized (disabled)`),
+    formatField("Earth Engine", earthEngineStatus),
   ];
 
   const width = Math.max(...lines.map((line) => line.length), 48);
@@ -67,7 +69,9 @@ async function gracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
-  console.log(`\nReceived ${signal} signal. Shutting down server gracefully...`);
+  console.log(
+    `\nReceived ${signal} signal. Shutting down server gracefully...`,
+  );
 
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
@@ -103,12 +107,21 @@ process.on("uncaughtException", (error) => {
 
 const initializeAndStartServer = async () => {
   try {
+    console.log("Đang khởi tạo Earth Engine...");
+    await initializeEarthEngine();
+    const earthEngineInitialized = isInitialized();
+    console.log(`Earth Engine isInitialized: ${earthEngineInitialized}`);
+    console.log("✓ Earth Engine khởi tạo thành công");
+
     const dbStatus = await getDatabaseStartupStatus();
+    const earthEngineStatus = earthEngineInitialized
+      ? "Initialized"
+      : "Uninitialized";
 
     server = app.listen(PORT, HOST, () => {
-      printStartupBanner({ dbStatus });
+      printStartupBanner({ dbStatus, earthEngineStatus });
     });
-
+    initWebSocketServer(server, { path: "/ws" });
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
 
