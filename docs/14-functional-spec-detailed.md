@@ -24,7 +24,7 @@
 
 ### A1. Tạo tài khoản (US-010)
 - **Quyền:** `system_admin` (mọi vai trò); `so_nnmt` (chỉ tạo `so_nnmt`/`citizen` trong phạm vi sở).
-- **Endpoint:** `POST /users`
+- **Endpoint:** `POST /admin/users`
 - **Đầu vào:**
   | Field | Kiểu | Bắt buộc | Ràng buộc |
   |-------|------|:---:|-----------|
@@ -43,7 +43,7 @@
 
 ### A2. Danh sách user (US-012)
 - **Quyền:** `system_admin`, `so_nnmt`.
-- **Endpoint:** `GET /users?page=&limit=&role=&status=&q=`
+- **Endpoint:** `GET /admin/users?page=&limit=&role=&status=&q=`
 - **Đầu vào (query):** `role` (enum), `status` (`active|locked|deleted`), `q` (tìm theo email/tên, ≥2 ký tự).
 - **Quy tắc:** `so_nnmt` chỉ thấy user cùng địa bàn/sở; mặc định ẩn `deleted_at IS NOT NULL` trừ khi `status=deleted`.
 - **Đầu ra:** `OK_LIST` items + `metadata.pagination`.
@@ -51,23 +51,23 @@
 
 ### A3. Đổi vai trò (US-010)
 - **Quyền:** `system_admin`.
-- **Endpoint:** `PATCH /users/:id/role` — body `{ role_code }`.
+- **Endpoint:** `PATCH /admin/users/:id/role` — body `{ role_code }`.
 - **Quy tắc:** không cho tự hạ quyền admin cuối cùng (giữ ≥1 `system_admin` active); ghi audit log.
 - **Lỗi:** `409 LAST_ADMIN`; `404 USER_NOT_FOUND`.
 
 ### A4. Khóa/mở tài khoản (US-010)
 - **Quyền:** `system_admin`, `so_nnmt` (phạm vi).
-- **Endpoint:** `PATCH /users/:id/active` — body `{ is_active: boolean, reason? }`.
+- **Endpoint:** `PATCH /admin/users/:id/active` — body `{ is_active: boolean, reason? }`.
 - **Quy tắc:** khóa → revoke toàn bộ refresh token của user (đăng xuất mọi phiên). Không tự khóa chính mình.
 
 ### A5. Cấp lại mật khẩu (US-010)
 - **Quyền:** `system_admin`, `so_nnmt`.
-- **Endpoint:** `POST /users/:id/reset-password`.
+- **Endpoint:** `POST /admin/users/:id/reset-password`.
 - **Quy tắc:** sinh mật khẩu tạm + `must_change_password=true` + gửi email; revoke phiên cũ.
 
 ### A6. Xóa mềm user (US-010)
 - **Quyền:** `system_admin`, `so_nnmt`.
-- **Endpoint:** `DELETE /users/:id`.
+- **Endpoint:** `DELETE /admin/users/:id`.
 - **Quy tắc:** set `deleted_at=NOW()` (migration 010), KHÔNG xóa cứng; revoke token; giữ ràng buộc dữ liệu (phản ánh/tin do user tạo vẫn còn). Không xóa admin cuối.
 
 ### A7. Hồ sơ cá nhân (US-011)
@@ -208,8 +208,8 @@
 - **Endpoints:**
   - `GET /news/:id/comments` — public xem danh sách bình luận đã duyệt của tin `published`.
   - `POST /news/:id/comments` — `citizen` gửi body `{ content }` (1–1000 ký tự, sanitize) cho tin `published`.
-  - `PATCH /comments/:id/approve` — `system_admin`/`so_nnmt` duyệt hoặc từ chối bình luận.
-  - `DELETE /comments/:id` — `system_admin`/`so_nnmt` hoặc chính người tạo xóa bình luận.
+  - `PATCH /admin/comments/:id/approve` — `system_admin`/`so_nnmt` duyệt hoặc từ chối bình luận.
+  - `DELETE /admin/comments/:id` — `system_admin`/`so_nnmt` hoặc chính người tạo xóa bình luận.
 - **Quy tắc:** không cho comment/list public trên tin `draft`; `is_approved=false` mặc định → chờ duyệt (chống spam).
 
 ---
@@ -256,13 +256,13 @@
 
 ### I2. Xử lý phản ánh (US-081)
 - **Quyền:** `so_nnmt` (lĩnh vực rừng); `system_admin`.
-- **Endpoint:** `PATCH /feedback/:id/status` — body `{ to_status, note }`.
+- **Endpoint:** `PATCH /admin/feedback/:id/status` — body `{ to_status, note }`.
 - **Quy tắc:** chuyển trạng thái hợp lệ `new→in_progress→resolved` (không nhảy ngược trừ admin); ghi `field.feedback_status_log`; thông báo người gửi (push/email nếu có).
 - **Lỗi:** `409 INVALID_TRANSITION`.
 
 ### I3. Danh sách & bản đồ phản ánh (US-082)
 - **Quyền:** `ubnd_tinh` (toàn tỉnh, xem), `so_nnmt` (xử lý).
-- **Endpoints:** `GET /feedback?status=&category=&district=&page=`, `GET /feedback/map?bbox=` (GeoJSON).
+- **Endpoints:** `GET /admin/feedback?status=&category=&district=&page=`, `GET /admin/feedback/map?bbox=` (GeoJSON).
 - **Quy tắc:** lọc theo trạng thái/khu vực; phân trang.
 
 ### I4. Theo dõi phản ánh của tôi (US-083)

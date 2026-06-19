@@ -12,10 +12,13 @@ const {
     updateFeedbackStatusSchema,
 } = require('../validators/feedback.validator');
 
-const router = Router();
+const publicRouter = Router();
+const adminRouter = Router();
+
+// ─── Public/Citizen endpoints — mounted at /feedback ─────────────────────────
 
 // POST /feedback — user đăng nhập hoặc ẩn danh với x-anonymous-id.
-router.post(
+publicRouter.post(
     '/',
     optionalAuth,
     uploadMedia.array('media', Number(process.env.FEEDBACK_MAX_MEDIA_FILES || 10)),
@@ -25,15 +28,25 @@ router.post(
 );
 
 // GET /feedback/mine — lấy phản ánh của JWT user hoặc anonymous id.
-router.get(
+publicRouter.get(
     '/mine',
     optionalAuth,
     validate(listFeedbackSchema, 'query'),
     asyncHandler(feedbackController.listMine)
 );
 
-// GET /feedback/map — GeoJSON cho dashboard/bản đồ phản ánh.
-router.get(
+// GET /feedback/:id — owner xem chi tiết phản ánh của mình.
+publicRouter.get(
+    '/:id',
+    optionalAuth,
+    validate(feedbackIdParamsSchema, 'params'),
+    asyncHandler(feedbackController.getFeedbackById)
+);
+
+// ─── Admin endpoints — mounted at /admin/feedback ────────────────────────────
+
+// GET /admin/feedback/map — GeoJSON cho dashboard/bản đồ phản ánh.
+adminRouter.get(
     '/map',
     verifyToken,
     enforcePasswordChange,
@@ -42,8 +55,8 @@ router.get(
     asyncHandler(feedbackController.getMap)
 );
 
-// GET /feedback — danh sách quản trị.
-router.get(
+// GET /admin/feedback — danh sách quản trị.
+adminRouter.get(
     '/',
     verifyToken,
     enforcePasswordChange,
@@ -52,16 +65,18 @@ router.get(
     asyncHandler(feedbackController.listFeedback)
 );
 
-// GET /feedback/:id — staff xem mọi phản ánh, owner xem phản ánh của mình.
-router.get(
+// GET /admin/feedback/:id — staff xem chi tiết phản ánh kèm statusLogs.
+adminRouter.get(
     '/:id',
-    optionalAuth,
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('feedback', 'read'),
     validate(feedbackIdParamsSchema, 'params'),
     asyncHandler(feedbackController.getFeedbackById)
 );
 
-// PATCH /feedback/:id/status — cán bộ xử lý trạng thái.
-router.patch(
+// PATCH /admin/feedback/:id/status — cán bộ xử lý trạng thái.
+adminRouter.patch(
     '/:id/status',
     verifyToken,
     enforcePasswordChange,
@@ -71,4 +86,7 @@ router.patch(
     asyncHandler(feedbackController.updateStatus)
 );
 
-module.exports = router;
+module.exports = {
+    publicRouter,
+    adminRouter,
+};

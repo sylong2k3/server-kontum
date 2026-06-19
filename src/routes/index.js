@@ -10,13 +10,14 @@ const feedbackRoutes = require('./feedback.routes');
 const router = Router();
 
 router.use('/auth', authRoutes);
-router.use('/users', userRoutes);
+router.use('/admin/users', userRoutes.adminRouter);
 router.use('/notifications', notificationRoutes);
 router.use('/news', newsRoutes.publicRouter);
 router.use('/admin/news', newsRoutes.adminRouter);
 router.use('/documents', documentRoutes.publicRouter);
 router.use('/admin/documents', documentRoutes.adminRouter);
-router.use('/comments', commentRoutes);
-router.use('/feedback', feedbackRoutes);
+router.use('/feedback', feedbackRoutes.publicRouter);
+router.use('/admin/feedback', feedbackRoutes.adminRouter);
+router.use('/admin/comments', commentRoutes.adminRouter);
 
 module.exports = router;

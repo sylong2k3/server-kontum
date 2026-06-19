@@ -12,13 +12,13 @@ const {
     userIdParamsSchema,
 } = require('../validators/user.validator');
 
-const router = Router();
+const adminRouter = Router();
 
-// ─── Admin endpoints — phải đặt TRƯỚC /:id để tránh conflict ─────────────────
+// ─── Admin endpoints — mounted at /admin/users ───────────────────────────────
 
-// GET /users/admin — danh sách users
-router.get(
-    '/admin',
+// GET /admin/users — danh sách users
+adminRouter.get(
+    '/',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'read'),
@@ -26,9 +26,9 @@ router.get(
     asyncHandler(userController.listUsers)
 );
 
-// POST /users/admin — tạo user mới
-router.post(
-    '/admin',
+// POST /admin/users — tạo user mới
+adminRouter.post(
+    '/',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'create'),
@@ -36,9 +36,9 @@ router.post(
     asyncHandler(userController.createUser)
 );
 
-// GET /users/admin/:id — chi tiết user
-router.get(
-    '/admin/:id',
+// GET /admin/users/:id — chi tiết user
+adminRouter.get(
+    '/:id',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'read'),
@@ -46,9 +46,9 @@ router.get(
     asyncHandler(userController.getUserById)
 );
 
-// PATCH /users/admin/:id/role — đổi role
-router.patch(
-    '/admin/:id/role',
+// PATCH /admin/users/:id/role — đổi role
+adminRouter.patch(
+    '/:id/role',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'change_role'),
@@ -57,9 +57,9 @@ router.patch(
     asyncHandler(userController.changeUserRole)
 );
 
-// PATCH /users/admin/:id/active — khóa/mở khóa user
-router.patch(
-    '/admin/:id/active',
+// PATCH /admin/users/:id/active — khóa/mở khóa user
+adminRouter.patch(
+    '/:id/active',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'change_status'),
@@ -68,9 +68,9 @@ router.patch(
     asyncHandler(userController.setUserActive)
 );
 
-// POST /users/admin/:id/reset-password — reset mật khẩu
-router.post(
-    '/admin/:id/reset-password',
+// POST /admin/users/:id/reset-password — reset mật khẩu
+adminRouter.post(
+    '/:id/reset-password',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'reset_password'),
@@ -79,9 +79,9 @@ router.post(
     asyncHandler(userController.resetUserPassword)
 );
 
-// DELETE /users/admin/:id — xoá user
-router.delete(
-    '/admin/:id',
+// DELETE /admin/users/:id — xoá user
+adminRouter.delete(
+    '/:id',
     verifyToken,
     enforcePasswordChange,
     requirePermission('users', 'delete'),
@@ -89,4 +89,6 @@ router.delete(
     asyncHandler(userController.deleteUser)
 );
 
-module.exports = router;
+module.exports = {
+    adminRouter,
+};

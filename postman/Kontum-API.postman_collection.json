@@ -849,13 +849,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users/admin?page=1&limit=20&lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users?page=1&limit=20&lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
-                "admin"
+                "admin",
+                "users"
               ],
               "query": [
                 {
@@ -900,13 +900,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/admin?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
-                "admin"
+                "admin",
+                "users"
               ],
               "query": [
                 {
@@ -927,13 +927,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users/admin/{{userId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users/{{userId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
                 "admin",
+                "users",
                 "{{userId}}"
               ],
               "query": [
@@ -956,13 +956,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/admin/{{userId}}/role?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/role?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
                 "admin",
+                "users",
                 "{{userId}}",
                 "role"
               ],
@@ -990,13 +990,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/admin/{{userId}}/active?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/active?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
                 "admin",
+                "users",
                 "{{userId}}",
                 "active"
               ],
@@ -1024,13 +1024,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/admin/{{userId}}/reset-password?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users/{{userId}}/reset-password?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
                 "admin",
+                "users",
                 "{{userId}}",
                 "reset-password"
               ],
@@ -1053,13 +1053,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/users/admin/{{userId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/users/{{userId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "users",
                 "admin",
+                "users",
                 "{{userId}}"
               ],
               "query": [
@@ -1518,11 +1518,12 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/comments/{{commentId}}/approve?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/comments/{{commentId}}/approve?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "admin",
                 "comments",
                 "{{commentId}}",
                 "approve"
@@ -1547,11 +1548,12 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/comments/{{commentId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/comments/{{commentId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "admin",
                 "comments",
                 "{{commentId}}"
               ],

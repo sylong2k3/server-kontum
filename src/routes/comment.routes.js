@@ -8,10 +8,10 @@ const {
     approveCommentSchema,
 } = require('../validators/comment.validator');
 
-const router = Router();
+const adminRouter = Router();
 
-// PATCH /comments/:id/approve — duyệt hoặc từ chối bình luận (chỉ dành cho admin/so_nnmt)
-router.patch(
+// PATCH /admin/comments/:id/approve — duyệt hoặc từ chối bình luận (chỉ dành cho admin/so_nnmt)
+adminRouter.patch(
     '/:id/approve',
     verifyToken,
     enforcePasswordChange,
@@ -21,8 +21,8 @@ router.patch(
     asyncHandler(commentController.approveComment)
 );
 
-// DELETE /comments/:id — xóa bình luận (admin/so_nnmt hoặc chính người tạo bình luận)
-router.delete(
+// DELETE /admin/comments/:id — xóa bình luận (admin/so_nnmt hoặc chính người tạo bình luận)
+adminRouter.delete(
     '/:id',
     verifyToken,
     enforcePasswordChange,
@@ -30,4 +30,6 @@ router.delete(
     asyncHandler(commentController.deleteComment)
 );
 
-module.exports = router;
+module.exports = {
+    adminRouter,
+};

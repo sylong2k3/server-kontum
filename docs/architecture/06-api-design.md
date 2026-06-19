@@ -190,14 +190,14 @@
 | GET | `/news` | public | Danh sách/tìm kiếm tin (đã published) |
 | GET | `/news/:slug` | public | Chi tiết tin theo slug (lang từ query/headers) |
 | GET | `/admin/news/:id` | admin, so_nnmt | Chi tiết tin kèm đầy đủ bản dịch |
-| POST | `/news` | admin, so_nnmt | Tạo tin mới (gồm metadata + bản dịch đầu tiên) |
+| POST | `/admin/news` | admin, so_nnmt | Tạo tin mới (gồm metadata + bản dịch đầu tiên) |
 | PATCH | `/admin/news/:id` | admin, so_nnmt | Cập nhật metadata chung (status, cover) |
 | PUT | `/admin/news/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
-| DELETE | `/news/:id` | admin, so_nnmt | Xóa tin (soft delete) |
+| DELETE | `/admin/news/:id` | admin, so_nnmt | Xóa tin (soft delete) |
 | GET | `/news/:id/comments` | public | Danh sách bình luận đã duyệt của tin đã published |
 | POST | `/news/:id/comments` | citizen | Bình luận trên tin đã published (chờ duyệt) |
-| PATCH | `/comments/:id/approve` | admin, so_nnmt | Duyệt hoặc từ chối bình luận |
-| DELETE | `/comments/:id` | admin, so_nnmt, owner | Xóa bình luận |
+| PATCH | `/admin/comments/:id/approve` | admin, so_nnmt | Duyệt hoặc từ chối bình luận |
+| DELETE | `/admin/comments/:id` | admin, so_nnmt, owner | Xóa bình luận |
 
 ### Documents
 
@@ -206,10 +206,10 @@
 | GET | `/documents` | public* | Danh sách tài liệu (doc_type, public only) |
 | GET | `/documents/:id` | public* | Chi tiết tài liệu (lang từ query/headers) |
 | GET | `/admin/documents/:id` | admin, so_nnmt | Chi tiết tài liệu kèm đầy đủ bản dịch |
-| POST | `/documents` | admin, so_nnmt | Upload tài liệu mới (metadata + bản dịch đầu tiên + file) |
+| POST | `/admin/documents` | admin, so_nnmt | Upload tài liệu mới (metadata + bản dịch đầu tiên + file) |
 | PATCH | `/admin/documents/:id` | admin, so_nnmt | Cập nhật metadata chung (docType, isPublic) |
 | PUT | `/admin/documents/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
-| DELETE | `/documents/:id` | admin, so_nnmt | Xóa tài liệu (soft delete) |
+| DELETE | `/admin/documents/:id` | admin, so_nnmt | Xóa tài liệu (soft delete) |
 
 \* tài liệu `is_public=false` yêu cầu auth + RBAC.
 
@@ -225,10 +225,11 @@ Phản ánh hỗ trợ 2 kiểu danh tính:
 |--------|----------|-----------------|-------|
 | POST | `/feedback` | optional auth hoặc `x-anonymous-id` | Gửi phản ánh multipart, field media là `media` |
 | GET | `/feedback/mine` | optional auth hoặc `x-anonymous-id` | Danh sách phản ánh của chính user/anonymous id |
-| GET | `/feedback/map` | `feedback.map` | GeoJSON phản ánh cho dashboard/bản đồ |
-| GET | `/feedback` | `feedback.read` | Danh sách quản trị, lọc/trang |
-| GET | `/feedback/:id` | staff hoặc owner | Chi tiết phản ánh; staff có thêm `statusLogs` |
-| PATCH | `/feedback/:id/status` | `feedback.update_status` | Cập nhật trạng thái xử lý |
+| GET | `/feedback/:id` | owner | Chi tiết phản ánh của chính user/anonymous id |
+| GET | `/admin/feedback/map` | `feedback.map` | GeoJSON phản ánh cho dashboard/bản đồ |
+| GET | `/admin/feedback` | `feedback.read` | Danh sách quản trị, lọc/trang |
+| GET | `/admin/feedback/:id` | `feedback.read` | Staff xem chi tiết phản ánh, có thêm `statusLogs` |
+| PATCH | `/admin/feedback/:id/status` | `feedback.update_status` | Cập nhật trạng thái xử lý |
 
 ### POST `/feedback`
 
@@ -267,16 +268,16 @@ Response `201`:
 }
 ```
 
-### GET `/feedback/mine` và GET `/feedback`
+### GET `/feedback/mine` và GET `/admin/feedback`
 
 Query chung: `page`, `limit`, `status`, `category`, `priority`, `q`, `from`, `to`.
 
-### GET `/feedback/map`
+### GET `/admin/feedback/map`
 
 Query: `status`, `category`, `priority`, `bbox=minLng,minLat,maxLng,maxLat`.
 Trả về `FeatureCollection`, mỗi feature có geometry point và properties phản ánh.
 
-### PATCH `/feedback/:id/status`
+### PATCH `/admin/feedback/:id/status`
 
 Body:
 ```jsonc
