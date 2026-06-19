@@ -41,7 +41,7 @@ const createNewsSchema = Joi.object({
 });
 
 // ─── Update metadata chung ────────────────────────────────────────────────────
-// Dùng cho PATCH /news/admin/:id (không phải bản dịch)
+// Dùng cho PATCH /admin/news/:id (không phải bản dịch)
 
 const updateNewsMetaSchema = Joi.object({
     status: Joi.string().valid('draft', 'published').optional(),
@@ -51,7 +51,7 @@ const updateNewsMetaSchema = Joi.object({
 
 
 // ─── Update gộp metadata + translations ──────────────────────────────────────
-// Dùng cho PUT /news/admin/:id — admin sửa toàn bộ rồi bấm Lưu 1 lần.
+// Dùng cho PUT /admin/news/:id — admin sửa toàn bộ rồi bấm Lưu 1 lần.
 
 const translationBodySchema = Joi.object({
     title: Joi.string().trim().min(5).max(255).required(),

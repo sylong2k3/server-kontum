@@ -1571,13 +1571,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/news/admin/{{newsId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/news/{{newsId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "news",
                 "admin",
+                "news",
                 "{{newsId}}"
               ],
               "query": [
@@ -1595,11 +1595,12 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/news?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/news?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "admin",
                 "news"
               ],
               "query": [
@@ -1657,13 +1658,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/news/admin/{{newsId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/news/{{newsId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "news",
                 "admin",
+                "news",
                 "{{newsId}}"
               ],
               "query": [
@@ -1690,13 +1691,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/news/admin/{{newsId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/news/{{newsId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "news",
                 "admin",
+                "news",
                 "{{newsId}}"
               ],
               "query": [
@@ -1718,11 +1719,12 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/news/{{newsId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/news/{{newsId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "admin",
                 "news",
                 "{{newsId}}"
               ],
@@ -1809,13 +1811,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/documents/admin/{{documentId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/documents/{{documentId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "documents",
                 "admin",
+                "documents",
                 "{{documentId}}"
               ],
               "query": [
@@ -1833,11 +1835,12 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/documents?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/documents?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "admin",
                 "documents"
               ],
               "query": [
@@ -1895,13 +1898,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/documents/admin/{{documentId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/documents/{{documentId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "documents",
                 "admin",
+                "documents",
                 "{{documentId}}"
               ],
               "query": [
@@ -1928,13 +1931,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/documents/admin/{{documentId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/documents/{{documentId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "documents",
                 "admin",
+                "documents",
                 "{{documentId}}"
               ],
               "query": [
@@ -1956,11 +1959,12 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/documents/{{documentId}}?lang={{lang}}",
+              "raw": "{{baseUrl}}/admin/documents/{{documentId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "admin",
                 "documents",
                 "{{documentId}}"
               ],

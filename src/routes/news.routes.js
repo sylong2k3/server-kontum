@@ -18,14 +18,15 @@ const {
     listCommentsQuerySchema,
 } = require('../validators/comment.validator');
 
-const router = Router();
+const publicRouter = Router();
+const adminRouter = Router();
 
-// ─── Public endpoints ─────────────────────────────────────────────────────────
+// ─── Public endpoints: /api/v1/news ───────────────────────────────────────────
 
-router.get('/', optionalAuth, validate(listNewsSchema, 'query'), asyncHandler(newsController.listNews));
+publicRouter.get('/', optionalAuth, validate(listNewsSchema, 'query'), asyncHandler(newsController.listNews));
 
 // GET /news/:id/comments — public list comments (only approved comments unless admin)
-router.get(
+publicRouter.get(
     '/:id/comments',
     optionalAuth,
     validate(newsIdParamsSchema, 'params'),
@@ -33,46 +34,8 @@ router.get(
     asyncHandler(commentController.listComments)
 );
 
-// ─── Admin endpoints — phải đặt TRƯỚC /:slug để tránh conflict ───────────────
-
-// GET /news/admin/:id — admin detail với đầy đủ translations
-router.get(
-    '/admin/:id',
-    verifyToken,
-    enforcePasswordChange,
-    requirePermission('news', 'read'),
-    validate(newsIdParamsSchema, 'params'),
-    asyncHandler(newsController.getAdminNewsById)
-);
-
-// PATCH /news/admin/:id — update metadata chung (status, cover)
-router.patch(
-    '/admin/:id',
-    verifyToken,
-    enforcePasswordChange,
-    requirePermission('news', 'update'),
-    validate(newsIdParamsSchema, 'params'),
-    uploadImage.single('cover'),
-    handleUploadError,
-    validate(updateNewsMetaSchema),
-    asyncHandler(newsController.updateNewsMeta)
-);
-
-// PUT /news/admin/:id — update gộp metadata + tất cả translations (1 request)
-router.put(
-    '/admin/:id',
-    verifyToken,
-    enforcePasswordChange,
-    requirePermission('news', 'update'),
-    validate(newsIdParamsSchema, 'params'),
-    uploadImage.single('cover'),
-    handleUploadError,
-    validate(updateNewsFullSchema),
-    asyncHandler(newsController.updateNewsFull)
-);
-
 // POST /news/:id/comments — tạo bình luận mới (chỉ citizen đã đăng nhập)
-router.post(
+publicRouter.post(
     '/:id/comments',
     verifyToken,
     enforcePasswordChange,
@@ -82,8 +45,23 @@ router.post(
     asyncHandler(commentController.createComment)
 );
 
-// POST /news — tạo tin mới (metadata + bản dịch đầu tiên)
-router.post(
+// GET /news/:slug — public detail
+publicRouter.get('/:slug', optionalAuth, validate(newsSlugParamsSchema, 'params'), asyncHandler(newsController.getNewsBySlug));
+
+// ─── Admin endpoints: /api/v1/admin/news ──────────────────────────────────────
+
+// GET /admin/news/:id — admin detail với đầy đủ translations
+adminRouter.get(
+    '/:id',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('news', 'read'),
+    validate(newsIdParamsSchema, 'params'),
+    asyncHandler(newsController.getAdminNewsById)
+);
+
+// POST /admin/news — tạo tin mới (metadata + bản dịch đầu tiên)
+adminRouter.post(
     '/',
     verifyToken,
     enforcePasswordChange,
@@ -94,8 +72,34 @@ router.post(
     asyncHandler(newsController.createNews)
 );
 
-// DELETE /news/:id
-router.delete(
+// PATCH /admin/news/:id — update metadata chung (status, cover)
+adminRouter.patch(
+    '/:id',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('news', 'update'),
+    validate(newsIdParamsSchema, 'params'),
+    uploadImage.single('cover'),
+    handleUploadError,
+    validate(updateNewsMetaSchema),
+    asyncHandler(newsController.updateNewsMeta)
+);
+
+// PUT /admin/news/:id — update gộp metadata + tất cả translations (1 request)
+adminRouter.put(
+    '/:id',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('news', 'update'),
+    validate(newsIdParamsSchema, 'params'),
+    uploadImage.single('cover'),
+    handleUploadError,
+    validate(updateNewsFullSchema),
+    asyncHandler(newsController.updateNewsFull)
+);
+
+// DELETE /admin/news/:id
+adminRouter.delete(
     '/:id',
     verifyToken,
     enforcePasswordChange,
@@ -104,7 +108,7 @@ router.delete(
     asyncHandler(newsController.deleteNews)
 );
 
-// GET /news/:slug — public detail (phải sau tất cả /admin/* để không conflict)
-router.get('/:slug', optionalAuth, validate(newsSlugParamsSchema, 'params'), asyncHandler(newsController.getNewsBySlug));
-
-module.exports = router;
+module.exports = {
+    publicRouter,
+    adminRouter,
+};

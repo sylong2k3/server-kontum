@@ -12,8 +12,10 @@ const router = Router();
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/notifications', notificationRoutes);
-router.use('/news', newsRoutes);
-router.use('/documents', documentRoutes);
+router.use('/news', newsRoutes.publicRouter);
+router.use('/admin/news', newsRoutes.adminRouter);
+router.use('/documents', documentRoutes.publicRouter);
+router.use('/admin/documents', documentRoutes.adminRouter);
 router.use('/comments', commentRoutes);
 router.use('/feedback', feedbackRoutes);
 

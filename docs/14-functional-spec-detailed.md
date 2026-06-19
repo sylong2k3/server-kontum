@@ -183,9 +183,9 @@
 - **Quyền:** `system_admin`, `so_nnmt` (đăng chuyên ngành).
 - **Endpoints:**
   - `POST /news`: Tạo tin mới (metadata + bản dịch đầu tiên, upload cover).
-  - `GET /news/admin/:id`: Chi tiết tin phía admin (kèm đầy đủ bản dịch).
-  - `PATCH /news/admin/:id`: Cập nhật metadata chung (status, cover).
-  - `PUT /news/admin/:id`: Cập nhật gộp metadata + tất cả bản dịch.
+  - `GET /admin/news/:id`: Chi tiết tin phía admin (kèm đầy đủ bản dịch).
+  - `PATCH /admin/news/:id`: Cập nhật metadata chung (status, cover).
+  - `PUT /admin/news/:id`: Cập nhật gộp metadata + tất cả bản dịch.
   - `DELETE /news/:id`: Xóa tin (soft delete).
   - `GET /news`: Lấy danh sách tin public (chỉ lấy published).
   - `GET /news/:slug`: Lấy chi tiết tin public theo slug.
@@ -219,9 +219,9 @@
 - **Quyền:** `system_admin`, `so_nnmt` (upload); public xem `is_public`.
 - **Endpoints:**
   - `POST /documents`: Upload tài liệu mới (metadata + bản dịch đầu tiên + file).
-  - `GET /documents/admin/:id`: Chi tiết tài liệu phía admin (kèm đầy đủ bản dịch).
-  - `PATCH /documents/admin/:id`: Cập nhật metadata chung (docType, isPublic).
-  - `PUT /documents/admin/:id`: Cập nhật gộp metadata + tất cả bản dịch.
+  - `GET /admin/documents/:id`: Chi tiết tài liệu phía admin (kèm đầy đủ bản dịch).
+  - `PATCH /admin/documents/:id`: Cập nhật metadata chung (docType, isPublic).
+  - `PUT /admin/documents/:id`: Cập nhật gộp metadata + tất cả bản dịch.
   - `DELETE /documents/:id`: Xóa tài liệu (soft delete).
   - `GET /documents`: Lấy danh sách tài liệu public (chỉ lấy public hoặc theo quyền).
   - `GET /documents/:id`: Lấy chi tiết tài liệu public theo ID.

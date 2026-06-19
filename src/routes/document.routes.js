@@ -12,17 +12,21 @@ const {
     updateDocumentFullSchema,
 } = require('../validators/document.validator');
 
-const router = Router();
+const publicRouter = Router();
+const adminRouter = Router();
 
-// ─── Public endpoints ─────────────────────────────────────────────────────────
+// ─── Public endpoints: /api/v1/documents ──────────────────────────────────────
 
-router.get('/', optionalAuth, validate(listDocumentsSchema, 'query'), asyncHandler(documentController.listDocuments));
+publicRouter.get('/', optionalAuth, validate(listDocumentsSchema, 'query'), asyncHandler(documentController.listDocuments));
 
-// ─── Admin endpoints — phải đặt TRƯỚC /:id để tránh conflict ─────────────────
+// GET /documents/:id — public detail
+publicRouter.get('/:id', optionalAuth, validate(documentIdParamsSchema, 'params'), asyncHandler(documentController.getDocumentById));
 
-// GET /documents/admin/:id — admin detail với đầy đủ translations
-router.get(
-    '/admin/:id',
+// ─── Admin endpoints: /api/v1/admin/documents ─────────────────────────────────
+
+// GET /admin/documents/:id — admin detail với đầy đủ translations
+adminRouter.get(
+    '/:id',
     verifyToken,
     enforcePasswordChange,
     requirePermission('documents', 'read'),
@@ -30,30 +34,8 @@ router.get(
     asyncHandler(documentController.getAdminDocumentById)
 );
 
-// PATCH /documents/admin/:id — update metadata chung (docType, isPublic)
-router.patch(
-    '/admin/:id',
-    verifyToken,
-    enforcePasswordChange,
-    requirePermission('documents', 'update'),
-    validate(documentIdParamsSchema, 'params'),
-    validate(updateDocumentMetaSchema),
-    asyncHandler(documentController.updateDocumentMeta)
-);
-
-// PUT /documents/admin/:id — update gộp metadata + translations
-router.put(
-    '/admin/:id',
-    verifyToken,
-    enforcePasswordChange,
-    requirePermission('documents', 'update'),
-    validate(documentIdParamsSchema, 'params'),
-    validate(updateDocumentFullSchema),
-    asyncHandler(documentController.updateDocumentFull)
-);
-
-// POST /documents — upload tài liệu mới (metadata + bản dịch đầu tiên)
-router.post(
+// POST /admin/documents — upload tài liệu mới (metadata + bản dịch đầu tiên)
+adminRouter.post(
     '/',
     verifyToken,
     enforcePasswordChange,
@@ -64,8 +46,30 @@ router.post(
     asyncHandler(documentController.createDocument)
 );
 
-// DELETE /documents/:id
-router.delete(
+// PATCH /admin/documents/:id — update metadata chung (docType, isPublic)
+adminRouter.patch(
+    '/:id',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('documents', 'update'),
+    validate(documentIdParamsSchema, 'params'),
+    validate(updateDocumentMetaSchema),
+    asyncHandler(documentController.updateDocumentMeta)
+);
+
+// PUT /admin/documents/:id — update gộp metadata + translations
+adminRouter.put(
+    '/:id',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('documents', 'update'),
+    validate(documentIdParamsSchema, 'params'),
+    validate(updateDocumentFullSchema),
+    asyncHandler(documentController.updateDocumentFull)
+);
+
+// DELETE /admin/documents/:id
+adminRouter.delete(
     '/:id',
     verifyToken,
     enforcePasswordChange,
@@ -74,7 +78,7 @@ router.delete(
     asyncHandler(documentController.deleteDocument)
 );
 
-// GET /documents/:id — public detail (phải sau /admin/*)
-router.get('/:id', optionalAuth, validate(documentIdParamsSchema, 'params'), asyncHandler(documentController.getDocumentById));
-
-module.exports = router;
+module.exports = {
+    publicRouter,
+    adminRouter,
+};

@@ -189,10 +189,10 @@
 |--------|----------|------|-------|
 | GET | `/news` | public | Danh sách/tìm kiếm tin (đã published) |
 | GET | `/news/:slug` | public | Chi tiết tin theo slug (lang từ query/headers) |
-| GET | `/news/admin/:id` | admin, so_nnmt | Chi tiết tin kèm đầy đủ bản dịch |
+| GET | `/admin/news/:id` | admin, so_nnmt | Chi tiết tin kèm đầy đủ bản dịch |
 | POST | `/news` | admin, so_nnmt | Tạo tin mới (gồm metadata + bản dịch đầu tiên) |
-| PATCH | `/news/admin/:id` | admin, so_nnmt | Cập nhật metadata chung (status, cover) |
-| PUT | `/news/admin/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
+| PATCH | `/admin/news/:id` | admin, so_nnmt | Cập nhật metadata chung (status, cover) |
+| PUT | `/admin/news/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
 | DELETE | `/news/:id` | admin, so_nnmt | Xóa tin (soft delete) |
 | GET | `/news/:id/comments` | public | Danh sách bình luận đã duyệt của tin đã published |
 | POST | `/news/:id/comments` | citizen | Bình luận trên tin đã published (chờ duyệt) |
@@ -205,10 +205,10 @@
 |--------|----------|------|-------|
 | GET | `/documents` | public* | Danh sách tài liệu (doc_type, public only) |
 | GET | `/documents/:id` | public* | Chi tiết tài liệu (lang từ query/headers) |
-| GET | `/documents/admin/:id` | admin, so_nnmt | Chi tiết tài liệu kèm đầy đủ bản dịch |
+| GET | `/admin/documents/:id` | admin, so_nnmt | Chi tiết tài liệu kèm đầy đủ bản dịch |
 | POST | `/documents` | admin, so_nnmt | Upload tài liệu mới (metadata + bản dịch đầu tiên + file) |
-| PATCH | `/documents/admin/:id` | admin, so_nnmt | Cập nhật metadata chung (docType, isPublic) |
-| PUT | `/documents/admin/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
+| PATCH | `/admin/documents/:id` | admin, so_nnmt | Cập nhật metadata chung (docType, isPublic) |
+| PUT | `/admin/documents/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
 | DELETE | `/documents/:id` | admin, so_nnmt | Xóa tài liệu (soft delete) |
 
 \* tài liệu `is_public=false` yêu cầu auth + RBAC.
