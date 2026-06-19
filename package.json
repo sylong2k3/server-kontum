@@ -38,5 +38,12 @@
   },
   "engines": {
     "node": ">=14.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "bcrypt",
+      "protobufjs"
+    ]
   }
 }

@@ -14,3 +14,6 @@ firebase.json
 ACCOUNTS.md
 
 package-lock.json
+.pnpm-store
+.pnpm-lock.yaml
+pnpm-lock.yaml
