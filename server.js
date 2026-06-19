@@ -142,9 +142,34 @@ const initializeAndStartServer = async () => {
 
     return server;
   } catch (error) {
-    console.error("✗ Earth Engine initialization error:", error.message);
-    console.error("  Shutting down server...");
-    process.exit(1);
+    // Nếu chỉ là lỗi Earth Engine, tiếp tục khởi động server với trạng thái cảnh báo
+    console.warn(`⚠ Earth Engine initialization warning: ${error.message}`);
+    console.warn("  Server vẫn khởi động bình thường. GEE sẽ không hoạt động.");
+
+    const dbStatus = await getDatabaseStartupStatus();
+    const earthEngineStatus = "⚠ Unavailable";
+
+    server = app.listen(PORT, HOST, () => {
+      printStartupBanner({ dbStatus, earthEngineStatus });
+    });
+    initWebSocketServer(server, { path: WS_PATH });
+
+    if (IS_SINGLETON_WORKER) {
+      tokenCleanupJob.start();
+      notificationCleanupJob.start();
+    }
+
+    process.on("unhandledRejection", (error) => {
+      console.error("UNHANDLED PROMISE REJECTION! Shutting down server...");
+      console.error(error.name, error.message);
+      console.error(error.stack);
+      gracefulShutdown("unhandledRejection");
+    });
+
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+    return server;
   }
 };
 
