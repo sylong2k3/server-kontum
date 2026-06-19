@@ -42,7 +42,8 @@ const createDocumentSchema = Joi.object({
 const updateDocumentMetaSchema = Joi.object({
     docType: Joi.string().valid('bao_cao', 'van_ban', 'pdf_map').optional(),
     isPublic: Joi.boolean().optional(),
-}).min(1);
+    expectedUpdatedAt: Joi.date().iso().required(),
+}).min(2);
 
 // ─── Update gộp metadata + translations ──────────────────────────────────────
 // Dùng cho PUT /documents/admin/:id — admin sửa toàn bộ rồi bấm Lưu 1 lần.
@@ -55,6 +56,7 @@ const docTranslationBodySchema = Joi.object({
 const updateDocumentFullSchema = Joi.object({
     docType: Joi.string().valid('bao_cao', 'van_ban', 'pdf_map').optional(),
     isPublic: Joi.boolean().optional(),
+    expectedUpdatedAt: Joi.date().iso().required(),
     translations: Joi.object().pattern(
         Joi.string().valid('vi', 'en'),
         docTranslationBodySchema

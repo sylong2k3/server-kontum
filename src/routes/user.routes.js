@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const asyncHandler = require('../helpers/async-handler');
 const userController = require('../controllers/user.controller');
-const { verifyToken, requireRole, enforcePasswordChange } = require('../middlewares/auth.middleware');
+const { verifyToken, requirePermission, enforcePasswordChange } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
 const {
     createUserSchema,
@@ -21,7 +21,7 @@ router.get(
     '/admin',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt', 'ubnd_tinh'),
+    requirePermission('users', 'read'),
     validate(listUsersSchema, 'query'),
     asyncHandler(userController.listUsers)
 );
@@ -31,7 +31,7 @@ router.post(
     '/admin',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('users', 'create'),
     validate(createUserSchema),
     asyncHandler(userController.createUser)
 );
@@ -41,7 +41,7 @@ router.get(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt', 'ubnd_tinh'),
+    requirePermission('users', 'read'),
     validate(userIdParamsSchema, 'params'),
     asyncHandler(userController.getUserById)
 );
@@ -51,7 +51,7 @@ router.patch(
     '/admin/:id/role',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin'),
+    requirePermission('users', 'change_role'),
     validate(userIdParamsSchema, 'params'),
     validate(updateRoleSchema),
     asyncHandler(userController.changeUserRole)
@@ -62,7 +62,7 @@ router.patch(
     '/admin/:id/active',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('users', 'change_status'),
     validate(userIdParamsSchema, 'params'),
     validate(setActiveSchema),
     asyncHandler(userController.setUserActive)
@@ -73,7 +73,7 @@ router.post(
     '/admin/:id/reset-password',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('users', 'reset_password'),
     validate(userIdParamsSchema, 'params'),
     validate(resetPasswordAdminSchema),
     asyncHandler(userController.resetUserPassword)
@@ -84,7 +84,7 @@ router.delete(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('users', 'delete'),
     validate(userIdParamsSchema, 'params'),
     asyncHandler(userController.deleteUser)
 );

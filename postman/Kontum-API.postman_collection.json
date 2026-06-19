@@ -2,7 +2,7 @@
   "info": {
     "name": "API Quản lý GIS Kon Tum",
     "_postman_id": "b1f4e2a0-0000-4000-8000-kontumgisapi01",
-    "description": "Collection cho server-kontum: Auth, Users, Notifications, News, Documents.\n\nBiến dùng chung:\n- baseUrl: http://localhost:3005/api/v1\n- accessToken / refreshToken: tự lưu sau khi gọi Login hoặc Refresh.\n\nĐa số endpoint cần header Authorization: Bearer {{accessToken}} (đã cấu hình sẵn ở mức collection).",
+    "description": "Collection cho server-kontum: Auth, Users, Notifications, News, Documents.\n\nBiến dùng chung:\n- baseUrl: http://localhost:3005/api/v1\n- accessToken / refreshToken: tự lưu sau khi gọi Login hoặc Refresh.\n- expectedUpdatedAt: giá trị updatedAt lấy từ API detail trước khi gọi update News/Document để chống ghi đè đồng thời.\n\nĐa số endpoint cần header Authorization: Bearer {{accessToken}} (đã cấu hình sẵn ở mức collection).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -68,6 +68,11 @@
       "type": "string"
     },
     {
+      "key": "commentId",
+      "value": "1",
+      "type": "string"
+    },
+    {
       "key": "documentId",
       "value": "1",
       "type": "string"
@@ -75,6 +80,11 @@
     {
       "key": "cmsLang",
       "value": "vi",
+      "type": "string"
+    },
+    {
+      "key": "expectedUpdatedAt",
+      "value": "2026-06-19T10:00:00.000Z",
       "type": "string"
     }
   ],
@@ -1369,7 +1379,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/news?page=1&limit=20&lang={{cmsLang}}&sortBy=created_at&sortOrder=DESC",
+              "raw": "{{baseUrl}}/news?page=1&limit=20&lang={{cmsLang}}&sortBy=published_at&sortOrder=DESC",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1391,7 +1401,7 @@
                 },
                 {
                   "key": "sortBy",
-                  "value": "created_at"
+                  "value": "published_at"
                 },
                 {
                   "key": "sortOrder",
@@ -1425,6 +1435,134 @@
                 }
               ]
             }
+          }
+        },
+        {
+          "name": "[Public] Danh sách bình luận đã duyệt",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/news/{{newsId}}/comments?page=1&limit=20&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "{{newsId}}",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Public chỉ xem bình luận đã duyệt và chỉ trên tin đã published."
+          }
+        },
+        {
+          "name": "[Citizen] Tạo bình luận",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/news/{{newsId}}/comments?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "news",
+                "{{newsId}}",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Bình luận góp ý về tin tức môi trường.\"\n}"
+            },
+            "description": "Cần đăng nhập bằng tài khoản role citizen; chỉ cho phép bình luận trên tin đã published."
+          }
+        },
+        {
+          "name": "[Admin] Duyệt/Từ chối bình luận",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/comments/{{commentId}}/approve?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "comments",
+                "{{commentId}}",
+                "approve"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isApproved\": true\n}"
+            },
+            "description": "Chỉ system_admin/so_nnmt được duyệt hoặc từ chối bình luận."
+          }
+        },
+        {
+          "name": "[Admin/Owner] Xóa bình luận",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/comments/{{commentId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "comments",
+                "{{commentId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "system_admin/so_nnmt hoặc chính người tạo bình luận được xóa."
           }
         },
         {
@@ -1537,7 +1675,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"published\"\n}"
+              "raw": "{\n  \"status\": \"published\",\n  \"expectedUpdatedAt\": \"{{expectedUpdatedAt}}\"\n}"
             }
           }
         },
@@ -1570,7 +1708,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"published\",\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Tin môi trường Kon Tum cập nhật\",\n      \"summary\": \"Tóm tắt tin tức tiếng Việt\",\n      \"content\": \"<p>Nội dung tin tức tiếng Việt cập nhật</p>\"\n    },\n    \"en\": {\n      \"title\": \"Kon Tum Environmental News Updated\",\n      \"summary\": \"News summary in English\",\n      \"content\": \"<p>Full content in English updated</p>\"\n    }\n  }\n}"
+              "raw": "{\n  \"status\": \"published\",\n  \"expectedUpdatedAt\": \"{{expectedUpdatedAt}}\",\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Tin môi trường Kon Tum cập nhật\",\n      \"summary\": \"Tóm tắt tin tức tiếng Việt\",\n      \"content\": \"<p>Nội dung tin tức tiếng Việt cập nhật</p>\"\n    },\n    \"en\": {\n      \"title\": \"Kon Tum Environmental News Updated\",\n      \"summary\": \"News summary in English\",\n      \"content\": \"<p>Full content in English updated</p>\"\n    }\n  }\n}"
             }
           }
         },
@@ -1775,7 +1913,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"isPublic\": true\n}"
+              "raw": "{\n  \"isPublic\": true,\n  \"expectedUpdatedAt\": \"{{expectedUpdatedAt}}\"\n}"
             }
           }
         },
@@ -1808,7 +1946,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"docType\": \"bao_cao\",\n  \"isPublic\": true,\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Báo cáo môi trường tháng 6 cập nhật\",\n      \"description\": \"Báo cáo tổng hợp môi trường tiếng Việt cập nhật\"\n    },\n    \"en\": {\n      \"title\": \"Environmental Report June Updated\",\n      \"description\": \"Monthly environmental summary report updated\"\n    }\n  }\n}"
+              "raw": "{\n  \"docType\": \"bao_cao\",\n  \"isPublic\": true,\n  \"expectedUpdatedAt\": \"{{expectedUpdatedAt}}\",\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Báo cáo môi trường tháng 6 cập nhật\",\n      \"description\": \"Báo cáo tổng hợp môi trường tiếng Việt cập nhật\"\n    },\n    \"en\": {\n      \"title\": \"Environmental Report June Updated\",\n      \"description\": \"Monthly environmental summary report updated\"\n    }\n  }\n}"
             }
           }
         },

@@ -2,13 +2,6 @@ const { BaseError } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 const multer = require('multer');
 
-const PG_ERROR_MAP = {
-    '23505': { status: 409, error: 'UNIQUE_VIOLATION' },
-    '23503': { status: 400, error: 'FOREIGN_KEY_VIOLATION' },
-    '23502': { status: 400, error: 'NOT_NULL_VIOLATION' },
-    '22P02': { status: 400, error: 'INVALID_TEXT_REPRESENTATION' },
-};
-
 const notFoundHandler = (req, res, next) => {
     const error = new Error(`Route ${req.method} ${req.originalUrl} not found`);
     error.status = 404;
@@ -16,7 +9,7 @@ const notFoundHandler = (req, res, next) => {
 };
 
 const errorHandler = (err, req, res, next) => {
-    if (res.headersSent) return next(err);
+    if (res.headersSent) {return next(err);}
 
     if (err instanceof BaseError) {
         return res.status(err.status).json({

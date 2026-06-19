@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const asyncHandler = require('../helpers/async-handler');
 const documentController = require('../controllers/document.controller');
-const { verifyToken, requireRole, enforcePasswordChange, optionalAuth } = require('../middlewares/auth.middleware');
+const { verifyToken, requirePermission, enforcePasswordChange, optionalAuth } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
 const { uploadDocument, handleUploadError } = require('../middlewares/upload.middleware');
 const {
@@ -25,7 +25,7 @@ router.get(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('documents', 'read'),
     validate(documentIdParamsSchema, 'params'),
     asyncHandler(documentController.getAdminDocumentById)
 );
@@ -35,7 +35,7 @@ router.patch(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('documents', 'update'),
     validate(documentIdParamsSchema, 'params'),
     validate(updateDocumentMetaSchema),
     asyncHandler(documentController.updateDocumentMeta)
@@ -46,7 +46,7 @@ router.put(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('documents', 'update'),
     validate(documentIdParamsSchema, 'params'),
     validate(updateDocumentFullSchema),
     asyncHandler(documentController.updateDocumentFull)
@@ -57,7 +57,7 @@ router.post(
     '/',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('documents', 'create'),
     uploadDocument.single('file'),
     handleUploadError,
     validate(createDocumentSchema),
@@ -69,7 +69,7 @@ router.delete(
     '/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('documents', 'delete'),
     validate(documentIdParamsSchema, 'params'),
     asyncHandler(documentController.deleteDocument)
 );

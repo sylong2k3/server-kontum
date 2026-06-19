@@ -221,7 +221,7 @@ const updateProfile = async (userId, { fullName, phone, avatarUrl }) => {
     if (phone !== undefined)     { sets.push(`phone = $${idx++}`);      params.push(phone); }
     if (avatarUrl !== undefined) { sets.push(`avatar_url = $${idx++}`); params.push(avatarUrl); }
 
-    if (!sets.length) return findByIdSafe(userId);
+    if (!sets.length) {return findByIdSafe(userId);}
 
     params.push(userId);
     const { rows } = await db.query(

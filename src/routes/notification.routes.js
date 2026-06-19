@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const asyncHandler = require('../helpers/async-handler');
 const notificationController = require('../controllers/notification.controller');
-const { verifyToken, requireRole, enforcePasswordChange } = require('../middlewares/auth.middleware');
+const { verifyToken, requirePermission, enforcePasswordChange } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
 const {
     listNotificationsSchema,
@@ -30,7 +30,7 @@ router.delete('/devices', validate(unregisterDeviceSchema), asyncHandler(notific
 // ── Gửi thông báo thủ công (chỉ admin / cơ quan quản lý) ────────────────────
 router.post(
     '/send',
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('notifications', 'send'),
     validate(sendNotificationSchema),
     asyncHandler(notificationController.sendNotification)
 );

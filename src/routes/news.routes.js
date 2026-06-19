@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const asyncHandler = require('../helpers/async-handler');
 const newsController = require('../controllers/news.controller');
-const { verifyToken, requireRole, enforcePasswordChange, optionalAuth } = require('../middlewares/auth.middleware');
+const { verifyToken, requirePermission, enforcePasswordChange, optionalAuth } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
 const { uploadImage, handleUploadError } = require('../middlewares/upload.middleware');
 const {
@@ -12,12 +12,26 @@ const {
     updateNewsMetaSchema,
     updateNewsFullSchema,
 } = require('../validators/news.validator');
+const commentController = require('../controllers/comment.controller');
+const {
+    createCommentSchema,
+    listCommentsQuerySchema,
+} = require('../validators/comment.validator');
 
 const router = Router();
 
 // ─── Public endpoints ─────────────────────────────────────────────────────────
 
 router.get('/', optionalAuth, validate(listNewsSchema, 'query'), asyncHandler(newsController.listNews));
+
+// GET /news/:id/comments — public list comments (only approved comments unless admin)
+router.get(
+    '/:id/comments',
+    optionalAuth,
+    validate(newsIdParamsSchema, 'params'),
+    validate(listCommentsQuerySchema, 'query'),
+    asyncHandler(commentController.listComments)
+);
 
 // ─── Admin endpoints — phải đặt TRƯỚC /:slug để tránh conflict ───────────────
 
@@ -26,7 +40,7 @@ router.get(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('news', 'read'),
     validate(newsIdParamsSchema, 'params'),
     asyncHandler(newsController.getAdminNewsById)
 );
@@ -36,7 +50,7 @@ router.patch(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('news', 'update'),
     validate(newsIdParamsSchema, 'params'),
     uploadImage.single('cover'),
     handleUploadError,
@@ -49,7 +63,7 @@ router.put(
     '/admin/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('news', 'update'),
     validate(newsIdParamsSchema, 'params'),
     uploadImage.single('cover'),
     handleUploadError,
@@ -57,12 +71,23 @@ router.put(
     asyncHandler(newsController.updateNewsFull)
 );
 
+// POST /news/:id/comments — tạo bình luận mới (chỉ citizen đã đăng nhập)
+router.post(
+    '/:id/comments',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('comments', 'create'),
+    validate(newsIdParamsSchema, 'params'),
+    validate(createCommentSchema),
+    asyncHandler(commentController.createComment)
+);
+
 // POST /news — tạo tin mới (metadata + bản dịch đầu tiên)
 router.post(
     '/',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('news', 'create'),
     uploadImage.single('cover'),
     handleUploadError,
     validate(createNewsSchema),
@@ -74,7 +99,7 @@ router.delete(
     '/:id',
     verifyToken,
     enforcePasswordChange,
-    requireRole('system_admin', 'so_nnmt'),
+    requirePermission('news', 'delete'),
     validate(newsIdParamsSchema, 'params'),
     asyncHandler(newsController.deleteNews)
 );

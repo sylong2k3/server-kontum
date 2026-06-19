@@ -24,7 +24,8 @@
 ### Quy tắc
 - Auth: header `Authorization: Bearer <accessToken>`.
 - Locale: `locale.middleware` (query `?lang=vi|en` hoặc header) → thông điệp song ngữ.
-- Phân quyền: middleware `requireRole('system_admin', 'so_nnmt', ...)`.
+- Phân quyền: ưu tiên middleware `requirePermission(resource, action)` cho CRUD/capability checks; `requireRole(...)` chỉ dùng khi endpoint bắt buộc đúng vai trò cụ thể.
+  - Ví dụ: `requirePermission('news', 'create')`, `requirePermission('comments', 'approve')`, `requirePermission('users', 'change_role')`.
 - Validate: Joi qua `validate(schema)` / `validate(schema, 'query')`.
 - Phân trang: query `?page=&limit=` → `metadata.pagination`.
 - Rate-limit: áp `/api/`; endpoint nhạy cảm có limiter riêng.
@@ -192,8 +193,11 @@
 | POST | `/news` | admin, so_nnmt | Tạo tin mới (gồm metadata + bản dịch đầu tiên) |
 | PATCH | `/news/admin/:id` | admin, so_nnmt | Cập nhật metadata chung (status, cover) |
 | PUT | `/news/admin/:id` | admin, so_nnmt | Cập nhật gộp metadata + all translations |
-| DELETE | `/news/:id` | admin | Xóa tin (soft delete) |
-| POST | `/news/:id/comments` | citizen | Bình luận (chờ duyệt) |
+| DELETE | `/news/:id` | admin, so_nnmt | Xóa tin (soft delete) |
+| GET | `/news/:id/comments` | public | Danh sách bình luận đã duyệt của tin đã published |
+| POST | `/news/:id/comments` | citizen | Bình luận trên tin đã published (chờ duyệt) |
+| PATCH | `/comments/:id/approve` | admin, so_nnmt | Duyệt hoặc từ chối bình luận |
+| DELETE | `/comments/:id` | admin, so_nnmt, owner | Xóa bình luận |
 
 ### Documents
 
@@ -211,16 +215,78 @@
 
 ---
 
-## 10. Feedback — `/api/v1/feedback` *(EP-09)*
+## 10. Feedback — `/api/v1/feedback` *(EP-09, đã hiện thực)*
 
-| Method | Endpoint | Role | Mô tả |
-|--------|----------|------|-------|
-| POST | `/` | citizen (cả ẩn danh `x-anonymous-id`) | Gửi phản ánh + ảnh + GPS (multipart) |
-| GET | `/mine` | citizen | Phản ánh của tôi |
-| GET | `/` | ubnd, so_nnmt | Danh sách toàn tỉnh (lọc trạng thái/khu vực) |
-| GET | `/:id` | so_nnmt | Chi tiết |
-| PATCH | `/:id/status` | so_nnmt | Cập nhật trạng thái (new→in_progress→resolved) |
-| GET | `/map` | ubnd, so_nnmt | GeoJSON phản ánh cho bản đồ |
+Phản ánh hỗ trợ 2 kiểu danh tính:
+- User đăng nhập: gửi `Authorization: Bearer <accessToken>`.
+- Ẩn danh: gửi header `x-anonymous-id` ổn định từ thiết bị/app.
+
+| Method | Endpoint | Auth/Permission | Mô tả |
+|--------|----------|-----------------|-------|
+| POST | `/feedback` | optional auth hoặc `x-anonymous-id` | Gửi phản ánh multipart, field media là `media` |
+| GET | `/feedback/mine` | optional auth hoặc `x-anonymous-id` | Danh sách phản ánh của chính user/anonymous id |
+| GET | `/feedback/map` | `feedback.map` | GeoJSON phản ánh cho dashboard/bản đồ |
+| GET | `/feedback` | `feedback.read` | Danh sách quản trị, lọc/trang |
+| GET | `/feedback/:id` | staff hoặc owner | Chi tiết phản ánh; staff có thêm `statusLogs` |
+| PATCH | `/feedback/:id/status` | `feedback.update_status` | Cập nhật trạng thái xử lý |
+
+### POST `/feedback`
+
+Content-Type: `multipart/form-data`.
+
+| Field | Type | Required | Ghi chú |
+|-------|------|----------|---------|
+| `category` | enum | ✅ | `chay_rung`, `vi_pham`, `hien_trang` |
+| `title` | string | ✅ | 5–255 ký tự |
+| `description` | string | — | tối đa 2000 ký tự |
+| `priority` | enum | — | `low`, `normal`, `high`, `urgent`; mặc định `normal` |
+| `lng` | number | ✅ | 106–109 |
+| `lat` | number | ✅ | 13–16.5 |
+| `clientUuid` | string | — | chống gửi trùng từ mobile/offline |
+| `media` | file[] | — | ảnh/video qua middleware upload media |
+
+Response `201`:
+```jsonc
+{
+  "message": "Gửi phản ánh thành công",
+  "status": 201,
+  "data": {
+    "feedback": {
+      "id": 1,
+      "category": "chay_rung",
+      "title": "Có khói tại khu vực rừng",
+      "status": "new",
+      "priority": "high",
+      "mediaUrls": ["uploads/images/abc.jpg"],
+      "lng": 107.92,
+      "lat": 14.35,
+      "createdAt": "2026-06-19T10:00:00.000Z"
+    },
+    "duplicated": false
+  }
+}
+```
+
+### GET `/feedback/mine` và GET `/feedback`
+
+Query chung: `page`, `limit`, `status`, `category`, `priority`, `q`, `from`, `to`.
+
+### GET `/feedback/map`
+
+Query: `status`, `category`, `priority`, `bbox=minLng,minLat,maxLng,maxLat`.
+Trả về `FeatureCollection`, mỗi feature có geometry point và properties phản ánh.
+
+### PATCH `/feedback/:id/status`
+
+Body:
+```jsonc
+{
+  "toStatus": "in_progress",
+  "note": "Đã chuyển cán bộ kiểm tra"
+}
+```
+
+Luồng mặc định: `new -> in_progress|rejected`, `in_progress -> resolved|rejected`; `system_admin` có thể override.
 
 ---
 

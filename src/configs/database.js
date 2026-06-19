@@ -48,7 +48,7 @@ const POOL_MONITOR_INTERVAL_MS = parseInt(process.env.DB_POOL_MONITOR_MS, 10) ||
 let poolMonitorId = null;
 
 const startPoolMonitor = () => {
-    if (poolMonitorId) return;
+    if (poolMonitorId) {return;}
 
     poolMonitorId = setInterval(() => {
         const { totalCount, idleCount, waitingCount } = pool;

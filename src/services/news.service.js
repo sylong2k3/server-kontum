@@ -1,7 +1,8 @@
 const newsRepository = require('../repositories/news.repository');
-const { Api404Error, Api403Error } = require('../core/error.response');
+const db = require('../configs/database');
+const { Api404Error, Api403Error, Api409Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
-const { slugify, stripTags, sanitizeHtml, normalizeLang, fallbackLang } = require('../utils/cms.util');
+const { slugify, stripTags, sanitizeHtml, normalizeLang } = require('../utils/cms.util');
 
 const CMS_ROLES = ['system_admin', 'so_nnmt'];
 const INTERNAL_ROLES = ['system_admin', 'so_nnmt', 'ubnd_tinh'];
@@ -79,21 +80,21 @@ const getNewsBySlug = async (actor, slug, context = {}) => {
         lang,
         publicOnly: !canViewInternal(actor),
     });
-    if (!news) throw new Api404Error(t('news_not_found', context.lang));
+    if (!news) {throw new Api404Error(t('news_not_found', context.lang));}
     return toPublicDetail(news);
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
 const getAdminNewsById = async (actor, id, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang));}
     const news = await newsRepository.findAdminById(id);
-    if (!news) throw new Api404Error(t('news_not_found', context.lang));
+    if (!news) {throw new Api404Error(t('news_not_found', context.lang));}
     return toAdminDetail(news);
 };
 
 const createNews = async (actor, payload, file, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
 
     const lang = normalizeLang(payload.lang);
     const status = payload.status || 'draft';
@@ -134,10 +135,10 @@ const createNews = async (actor, payload, file, context = {}) => {
 };
 
 const updateNewsMeta = async (actor, id, payload, file, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
 
     const existing = await newsRepository.findById(id);
-    if (!existing) throw new Api404Error(t('news_not_found', context.lang));
+    if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
 
     const updatePayload = {};
     if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
@@ -152,17 +153,19 @@ const updateNewsMeta = async (actor, id, payload, file, context = {}) => {
         updatePayload.coverUrl = payload.coverUrl;
     }
 
+    updatePayload.expectedUpdatedAt = payload.expectedUpdatedAt;
+
     const updated = await newsRepository.updateMeta(id, updatePayload);
-    if (!updated) throw new Api404Error(t('news_not_found', context.lang));
+    if (!updated) {throw new Api409Error('Bản tin đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');}
 
     return { message: t('news_updated_success', context.lang), news: { id: updated.id, status: updated.status, coverUrl: updated.cover_url } };
 };
 
 const upsertNewsTranslation = async (actor, id, lang, payload, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
 
     const existing = await newsRepository.findById(id);
-    if (!existing) throw new Api404Error(t('news_not_found', context.lang));
+    if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
 
     const resolvedLang = normalizeLang(lang);
     const title = stripTags(payload.title);
@@ -190,52 +193,65 @@ const upsertNewsTranslation = async (actor, id, lang, payload, context = {}) => 
 };
 
 const deleteNews = async (actor, id, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
     const deleted = await newsRepository.softDelete(id);
-    if (!deleted) throw new Api404Error(t('news_not_found', context.lang));
+    if (!deleted) {throw new Api404Error(t('news_not_found', context.lang));}
     return { message: t('news_deleted_success', context.lang) };
 };
 const updateNewsFull = async (actor, id, payload, file, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
 
     const existing = await newsRepository.findById(id);
-    if (!existing) throw new Api404Error(t('news_not_found', context.lang));
+    if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
 
-    // 1. Update metadata nếu có thay đổi
-    const metaPayload = {};
-    if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
-        metaPayload.status = payload.status;
-        if (payload.status === 'published' && existing.status !== 'published' && !existing.published_at) {
-            metaPayload.publishedAt = new Date();
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+
+        // 1. Update metadata nếu có thay đổi, đồng thời check optimistic lock.
+        const metaPayload = { expectedUpdatedAt: payload.expectedUpdatedAt };
+        if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
+            metaPayload.status = payload.status;
+            if (payload.status === 'published' && existing.status !== 'published' && !existing.published_at) {
+                metaPayload.publishedAt = new Date();
+            }
         }
-    }
-    if (file) {
-        metaPayload.coverUrl = `${file._relativeDir}/${file.filename}`;
-    } else if (Object.prototype.hasOwnProperty.call(payload, 'coverUrl')) {
-        metaPayload.coverUrl = payload.coverUrl;
-    }
+        if (file) {
+            metaPayload.coverUrl = `${file._relativeDir}/${file.filename}`;
+        } else if (Object.prototype.hasOwnProperty.call(payload, 'coverUrl')) {
+            metaPayload.coverUrl = payload.coverUrl;
+        }
 
-    if (Object.keys(metaPayload).length > 0) {
-        await newsRepository.updateMeta(id, metaPayload);
-    }
+        const metaUpdated = await newsRepository.updateMeta(id, metaPayload, { client });
+        if (!metaUpdated) {
+            throw new Api409Error('Bản tin đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');
+        }
 
-    // 2. Upsert từng bản dịch
-    const translationResults = {};
-    for (const [lang, body] of Object.entries(payload.translations || {})) {
-        const resolvedLang = normalizeLang(lang);
-        const title = stripTags(body.title);
-        const summary = body.summary ? stripTags(body.summary) : null;
-        const content = sanitizeHtml(body.content);
-        const slug = await buildUniqueSlug(title, resolvedLang, id);
+        // 2. Upsert từng bản dịch trong cùng transaction.
+        const translationResults = {};
+        for (const [lang, body] of Object.entries(payload.translations || {})) {
+            const resolvedLang = normalizeLang(lang);
+            const title = stripTags(body.title);
+            const summary = body.summary ? stripTags(body.summary) : null;
+            const content = sanitizeHtml(body.content);
+            const slug = await buildUniqueSlug(title, resolvedLang, id);
 
-        const translation = await newsRepository.upsertTranslation(id, resolvedLang, {
-            title, slug, summary, content,
-        });
-        translationResults[resolvedLang] = {
-            title: translation.title,
-            slug: translation.slug,
-            summary: translation.summary,
-        };
+            const translation = await newsRepository.upsertTranslation(id, resolvedLang, {
+                title, slug, summary, content,
+            }, { client });
+            translationResults[resolvedLang] = {
+                title: translation.title,
+                slug: translation.slug,
+                summary: translation.summary,
+            };
+        }
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
     }
 
     // 3. Trả về admin detail đầy đủ

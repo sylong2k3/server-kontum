@@ -1,14 +1,7 @@
 const notificationService = require('../services/notification.service');
 const { OK, CREATED, OK_LIST } = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
-
-const buildActor = (req) => ({
-    id: req.user.id,
-    role: req.user.role,
-    lang: req.lang,
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-});
+const { buildActor } = require('../utils/actor.util');
 
 const listNotifications = async (req, res) => {
     const { page, limit, onlyUnread, isRead, channel, type, audience, sortBy, sortOrder } = req.query;

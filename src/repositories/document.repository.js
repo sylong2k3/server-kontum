@@ -111,7 +111,7 @@ const findById = async (id, { lang = 'vi', publicOnly = true } = {}) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
     const params = [id];
     const conditions = ['d.id = $1', 'd.deleted_at IS NULL'];
-    if (publicOnly) conditions.push('d.is_public = true');
+    if (publicOnly) {conditions.push('d.is_public = true');}
 
     const result = await db.query(
         `SELECT
@@ -142,7 +142,7 @@ const findAdminById = async (id) => {
          WHERE d.id = $1 AND d.deleted_at IS NULL`,
         [id]
     );
-    if (!docResult.rows[0]) return null;
+    if (!docResult.rows[0]) {return null;}
 
     const doc = docResult.rows[0];
 
@@ -200,7 +200,8 @@ const createTranslation = async ({ documentId, lang, title, description }) => {
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 
-const updateMeta = async (id, payload) => {
+const updateMeta = async (id, payload, options = {}) => {
+    const queryExecutor = options.client || db;
     const fields = [];
     const params = [];
     const map = {
@@ -215,24 +216,35 @@ const updateMeta = async (id, payload) => {
         }
     });
 
-    if (fields.length === 0) return findRaw(id);
+    if (fields.length === 0 && !payload.expectedUpdatedAt) {return findRaw(id);}
 
+    fields.push('updated_at = NOW()');
     params.push(id);
-    const result = await db.query(
+    const idParamIndex = params.length;
+
+    let versionCondition = '';
+    if (payload.expectedUpdatedAt) {
+        params.push(payload.expectedUpdatedAt);
+        versionCondition = ` AND updated_at = $${params.length}::timestamptz`;
+    }
+
+    const result = await queryExecutor.query(
         `UPDATE cms.documents SET ${fields.join(', ')}
-         WHERE id = $${params.length} AND deleted_at IS NULL RETURNING *`,
+         WHERE id = $${idParamIndex} AND deleted_at IS NULL${versionCondition} RETURNING *`,
         params
     );
     return result.rows[0] || null;
 };
 
-const upsertTranslation = async (documentId, lang, { title, description }) => {
-    const result = await db.query(
+const upsertTranslation = async (documentId, lang, { title, description }, options = {}) => {
+    const queryExecutor = options.client || db;
+    const result = await queryExecutor.query(
         `INSERT INTO cms.document_translations (document_id, lang, title, description)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (document_id, lang) DO UPDATE
            SET title = EXCLUDED.title,
-               description = EXCLUDED.description
+               description = EXCLUDED.description,
+               updated_at = NOW()
          RETURNING *`,
         [documentId, lang, title, description || null]
     );

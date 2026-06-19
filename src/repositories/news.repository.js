@@ -15,6 +15,11 @@ const normalizeSort = (sortBy = 'created_at', sortOrder = 'DESC') => ({
     direction: String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC',
 });
 
+const normalizeListSort = ({ sortBy, sortOrder } = {}, publicOnly = true) => {
+    const effectiveSortBy = sortBy || (publicOnly ? 'published_at' : 'created_at');
+    return normalizeSort(effectiveSortBy, sortOrder);
+};
+
 // ─── WHERE builder ────────────────────────────────────────────────────────────
 // Returns { where, params }. Params index starts at startIdx (1-based).
 
@@ -46,11 +51,11 @@ const buildWhere = ({ q, status, publicOnly = true } = {}, startIdx = 1) => {
 // ─── Translation join fragment ────────────────────────────────────────────────
 // Returns effective translation: requested lang or fallback to 'vi'.
 
-const translationJoin = (reqLang = 'vi', fbLang = 'vi') => `
+const translationJoin = (reqLangParam = '$1', fbLangParam = '$2') => `
     LEFT JOIN cms.news_translations nt_req
-        ON nt_req.news_id = n.id AND nt_req.lang = '${reqLang}'
+        ON nt_req.news_id = n.id AND nt_req.lang = ${reqLangParam}
     LEFT JOIN cms.news_translations nt_fb
-        ON nt_fb.news_id = n.id AND nt_fb.lang = '${fbLang}'
+        ON nt_fb.news_id = n.id AND nt_fb.lang = ${fbLangParam}
     LEFT JOIN LATERAL (
         SELECT
             COALESCE(nt_req.id, nt_fb.id) AS id,
@@ -59,7 +64,7 @@ const translationJoin = (reqLang = 'vi', fbLang = 'vi') => `
             COALESCE(nt_req.summary, nt_fb.summary) AS summary,
             COALESCE(nt_req.content, nt_fb.content) AS content,
             COALESCE(nt_req.search_tsv, nt_fb.search_tsv) AS search_tsv,
-            CASE WHEN nt_req.id IS NOT NULL THEN '${reqLang}' ELSE '${fbLang}' END AS effective_lang,
+            CASE WHEN nt_req.id IS NOT NULL THEN ${reqLangParam} ELSE ${fbLangParam} END AS effective_lang,
             (nt_req.id IS NULL AND nt_fb.id IS NOT NULL) AS fallback_used
     ) nt_eff ON true
 `;
@@ -68,9 +73,10 @@ const translationJoin = (reqLang = 'vi', fbLang = 'vi') => `
 
 const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = 'vi' }) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
-    const { where, params } = buildWhere({ ...filter, publicOnly }, 1);
-    const { column, direction } = normalizeSort(filter.sortBy, filter.sortOrder);
-    params.push(limit, offset);
+    const { where, params } = buildWhere({ ...filter, publicOnly }, 3);
+    const { column, direction } = normalizeListSort(filter, publicOnly);
+    const queryParams = [lang, fbLang, ...params];
+    queryParams.push(limit, offset);
 
     const result = await db.query(
         `SELECT
@@ -81,37 +87,38 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
             nt_eff.fallback_used,
             u.full_name AS author_name
          FROM cms.news n
-         ${translationJoin(lang, fbLang)}
+         ${translationJoin('$1', '$2')}
          LEFT JOIN auth.users u ON u.id = n.author_id
          WHERE ${where}
            AND nt_eff.id IS NOT NULL
          ORDER BY ${column} ${direction} NULLS LAST, n.id DESC
-         LIMIT $${params.length - 1} OFFSET $${params.length}`,
-        params
+         LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
+        queryParams
     );
     return result.rows;
 };
 
 const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
-    const { where, params } = buildWhere({ ...filter, publicOnly }, 1);
+    const { where, params } = buildWhere({ ...filter, publicOnly }, 3);
+    const queryParams = [lang, fbLang, ...params];
 
     const result = await db.query(
         `SELECT COUNT(*)::int AS total
          FROM cms.news n
-         ${translationJoin(lang, fbLang)}
+         ${translationJoin('$1', '$2')}
          WHERE ${where}
            AND nt_eff.id IS NOT NULL`,
-        params
+        queryParams
     );
     return result.rows[0]?.total || 0;
 };
 
 const findBySlug = async (slug, { lang = 'vi', publicOnly = true } = {}) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
-    const params = [slug];
-    const conditions = ['n.deleted_at IS NULL', 'nt_eff.slug = $1'];
-    if (publicOnly) conditions.push("n.status = 'published'");
+    const params = [lang, fbLang, slug];
+    const conditions = ['n.deleted_at IS NULL', 'nt_eff.slug = $3'];
+    if (publicOnly) {conditions.push("n.status = 'published'");}
 
     const result = await db.query(
         `SELECT
@@ -122,7 +129,7 @@ const findBySlug = async (slug, { lang = 'vi', publicOnly = true } = {}) => {
             nt_eff.fallback_used,
             u.full_name AS author_name
          FROM cms.news n
-         ${translationJoin(lang, fbLang)}
+         ${translationJoin('$1', '$2')}
          LEFT JOIN auth.users u ON u.id = n.author_id
          WHERE ${conditions.join(' AND ')}
          LIMIT 1`,
@@ -141,7 +148,7 @@ const findAdminById = async (id) => {
          WHERE n.id = $1 AND n.deleted_at IS NULL`,
         [id]
     );
-    if (!newsResult.rows[0]) return null;
+    if (!newsResult.rows[0]) {return null;}
 
     const news = newsResult.rows[0];
 
@@ -216,7 +223,8 @@ const translationSlugExists = async (slug, lang, excludeNewsId = null) => {
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 
-const updateMeta = async (id, payload) => {
+const updateMeta = async (id, payload, options = {}) => {
+    const queryExecutor = options.client || db;
     const fields = [];
     const params = [];
     const map = {
@@ -232,26 +240,37 @@ const updateMeta = async (id, payload) => {
         }
     });
 
-    if (fields.length === 0) return findById(id);
+    if (fields.length === 0 && !payload.expectedUpdatedAt) {return findById(id);}
 
+    fields.push('updated_at = NOW()');
     params.push(id);
-    const result = await db.query(
+    const idParamIndex = params.length;
+
+    let versionCondition = '';
+    if (payload.expectedUpdatedAt) {
+        params.push(payload.expectedUpdatedAt);
+        versionCondition = ` AND updated_at = $${params.length}::timestamptz`;
+    }
+
+    const result = await queryExecutor.query(
         `UPDATE cms.news SET ${fields.join(', ')}
-         WHERE id = $${params.length} AND deleted_at IS NULL RETURNING *`,
+         WHERE id = $${idParamIndex} AND deleted_at IS NULL${versionCondition} RETURNING *`,
         params
     );
     return result.rows[0] || null;
 };
 
-const upsertTranslation = async (newsId, lang, { title, slug, summary, content }) => {
-    const result = await db.query(
+const upsertTranslation = async (newsId, lang, { title, slug, summary, content }, options = {}) => {
+    const queryExecutor = options.client || db;
+    const result = await queryExecutor.query(
         `INSERT INTO cms.news_translations (news_id, lang, title, slug, summary, content)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (news_id, lang) DO UPDATE
            SET title = EXCLUDED.title,
                slug  = EXCLUDED.slug,
                summary = EXCLUDED.summary,
-               content = EXCLUDED.content
+               content = EXCLUDED.content,
+               updated_at = NOW()
          RETURNING *`,
         [newsId, lang, title, slug, summary || null, content]
     );

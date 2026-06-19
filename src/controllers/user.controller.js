@@ -1,14 +1,7 @@
 const userService = require('../services/user.service');
 const { OK, CREATED, OK_LIST } = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
-
-const buildActor = (req) => ({
-    id: req.user.id,
-    role: req.user.role,
-    lang: req.lang,
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-});
+const { buildActor } = require('../utils/actor.util');
 
 const listUsers = async (req, res) => {
     const { page, limit, roleCode, isActive, email, sortBy, sortOrder } = req.query;

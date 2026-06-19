@@ -1,5 +1,6 @@
 const documentRepository = require('../repositories/document.repository');
-const { Api400Error, Api404Error, Api403Error } = require('../core/error.response');
+const db = require('../configs/database');
+const { Api400Error, Api404Error, Api403Error, Api409Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 const { stripTags, sanitizeHtml, normalizeLang } = require('../utils/cms.util');
 
@@ -66,22 +67,22 @@ const getDocumentById = async (actor, id, context = {}) => {
         lang,
         publicOnly: !canViewInternal(actor),
     });
-    if (!doc) throw new Api404Error(t('document_not_found', context.lang));
+    if (!doc) {throw new Api404Error(t('document_not_found', context.lang));}
     return toPublicItem(doc);
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
 const getAdminDocumentById = async (actor, id, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang));}
     const doc = await documentRepository.findAdminById(id);
-    if (!doc) throw new Api404Error(t('document_not_found', context.lang));
+    if (!doc) {throw new Api404Error(t('document_not_found', context.lang));}
     return toAdminDetail(doc);
 };
 
 const createDocument = async (actor, payload, file, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));
-    if (!file) throw new Api400Error(t('upload_no_file', context.lang));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));}
+    if (!file) {throw new Api400Error(t('upload_no_file', context.lang));}
 
     const lang = normalizeLang(payload.lang);
     const title = stripTags(payload.title);
@@ -122,22 +123,22 @@ const createDocument = async (actor, payload, file, context = {}) => {
 };
 
 const updateDocumentMeta = async (actor, id, payload, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));}
 
     const existing = await documentRepository.findRaw(id);
-    if (!existing) throw new Api404Error(t('document_not_found', context.lang));
+    if (!existing) {throw new Api404Error(t('document_not_found', context.lang));}
 
     const updated = await documentRepository.updateMeta(id, payload);
-    if (!updated) throw new Api404Error(t('document_not_found', context.lang));
+    if (!updated) {throw new Api409Error('Tài liệu đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');}
 
     return { message: t('document_updated_success', context.lang), document: { id: updated.id, docType: updated.doc_type, isPublic: updated.is_public } };
 };
 
 const upsertDocumentTranslation = async (actor, id, lang, payload, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));}
 
     const existing = await documentRepository.findRaw(id);
-    if (!existing) throw new Api404Error(t('document_not_found', context.lang));
+    if (!existing) {throw new Api404Error(t('document_not_found', context.lang));}
 
     const resolvedLang = normalizeLang(lang);
     const title = stripTags(payload.title);
@@ -157,32 +158,45 @@ const upsertDocumentTranslation = async (actor, id, lang, payload, context = {})
 };
 
 const deleteDocument = async (actor, id, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));}
     const deleted = await documentRepository.softDelete(id);
-    if (!deleted) throw new Api404Error(t('document_not_found', context.lang));
+    if (!deleted) {throw new Api404Error(t('document_not_found', context.lang));}
     return { message: t('document_deleted_success', context.lang) };
 };
 const updateDocumentFull = async (actor, id, payload, context = {}) => {
-    if (!canManage(actor)) throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));
+    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: MANAGE_ROLES.join(', ') }));}
 
     const existing = await documentRepository.findRaw(id);
-    if (!existing) throw new Api404Error(t('document_not_found', context.lang));
+    if (!existing) {throw new Api404Error(t('document_not_found', context.lang));}
 
-    // 1. Update metadata nếu có thay đổi
-    const metaPayload = {};
-    if (Object.prototype.hasOwnProperty.call(payload, 'docType')) metaPayload.docType = payload.docType;
-    if (Object.prototype.hasOwnProperty.call(payload, 'isPublic')) metaPayload.isPublic = payload.isPublic;
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
 
-    if (Object.keys(metaPayload).length > 0) {
-        await documentRepository.updateMeta(id, metaPayload);
-    }
+        // 1. Update metadata nếu có thay đổi, đồng thời check optimistic lock.
+        const metaPayload = { expectedUpdatedAt: payload.expectedUpdatedAt };
+        if (Object.prototype.hasOwnProperty.call(payload, 'docType')) {metaPayload.docType = payload.docType;}
+        if (Object.prototype.hasOwnProperty.call(payload, 'isPublic')) {metaPayload.isPublic = payload.isPublic;}
 
-    // 2. Upsert từng bản dịch
-    for (const [lang, body] of Object.entries(payload.translations || {})) {
-        const resolvedLang = normalizeLang(lang);
-        const title = stripTags(body.title);
-        const description = body.description ? sanitizeHtml(body.description) : null;
-        await documentRepository.upsertTranslation(id, resolvedLang, { title, description });
+        const metaUpdated = await documentRepository.updateMeta(id, metaPayload, { client });
+        if (!metaUpdated) {
+            throw new Api409Error('Tài liệu đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');
+        }
+
+        // 2. Upsert từng bản dịch trong cùng transaction.
+        for (const [lang, body] of Object.entries(payload.translations || {})) {
+            const resolvedLang = normalizeLang(lang);
+            const title = stripTags(body.title);
+            const description = body.description ? sanitizeHtml(body.description) : null;
+            await documentRepository.upsertTranslation(id, resolvedLang, { title, description }, { client });
+        }
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
     }
 
     // 3. Trả về admin detail đầy đủ

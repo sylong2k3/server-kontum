@@ -539,7 +539,7 @@ const getMe = async (userId, context = {}) => {
 
 const updateMe = async (userId, data, context = {}) => {
     const user = await userRepository.findById(userId);
-    if (!user) throw new Api404Error(t('user_not_found', context.lang));
+    if (!user) {throw new Api404Error(t('user_not_found', context.lang));}
 
     const normalized = {
         ...data,

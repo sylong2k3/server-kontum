@@ -6,7 +6,7 @@ class SuccessResponse {
         this.message = message;
         this.status = status;
         this.data = data;
-        if (metadata !== undefined) this.metadata = metadata;
+        if (metadata !== undefined) {this.metadata = metadata;}
     }
 
     send(res) {

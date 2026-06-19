@@ -204,9 +204,13 @@
 - **Quy tắc:** public chỉ thấy `published`; sắp theo `published_at DESC`.
 
 ### G3. Bình luận (US-071)
-- **Quyền:** `citizen` (đã đăng nhập).
-- **Endpoint:** `POST /news/:id/comments` — body `{ content }` (1–1000 ký tự, sanitize).
-- **Quy tắc:** `is_approved=false` mặc định → chờ duyệt (chống spam); admin/so_nnmt duyệt qua `PATCH /comments/:id/approve`. (Chốt với PO: duyệt trước hay sau — câu hỏi mở doc 10 §4.5.)
+- **Quyền:** `citizen` đã đăng nhập mới được tạo bình luận; public chỉ được xem bình luận đã duyệt.
+- **Endpoints:**
+  - `GET /news/:id/comments` — public xem danh sách bình luận đã duyệt của tin `published`.
+  - `POST /news/:id/comments` — `citizen` gửi body `{ content }` (1–1000 ký tự, sanitize) cho tin `published`.
+  - `PATCH /comments/:id/approve` — `system_admin`/`so_nnmt` duyệt hoặc từ chối bình luận.
+  - `DELETE /comments/:id` — `system_admin`/`so_nnmt` hoặc chính người tạo xóa bình luận.
+- **Quy tắc:** không cho comment/list public trên tin `draft`; `is_approved=false` mặc định → chờ duyệt (chống spam).
 
 ---
 

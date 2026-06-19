@@ -119,43 +119,73 @@ ON CONFLICT (code) DO NOTHING;
 -- requirePermission(resource, action). system_admin được bypass trong code
 -- nhưng vẫn seed đầy đủ để nhất quán. Idempotent: luôn set về giá trị mong muốn.
 UPDATE auth.roles SET permissions = '{
-    "users":              { "read": true, "create": true, "update": true, "delete": true, "manage": true },
-    "roles":              { "read": true, "manage": true },
-    "stations":           { "read": true, "create": true, "update": true, "delete": true, "manage": true },
-    "zones":              { "read": true, "create": true, "update": true, "delete": true, "manage": true },
-    "environmental_data": { "read": true, "create": true, "update": true, "delete": true },
-    "alerts":             { "read": true, "create": true, "update": true, "delete": true },
-    "reports":            { "read": true, "create": true, "update": true, "delete": true, "export": true, "approve": true },
-    "media":              { "read": true, "create": true, "delete": true, "manage": true },
-    "dashboard":          { "read": true },
-    "maps":               { "read": true },
-    "system_config":      { "read": true, "manage": true }
+    "users": {
+        "read": true,
+        "create": true,
+        "update": true,
+        "delete": true,
+        "read_own": true,
+        "update_own": true,
+        "reset_password": true,
+        "change_role": true,
+        "change_status": true
+    },
+    "roles": { "read": true, "update": true, "manage": true },
+    "notifications": {
+        "read": true,
+        "read_own": true,
+        "create": true,
+        "update": true,
+        "delete": true,
+        "delete_own": true,
+        "send": true
+    },
+    "notification_reads": { "read_own": true, "create": true, "update_own": true },
+    "device_tokens": { "read": true, "read_own": true, "create_own": true, "delete": true, "delete_own": true },
+    "news": { "read": true, "create": true, "update": true, "delete": true, "publish": true },
+    "news_translations": { "read": true, "create": true, "update": true, "delete": true },
+    "comments": { "read": true, "create": true, "delete": true, "delete_own": true, "approve": true },
+    "documents": { "read": true, "create": true, "update": true, "delete": true, "publish": true },
+    "document_translations": { "read": true, "create": true, "update": true, "delete": true }
 }'::jsonb WHERE code = 'system_admin';
 
 UPDATE auth.roles SET permissions = '{
-    "users":     { "read": true },
-    "dashboard": { "read": true },
-    "alerts":    { "read": true },
-    "reports":   { "read": true, "export": true, "approve": true },
-    "maps":      { "read": true }
+    "users": { "read": true },
+    "notifications": { "read_own": true, "delete_own": true },
+    "notification_reads": { "read_own": true, "create": true, "update_own": true },
+    "device_tokens": { "read_own": true, "create_own": true, "delete_own": true },
+    "news": { "read": true },
+    "comments": { "read": true },
+    "documents": { "read": true }
 }'::jsonb WHERE code = 'ubnd_tinh';
 
 UPDATE auth.roles SET permissions = '{
-    "users":              { "read": true, "create": true },
-    "stations":           { "read": true, "create": true, "update": true, "delete": true, "manage": true },
-    "zones":              { "read": true, "create": true, "update": true, "delete": true, "manage": true },
-    "environmental_data": { "read": true, "create": true, "update": true, "delete": true },
-    "alerts":             { "read": true, "create": true, "update": true },
-    "reports":            { "read": true, "create": true, "update": true, "export": true },
-    "media":              { "read": true, "create": true, "delete": true, "manage": true },
-    "dashboard":          { "read": true },
-    "maps":               { "read": true }
+    "users": {
+        "read": true,
+        "create": true,
+        "update": true,
+        "delete": true,
+        "reset_password": true,
+        "change_status": true
+    },
+    "notifications": { "read_own": true, "delete_own": true, "send": true },
+    "notification_reads": { "read_own": true, "create": true, "update_own": true },
+    "device_tokens": { "read_own": true, "create_own": true, "delete_own": true },
+    "news": { "read": true, "create": true, "update": true, "delete": true, "publish": true },
+    "news_translations": { "read": true, "create": true, "update": true, "delete": true },
+    "comments": { "read": true, "delete": true, "approve": true },
+    "documents": { "read": true, "create": true, "update": true, "delete": true, "publish": true },
+    "document_translations": { "read": true, "create": true, "update": true, "delete": true }
 }'::jsonb WHERE code = 'so_nnmt';
 
 UPDATE auth.roles SET permissions = '{
-    "maps":    { "read": true },
-    "alerts":  { "read": true },
-    "reports": { "read": true }
+    "users": { "read_own": true, "update_own": true },
+    "notifications": { "read_own": true, "delete_own": true },
+    "notification_reads": { "read_own": true, "create": true, "update_own": true },
+    "device_tokens": { "read_own": true, "create_own": true, "delete_own": true },
+    "news": { "read": true },
+    "comments": { "read": true, "create": true, "delete_own": true },
+    "documents": { "read": true }
 }'::jsonb WHERE code = 'citizen';
 
 

@@ -8,14 +8,14 @@ const SO_NNMT_ALLOWED_ROLES = ['so_nnmt', 'citizen'];
 const PG_UNIQUE_VIOLATION = '23505';
 
 const _assertSoNnmtScope = (actorRole, targetRoleCode, lang) => {
-    if (actorRole === 'system_admin') return;
+    if (actorRole === 'system_admin') {return;}
     if (actorRole === 'so_nnmt' && targetRoleCode !== 'citizen') {
         throw new Api403Error(t('no_permission_resource', lang, { resource: 'users', action: 'manage' }));
     }
 };
 
 const _assertNotLastActiveSystemAdmin = async (targetUser, lang) => {
-    if (targetUser.role !== 'system_admin') return;
+    if (targetUser.role !== 'system_admin') {return;}
     const activeSystemAdmins = await userRepository.countActiveUsersByRole('system_admin');
     if (activeSystemAdmins <= 1) {
         throw new Api400Error(t('invalid_data', lang), [t('cannot_modify_last_admin', lang)]);
@@ -24,13 +24,16 @@ const _assertNotLastActiveSystemAdmin = async (targetUser, lang) => {
 
 const _getOrThrow = async (userId, lang) => {
     const user = await userRepository.findById(userId);
-    if (!user) throw new Api404Error(t('user_not_found', lang));
+    if (!user) {throw new Api404Error(t('user_not_found', lang));}
     return user;
 };
 
 const _sanitize = (user) => {
-    if (!user) return null;
-    const { password_hash, login_attempts, locked_until, ...safe } = user;
+    if (!user) {return null;}
+    const safe = { ...user };
+    delete safe.password_hash;
+    delete safe.login_attempts;
+    delete safe.locked_until;
     return safe;
 };
 
@@ -61,7 +64,7 @@ const listUsers = async (filter, actor) => {
         if (filter.roleCode && !SO_NNMT_ALLOWED_ROLES.includes(filter.roleCode)) {
             throw new Api403Error(t('no_permission_resource', actor.lang, { resource: 'users', action: 'list' }));
         }
-        if (!filter.roleCode) effectiveFilter.roleCodes = SO_NNMT_ALLOWED_ROLES;
+        if (!filter.roleCode) {effectiveFilter.roleCodes = SO_NNMT_ALLOWED_ROLES;}
     }
     const [items, total] = await Promise.all([
         userRepository.findAll(effectiveFilter),
@@ -73,9 +76,9 @@ const listUsers = async (filter, actor) => {
 const createUser = async ({ email, password, fullName, phone, roleCode = 'citizen' }, actor) => {
     _assertSoNnmtScope(actor.role, roleCode, actor.lang);
     const existing = await userRepository.findByEmail(email);
-    if (existing) throw new Api409Error(t('email_in_use', actor.lang));
+    if (existing) {throw new Api409Error(t('email_in_use', actor.lang));}
     const role = await userRepository.findRoleByCode(roleCode);
-    if (!role) throw new Api400Error(t('invalid_data', actor.lang));
+    if (!role) {throw new Api400Error(t('invalid_data', actor.lang));}
 
     const passwordHash = await hashPassword(password);
     let user;
@@ -102,12 +105,12 @@ const changeUserRole = async (userId, roleCode, actor) => {
     _assertSoNnmtScope(actor.role, roleCode, actor.lang);
     const user = await _getOrThrow(userId, actor.lang);
     _assertSoNnmtScope(actor.role, user.role, actor.lang);
-    if (actor.id === userId) throw new Api400Error(t('invalid_data', actor.lang), [t('cannot_change_own_role', actor.lang)]);
+    if (actor.id === userId) {throw new Api400Error(t('invalid_data', actor.lang), [t('cannot_change_own_role', actor.lang)]);}
     if (user.role === 'system_admin' && roleCode !== 'system_admin') {
         await _assertNotLastActiveSystemAdmin(user, actor.lang);
     }
     const role = await userRepository.findRoleByCode(roleCode);
-    if (!role) throw new Api400Error(t('invalid_data', actor.lang));
+    if (!role) {throw new Api400Error(t('invalid_data', actor.lang));}
     const updated = await userRepository.updateRole(userId, roleCode);
     await _logAdminActivity(actor, 'user_role_change', userId, { fromRole: user.role, toRole: roleCode });
     return _sanitize(updated);
@@ -116,7 +119,7 @@ const changeUserRole = async (userId, roleCode, actor) => {
 const setUserActive = async (userId, isActive, actor) => {
     const user = await _getOrThrow(userId, actor.lang);
     _assertSoNnmtScope(actor.role, user.role, actor.lang);
-    if (actor.id === userId) throw new Api400Error(t('cannot_self_lock', actor.lang));
+    if (actor.id === userId) {throw new Api400Error(t('cannot_self_lock', actor.lang));}
     if (user.role === 'system_admin' && isActive === false) {
         await _assertNotLastActiveSystemAdmin(user, actor.lang);
     }
@@ -149,7 +152,7 @@ const getUserById = async (userId, actor) => {
 const deleteUser = async (userId, actor) => {
     const user = await _getOrThrow(userId, actor.lang);
     _assertSoNnmtScope(actor.role, user.role, actor.lang);
-    if (actor.id === userId) throw new Api400Error(t('cannot_self_delete', actor.lang));
+    if (actor.id === userId) {throw new Api400Error(t('cannot_self_delete', actor.lang));}
     if (user.role === 'system_admin') {
         await _assertNotLastActiveSystemAdmin(user, actor.lang);
     }

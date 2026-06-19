@@ -46,7 +46,8 @@ const createNewsSchema = Joi.object({
 const updateNewsMetaSchema = Joi.object({
     status: Joi.string().valid('draft', 'published').optional(),
     coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
-}).min(1);
+    expectedUpdatedAt: Joi.date().iso().required(),
+}).min(2);
 
 
 // ─── Update gộp metadata + translations ──────────────────────────────────────
@@ -61,6 +62,7 @@ const translationBodySchema = Joi.object({
 const updateNewsFullSchema = Joi.object({
     status: Joi.string().valid('draft', 'published').optional(),
     coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
+    expectedUpdatedAt: Joi.date().iso().required(),
     translations: Joi.object().pattern(
         Joi.string().valid('vi', 'en'),
         translationBodySchema

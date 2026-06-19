@@ -6,14 +6,14 @@
 
 | Epic | Tên | Ưu tiên | Trạng thái |
 |------|-----|---------|-----------|
-| EP-01 | Nền tảng & Bảo mật (Auth, RBAC) | P0 | ✅ phần lớn Done |
-| EP-02 | Quản trị người dùng & hồ sơ | P0 | 🟡 |
+| EP-01 | Nền tảng & Bảo mật (Auth, RBAC) | P0 | ✅ Done |
+| EP-02 | Quản trị người dùng & hồ sơ | P0 | ✅ Done |
 | EP-03 | Lớp dữ liệu bản đồ & WebGIS core | P0 | ⬜ |
 | EP-04 | Ảnh vệ tinh & Google Earth Engine | P1 | ⬜ |
 | EP-05 | Thời tiết thời gian gần thực | P1 | ⬜ |
 | EP-06 | Dự báo & cảnh báo cháy rừng | P0 | ⬜ |
 | EP-07 | Phân tích không gian & Thống kê | P2 | ⬜ |
-| EP-08 | CMS: Tin tức, Văn bản, Bản đồ PDF | P2 | ⬜ |
+| EP-08 | CMS: Tin tức, Văn bản, Bản đồ PDF | P2 | 🟡 |
 | EP-09 | Phản ánh hiện trường (Feedback) | P1 | ⬜ |
 | EP-10 | MobileGIS | P1 | ⬜ |
 | EP-11 | Vận hành, Pipeline dữ liệu & DevOps | P0 | 🟡 |
@@ -52,10 +52,10 @@ Scenario: Sai mật khẩu vượt ngưỡng
 
 | ID | User Story | AC tóm tắt | P | SP | TT |
 |----|-----------|-----------|---|----|----|
-| US-010 | Là `system_admin`, tôi muốn thêm/khóa/xóa mềm tài khoản & gán vai trò. | CRUD user; soft delete (migration 010); buộc đổi mật khẩu lần đầu (`must_change_password`). | P0 | 8 | 🟡 |
-| US-011 | Là người dùng, tôi muốn xem & sửa hồ sơ cá nhân. | Cập nhật tên, avatar (upload middleware), đổi mật khẩu. | P1 | 5 | 🟡 |
-| US-012 | Là `system_admin`, tôi muốn xem danh sách user có phân trang/lọc. | Phân trang, lọc theo role/trạng thái/từ khóa. | P1 | 3 | ⬜ |
-| US-013 | Là `so_nnmt` admin cấp sở, tôi muốn quản lý tài khoản chuyên môn của sở. | Giới hạn scope tạo user trong phạm vi sở. | P2 | 5 | ⬜ |
+| US-010 | Là `system_admin`, tôi muốn thêm/khóa/xóa mềm tài khoản & gán vai trò. | CRUD user; soft delete (migration 010); buộc đổi mật khẩu lần đầu (`must_change_password`). | P0 | 8 | ✅ |
+| US-011 | Là người dùng, tôi muốn xem & sửa hồ sơ cá nhân. | Cập nhật tên, avatar (upload middleware), đổi mật khẩu. | P1 | 5 | ✅ |
+| US-012 | Là `system_admin`, tôi muốn xem danh sách user có phân trang/lọc. | Phân trang, lọc theo role/trạng thái/từ khóa. | P1 | 3 | ✅ |
+| US-013 | Là `so_nnmt` admin cấp sở, tôi muốn quản lý tài khoản chuyên môn của sở. | Giới hạn scope tạo user trong phạm vi sở. | P2 | 5 | ✅ |
 
 ---
 
@@ -143,9 +143,9 @@ Scenario: Cảnh báo ưu tiên cao
 
 | ID | User Story | AC | P | SP | TT |
 |----|-----------|----|---|----|----|
-| US-070 | Là `system_admin`/`so_nnmt`, tôi muốn CRUD tin tức. | Bảng `cms.news`; trạng thái nháp/đăng; ảnh đính kèm. | P2 | 5 | ⬜ |
-| US-071 | Là người dân, tôi muốn đọc/tìm kiếm/bình luận tin tức. | Full-text search; comment kiểm duyệt. | P2 | 5 | ⬜ |
-| US-072 | Là cơ quan, tôi muốn CRUD báo cáo/văn bản. | Bảng `cms.documents`; phân loại công khai/nội bộ. | P2 | 5 | ⬜ |
+| US-070 | Là `system_admin`/`so_nnmt`, tôi muốn CRUD tin tức. | Bảng `cms.news`; trạng thái nháp/đăng; ảnh đính kèm. | P2 | 5 | ✅ |
+| US-071 | Là người dân, tôi muốn đọc/tìm kiếm/bình luận tin tức. | Full-text search; comment kiểm duyệt. | P2 | 5 | ✅ |
+| US-072 | Là cơ quan, tôi muốn CRUD báo cáo/văn bản. | Bảng `cms.documents`; phân loại công khai/nội bộ. | P2 | 5 | ✅ |
 | US-073 | Là người dùng, tôi muốn xem/tải bản đồ PDF chuyên đề. | Bảng `cms.pdf_maps`; tải file; phân quyền. | P2 | 3 | ⬜ |
 
 ---
@@ -181,7 +181,7 @@ Scenario: Cảnh báo ưu tiên cao
 | US-101 | Là dev, tôi muốn CI lint+test trước merge. | GitHub Actions: eslint + test; chặn merge nếu đỏ. | P0 | 5 | ⬜ |
 | US-102 | Là ops, tôi muốn health-check & metric cơ bản. | `/health` (đã có) + metric DB pool/cron. | P1 | 3 | 🟡 |
 | US-103 | Là ops, tôi muốn backup PostGIS định kỳ. | pg_dump cron + retention; thử restore. | P1 | 3 | ⬜ |
-| US-104 | Là hệ thống, tôi muốn realtime đẩy cảnh báo qua WebSocket. | `realtime/websocket.server.js` broadcast cảnh báo mới. | P1 | 5 | 🟡 |
+| US-104 | Là hệ thống, tôi muốn realtime đẩy cảnh báo qua WebSocket. | `realtime/websocket.server.js` broadcast cảnh báo mới. | P1 | 5 | ✅ |
 
 ---
 

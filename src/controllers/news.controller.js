@@ -1,14 +1,7 @@
 const newsService = require('../services/news.service');
 const { OK, CREATED, OK_LIST } = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
-
-const buildActor = (req) => req.user ? ({
-    id: req.user.id,
-    role: req.user.role,
-    lang: req.lang,
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent'),
-}) : null;
+const { buildActor } = require('../utils/actor.util');
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 

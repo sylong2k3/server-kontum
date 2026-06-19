@@ -18,7 +18,7 @@ const runCleanup = async () => {
 };
 
 const start = () => {
-    if (task) return;
+    if (task) {return;}
     if (!cron.validate(CLEANUP_CRON)) {
         console.warn(`[TOKEN CLEANUP] Invalid cron expression "${CLEANUP_CRON}" — job not started`);
         return;

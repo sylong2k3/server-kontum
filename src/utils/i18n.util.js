@@ -79,6 +79,12 @@ const locales = {
         document_created_success: 'Tạo tài liệu thành công',
         document_updated_success: 'Cập nhật tài liệu thành công',
         document_deleted_success: 'Đã xóa tài liệu',
+        feedback_created_success: 'Gửi phản ánh thành công',
+        feedback_updated_success: 'Cập nhật phản ánh thành công',
+        feedback_not_found: 'Không tìm thấy phản ánh',
+        feedback_anonymous_required: 'Gửi phản ánh ẩn danh yêu cầu header x-anonymous-id',
+        feedback_invalid_transition: 'Trạng thái phản ánh không thể chuyển theo luồng này',
+        feedback_invalid_bbox: 'bbox không hợp lệ',
 
         'any.required': 'Trường này là bắt buộc',
         'string.empty': 'Trường này không được để trống',
@@ -93,6 +99,11 @@ const locales = {
         'oldPassword.any.required': 'Mật khẩu cũ là bắt buộc',
         'newPassword.any.required': 'Mật khẩu mới là bắt buộc',
         'phone.string.pattern.base': 'Số điện thoại không hợp lệ',
+        comment_created_success: 'Bình luận thành công và đang chờ duyệt',
+        comment_approved_success: 'Đã duyệt bình luận',
+        comment_rejected_success: 'Đã từ chối bình luận',
+        comment_deleted_success: 'Đã xóa bình luận',
+        comment_not_found: 'Không tìm thấy bình luận',
      },
      en: {
         email_in_use: 'Email is already in use',
@@ -173,6 +184,12 @@ const locales = {
         document_created_success: 'Document created successfully',
         document_updated_success: 'Document updated successfully',
         document_deleted_success: 'Document deleted',
+        feedback_created_success: 'Feedback submitted successfully',
+        feedback_updated_success: 'Feedback updated successfully',
+        feedback_not_found: 'Feedback not found',
+        feedback_anonymous_required: 'Anonymous feedback requires x-anonymous-id header',
+        feedback_invalid_transition: 'Feedback status cannot transition this way',
+        feedback_invalid_bbox: 'Invalid bbox',
 
         'any.required': 'This field is required',
         'string.empty': 'This field cannot be empty',
@@ -187,6 +204,11 @@ const locales = {
         'oldPassword.any.required': 'Old password is required',
         'newPassword.any.required': 'New password is required',
         'phone.string.pattern.base': 'Invalid phone number',
+        comment_created_success: 'Comment posted successfully, pending approval',
+        comment_approved_success: 'Comment approved',
+        comment_rejected_success: 'Comment rejected',
+        comment_deleted_success: 'Comment deleted',
+        comment_not_found: 'Comment not found',
     }
 };
 
