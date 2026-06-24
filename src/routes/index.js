@@ -6,6 +6,7 @@ const newsRoutes = require('./news.routes');
 const documentRoutes = require('./document.routes');
 const commentRoutes = require('./comment.routes');
 const feedbackRoutes = require('./feedback.routes');
+const remoteSensingRoutes = require('./remoteSensing.routes');
 
 const router = Router();
 
@@ -19,5 +20,8 @@ router.use('/admin/documents', documentRoutes.adminRouter);
 router.use('/feedback', feedbackRoutes.publicRouter);
 router.use('/admin/feedback', feedbackRoutes.adminRouter);
 router.use('/admin/comments', commentRoutes.adminRouter);
+
+// ── Remote Sensing / Viễn thám ───────────────────────────────────────────────
+router.use('/remote-sensing', remoteSensingRoutes);
 
 module.exports = router;

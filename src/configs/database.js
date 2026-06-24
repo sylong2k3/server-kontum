@@ -13,7 +13,7 @@ const pool = new Pool({
     connectionTimeoutMillis: parseInt(process.env.DB_CONN_TIMEOUT_MS, 10) || 10000,
     statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT, 10) || 30000,
     query_timeout: parseInt(process.env.DB_QUERY_TIMEOUT, 10) || 30000,
-    options: '-c search_path=public,core,auth,gis,fire,cms,field',
+    options: '-c search_path=public,core,auth,gis,fire,cms,field,raster',
 });
 
 pool.on('error', (err) => {

@@ -1,8 +1,10 @@
 const app = require("./src/app");
 const db = require("./src/configs/database");
 const { initializeEarthEngine, isInitialized } = require("./src/configs/gge");
+const { initMinio, healthCheck: minioHealthCheck } = require("./src/configs/minioClient");
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
+const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const {
   initWebSocketServer,
   closeWebSocketServer,
@@ -23,7 +25,7 @@ function formatField(label, value) {
   return `${label.padEnd(14)}: ${value}`;
 }
 
-function printStartupBanner({ dbStatus, earthEngineStatus }) {
+function printStartupBanner({ dbStatus, minioStatus, earthEngineStatus }) {
   const publicHost = HOST === "0.0.0.0" ? "localhost" : HOST;
   const lines = [
     "APP QUẢN LÝ GIS KONTUM",
@@ -31,12 +33,11 @@ function printStartupBanner({ dbStatus, earthEngineStatus }) {
     formatField("WebSocket", `ws://${publicHost}:${PORT}${WS_PATH}`),
     formatField("Environment", process.env.NODE_ENV || "development"),
     formatField("Database", process.env.DB_NAME || "(not configured)"),
-    formatField(
-      "DB Host",
+    formatField("DB Host",
       `${process.env.DB_HOST || "(not configured)"}:${process.env.DB_PORT || "(not configured)"}`,
     ),
     formatField("PostgreSQL", dbStatus),
-    formatField("File Storage", "✓ Local (public/uploads)"),
+    formatField("MinIO",      minioStatus),
     formatField("Earth Engine", earthEngineStatus),
   ];
 
@@ -75,6 +76,7 @@ async function gracefulShutdown(signal) {
 
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
+  imageProcessingWorker.stopWorker(); // ← dừng Image Processing Worker
   closeWebSocketServer();
 
   if (server) {
@@ -113,21 +115,24 @@ const initializeAndStartServer = async () => {
     console.log(`Earth Engine isInitialized: ${earthEngineInitialized}`);
     console.log("✓ Earth Engine khởi tạo thành công");
 
-    const dbStatus = await getDatabaseStartupStatus();
-    const earthEngineStatus = earthEngineInitialized
-      ? "Initialized"
-      : "Uninitialized";
+    await initMinio();
+    const dbStatus          = await getDatabaseStartupStatus();
+    const minioOk           = await minioHealthCheck();
+    const minioStatus       = minioOk
+      ? `✓ Connected (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`
+      : `⚠ Unavailable (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`;
+    const earthEngineStatus = earthEngineInitialized ? "Initialized" : "Uninitialized";
 
     server = app.listen(PORT, HOST, () => {
-      printStartupBanner({ dbStatus, earthEngineStatus });
+      printStartupBanner({ dbStatus, minioStatus, earthEngineStatus });
     });
-    initWebSocketServer(server, { path: "/ws" });
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
 
     if (IS_SINGLETON_WORKER) {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
+      imageProcessingWorker.startWorker();
     }
 
     process.on("unhandledRejection", (error) => {
@@ -146,17 +151,23 @@ const initializeAndStartServer = async () => {
     console.warn(`⚠ Earth Engine initialization warning: ${error.message}`);
     console.warn("  Server vẫn khởi động bình thường. GEE sẽ không hoạt động.");
 
+    await initMinio();
     const dbStatus = await getDatabaseStartupStatus();
+    const minioOk  = await minioHealthCheck();
+    const minioStatus = minioOk
+      ? `✓ Connected (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`
+      : `⚠ Unavailable (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`;
     const earthEngineStatus = "⚠ Unavailable";
 
     server = app.listen(PORT, HOST, () => {
-      printStartupBanner({ dbStatus, earthEngineStatus });
+      printStartupBanner({ dbStatus, minioStatus, earthEngineStatus });
     });
     initWebSocketServer(server, { path: WS_PATH });
 
     if (IS_SINGLETON_WORKER) {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
+      imageProcessingWorker.startWorker();
     }
 
     process.on("unhandledRejection", (error) => {

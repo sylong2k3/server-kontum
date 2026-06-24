@@ -9,6 +9,8 @@
     "dev": "nodemon server.js",
     "migrate": "node src/database/migrate.js",
     "migrate:status": "node src/database/migrate.js --status",
+    "seed:users": "node src/database/seeds/001_users.seed.js",
+    "seed:dev": "node src/database/seeds/002_dev_data.seed.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -21,9 +23,11 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "firebase-admin": "^13.10.0",
+    "geotiff": "^3.0.5",
     "helmet": "^8.1.0",
     "joi": "^18.0.1",
     "jsonwebtoken": "^9.0.2",
+    "minio": "^8.0.7",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
@@ -32,6 +36,8 @@
     "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.16.3",
+    "sharp": "^0.35.2",
+    "uuid": "^14.0.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
