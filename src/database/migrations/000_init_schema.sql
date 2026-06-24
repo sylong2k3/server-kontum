@@ -19,7 +19,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- ════════════════════════════════════════════════════════════════════════════
 CREATE SCHEMA IF NOT EXISTS core;   -- Hàm/tiện ích dùng chung toàn hệ thống
 CREATE SCHEMA IF NOT EXISTS auth;   -- Xác thực, phân quyền người dùng
-CREATE SCHEMA IF NOT EXISTS 06_PBX;    -- Dữ liệu không gian / bản đồ
+CREATE SCHEMA IF NOT EXISTS gis;    -- Dữ liệu không gian / bản đồ
 CREATE SCHEMA IF NOT EXISTS fire;   -- Cảnh báo cháy rừng
 CREATE SCHEMA IF NOT EXISTS cms;    -- Nội dung / báo cáo
 CREATE SCHEMA IF NOT EXISTS field;  -- Dữ liệu hiện trường
