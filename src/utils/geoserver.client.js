@@ -155,16 +155,21 @@ const publishTimelapseLayer = async (layer) => {
     return `${workspace}:${storeName}`;
 };
 
+const encodeLayerName = (geoserverLayerName) => String(geoserverLayerName)
+    .split(':')
+    .map((part) => encodeURIComponent(part))
+    .join(':');
+
 const unpublishLayer = async (geoserverLayerName) => {
     await requestGeoserver(
-        `/rest/layers/${encodeURIComponent(geoserverLayerName)}?recurse=true`,
+        `/rest/layers/${encodeLayerName(geoserverLayerName)}?recurse=true`,
         { method: 'DELETE' }
     );
 };
 
 const setLayerEnabled = async (geoserverLayerName, enabled) => {
     await requestGeoserver(
-        `/rest/layers/${encodeURIComponent(geoserverLayerName)}`,
+        `/rest/layers/${encodeLayerName(geoserverLayerName)}`,
         {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },

@@ -57,10 +57,35 @@ const createLayer = Joi.object({
     return value;
 });
 
-const updateLayer = createLayer.fork(
-    ['code', 'name_vi', 'table_name', 'geometry_type'],
-    (schema) => schema.optional()
-).min(1);
+const updateLayer = Joi.object({
+    name_vi:           Joi.string().min(1).max(200),
+    name_en:           Joi.string().max(200).allow('', null),
+    description_vi:    Joi.string().allow('', null),
+    description_en:    Joi.string().allow('', null),
+    schema_name:       identifier,
+    table_name:        identifier.max(120),
+    geometry_column:   identifier.max(60),
+    geometry_type:     geometryType,
+    epsg_code:         Joi.number().integer().min(1),
+    geoserver_layer:   Joi.string().max(255).allow('', null),
+    geoserver_store:   Joi.string().max(120).allow('', null),
+    source_url:        Joi.string().allow('', null),
+    default_style:     Joi.object(),
+    min_zoom:          Joi.number().integer().min(0).max(24),
+    max_zoom:          Joi.number().integer().min(0).max(24),
+    label_field:       Joi.string().max(60).allow('', null),
+    category:          Joi.string().max(60).allow('', null),
+    layer_kind:        layerKind,
+    layer_group:       Joi.string().max(80).allow('', null),
+    data_year:         Joi.number().integer().min(1900).max(2100).allow(null),
+    source_dataset:    Joi.string().max(120).allow('', null),
+    source_layer_name: Joi.string().max(160).allow('', null),
+    sort_order:        Joi.number().integer(),
+    is_active:         Joi.boolean(),
+    is_public:         Joi.boolean(),
+    is_editable:       Joi.boolean(),
+    layer_permissions: Joi.object(),
+}).min(1);
 
 const activeLayer = Joi.object({ is_active: Joi.boolean().required() });
 

@@ -154,9 +154,15 @@ const unpublishLayer = async (code, user) => {
 
 const setLayerActive = async (code, isActive, user) => {
     const layer = await requireLayer(code);
-    if (layer.geoserver_layer) { await geoserver.setLayerEnabled(layer.geoserver_layer, isActive); }
     const updated = await layerRepo.setActive({ code, isActive, updatedAt: layer.updated_at, updatedBy: user?.id || null });
     if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict'), ['OPTIMISTIC_LOCK_CONFLICT']); }
+
+    if (layer.geoserver_layer) {
+        await geoserver.setLayerEnabled(layer.geoserver_layer, isActive).catch((err) => {
+            console.warn(`[MapService] Không thể đồng bộ trạng thái GeoServer cho ${layer.geoserver_layer}:`, err.message);
+        });
+    }
+
     const client = await db.pool.connect();
     try { await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'toggle_active', source: 'api', oldData: { is_active: layer.is_active }, newData: { is_active: isActive }, changedBy: user?.id || null }); }
     finally { client.release(); }

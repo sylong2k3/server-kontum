@@ -346,10 +346,10 @@ const refreshStats = async (client, layerId) => {
     const layer = layerRows[0];
     if (!layer || layer.geometry_type === 'RASTER') { return layer; }
     const { rows } = await exec(client)(
-        `UPDATE gis.layer_registry SET feature_count = stats.total, bbox = stats.bbox, last_updated_at = NOW(), updated_at = NOW()
+        `UPDATE gis.layer_registry SET feature_count = stats.cnt, bbox = stats.new_bbox, last_updated_at = NOW(), updated_at = NOW()
          FROM (
-             SELECT COUNT(*)::bigint AS total,
-                    CASE WHEN COUNT(*) = 0 THEN NULL ELSE ST_Envelope(ST_Transform(ST_SetSRID(ST_Extent(${geomCol(layer)})::geometry, ${Number(layer.epsg_code || 4326)}), 4326)) END AS bbox
+             SELECT COUNT(*)::bigint AS cnt,
+                    CASE WHEN COUNT(*) = 0 THEN NULL ELSE ST_Envelope(ST_Transform(ST_SetSRID(ST_Extent(${geomCol(layer)})::geometry, ${Number(layer.epsg_code || 4326)}), 4326)) END AS new_bbox
              FROM ${tableRef(layer)}
          ) stats WHERE id = $1 RETURNING ${LAYER_COLUMNS}`,
         [layerId]
@@ -436,6 +436,9 @@ const upsertLayerByCode = async (client, payload) => {
             source_dataset    = COALESCE(EXCLUDED.source_dataset, gis.layer_registry.source_dataset),
             source_layer_name = COALESCE(EXCLUDED.source_layer_name, gis.layer_registry.source_layer_name),
             source_url        = COALESCE(EXCLUDED.source_url, gis.layer_registry.source_url),
+            is_active         = EXCLUDED.is_active,
+            is_public         = EXCLUDED.is_public,
+            is_editable       = EXCLUDED.is_editable,
             updated_by        = EXCLUDED.updated_by,
             updated_at        = NOW()
         RETURNING ${LAYER_COLUMNS}`,
