@@ -18,34 +18,6 @@ const assertIdentifier = (value, label = 'identifier') => {
 const qid = (value) => '"' + assertIdentifier(value).replace(/"/g, '""') + '"';
 const tableRef = (layer) => `${qid(layer.schema_name)}.${qid(layer.table_name)}`;
 const geomCol = (layer) => qid(layer.geometry_column || 'geom');
-const getFeatureIdColumn = async (layer, client = null) => {
-    const { rows } = await exec(client)(
-        `SELECT kcu.column_name
-         FROM information_schema.table_constraints tc
-         JOIN information_schema.key_column_usage kcu
-           ON tc.constraint_name = kcu.constraint_name
-          AND tc.table_schema = kcu.table_schema
-          AND tc.table_name = kcu.table_name
-         WHERE tc.table_schema = $1
-           AND tc.table_name = $2
-           AND tc.constraint_type = 'PRIMARY KEY'
-         ORDER BY kcu.ordinal_position
-         LIMIT 1`,
-        [layer.schema_name, layer.table_name]
-    );
-    if (rows[0]?.column_name) { return rows[0].column_name; }
-
-    const idCheck = await exec(client)(
-        `SELECT column_name
-         FROM information_schema.columns
-         WHERE table_schema = $1 AND table_name = $2 AND column_name = 'id'
-         LIMIT 1`,
-        [layer.schema_name, layer.table_name]
-    );
-    if (idCheck.rows[0]?.column_name) { return 'id'; }
-
-    throw new Error(`Layer table ${layer.schema_name}.${layer.table_name} does not have a primary key or id column`);
-};
 
 const LAYER_COLUMNS = `
     id, code, name_vi, name_en, description_vi, description_en,
@@ -208,7 +180,7 @@ const markPublished = async (client, { code, geoserverLayer, geoserverStore, upd
 const markUnpublished = async ({ code, updatedAt, updatedBy }) => {
     const { rows } = await db.query(
         `UPDATE gis.layer_registry SET geoserver_layer = NULL, geoserver_store = NULL, last_updated_at = NOW(), updated_at = NOW(), updated_by = $3
-         WHERE code = $1 AND updated_at = $2::timestamptz RETURNING ${LAYER_COLUMNS}`,
+         WHERE code = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz RETURNING ${LAYER_COLUMNS}`,
         [code, updatedAt, updatedBy]
     );
     return rows[0] || null;
@@ -217,129 +189,11 @@ const markUnpublished = async ({ code, updatedAt, updatedBy }) => {
 const setActive = async ({ code, isActive, updatedAt, updatedBy }) => {
     const { rows } = await db.query(
         `UPDATE gis.layer_registry SET is_active = $2, last_updated_at = NOW(), updated_at = NOW(), updated_by = $4
-         WHERE code = $1 AND updated_at = $3::timestamptz RETURNING ${LAYER_COLUMNS}`,
+         WHERE code = $1 AND date_trunc('milliseconds', updated_at) = $3::timestamptz RETURNING ${LAYER_COLUMNS}`,
         [code, isActive, updatedAt, updatedBy]
     );
     return rows[0] || null;
 };
-
-const parseBbox = (bbox) => {
-    if (!bbox) { return null; }
-    const values = String(bbox).split(',').map(Number);
-    if (values.length !== 4 || values.some(Number.isNaN) || values[0] >= values[2] || values[1] >= values[3]) {
-        return null;
-    }
-    return values;
-};
-
-const listFeatures = async (layer, { limit = 1000, offset = 0, bbox } = {}) => {
-    const idColumn = await getFeatureIdColumn(layer);
-    const idCol = qid(idColumn);
-    const params = [limit, offset];
-    const where = [];
-    const parsed = parseBbox(bbox);
-    if (parsed) {
-        params.push(...parsed);
-        where.push(`${geomCol(layer)} && ST_MakeEnvelope($3, $4, $5, $6, 4326)`);
-    }
-    const { rows } = await db.query(
-        `SELECT jsonb_build_object(
-            'type', 'FeatureCollection',
-            'features', COALESCE(jsonb_agg(jsonb_build_object(
-                'type', 'Feature', 'id', t.${idCol},
-                'geometry', ST_AsGeoJSON(t.${geomCol(layer)})::jsonb,
-                'properties', to_jsonb(t) - '${layer.geometry_column || 'geom'}'
-            ) ORDER BY t.${idCol}), '[]'::jsonb)
-        ) AS geojson
-        FROM (SELECT * FROM ${tableRef(layer)} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY ${idCol} LIMIT $1 OFFSET $2) t`,
-        params
-    );
-    return rows[0]?.geojson || { type: 'FeatureCollection', features: [] };
-};
-
-const getFeature = async (layer, featureId, client = null) => {
-    const idColumn = await getFeatureIdColumn(layer, client);
-    const idCol = qid(idColumn);
-    const { rows } = await exec(client)(
-        `SELECT jsonb_build_object('type', 'Feature', 'id', ${idCol}, 'geometry', ST_AsGeoJSON(${geomCol(layer)})::jsonb, 'properties', to_jsonb(t) - '${layer.geometry_column || 'geom'}') AS feature
-         FROM ${tableRef(layer)} t WHERE ${idCol} = $1`,
-        [featureId]
-    );
-    return rows[0]?.feature || null;
-};
-
-const findFeatureAtPoint = async (layer, { lng, lat, tolerance_meters: toleranceMeters = 10 } = {}) => {
-    const idColumn = await getFeatureIdColumn(layer);
-    const idCol = qid(idColumn);
-    const epsgCode = Number(layer.epsg_code || 4326);
-    const pointExpression = `ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), ${epsgCode})`;
-    const tolerance = Number(toleranceMeters || 0);
-    const whereClause = tolerance > 0
-        ? `ST_DWithin(t.${geomCol(layer)}::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $3)`
-        : `ST_Intersects(t.${geomCol(layer)}, ${pointExpression})`;
-    const params = tolerance > 0 ? [lng, lat, tolerance] : [lng, lat];
-    const { rows } = await db.query(
-        `SELECT jsonb_build_object(
-             'type', 'Feature',
-             'id', t.${idCol},
-             'geometry', ST_AsGeoJSON(t.${geomCol(layer)})::jsonb,
-             'properties', to_jsonb(t) - '${layer.geometry_column || 'geom'}'
-         ) AS feature
-         FROM ${tableRef(layer)} t
-         WHERE ${whereClause}
-         ORDER BY ST_Distance(t.${geomCol(layer)}, ${pointExpression}) ASC
-         LIMIT 1`,
-        params
-    );
-    return rows[0]?.feature || null;
-};
-
-const insertFeature = async (client, layer, { geometry, properties = {} }) => {
-    const idColumn = await getFeatureIdColumn(layer, client);
-    const idCol = qid(idColumn);
-    const propKeys = Object.keys(properties).filter((key) => IDENTIFIER_RE.test(key) && key !== idColumn && key !== (layer.geometry_column || 'geom'));
-    const columns = [geomCol(layer), ...propKeys.map(qid)];
-    const params = [JSON.stringify(geometry || null), ...propKeys.map((key) => properties[key])];
-    const values = [`CASE WHEN $1::jsonb IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($1), ${Number(layer.epsg_code || 4326)}) END`];
-    propKeys.forEach((_, index) => values.push(`$${index + 2}`));
-    const { rows } = await exec(client)(
-        `INSERT INTO ${tableRef(layer)} (${columns.join(', ')}) VALUES (${values.join(', ')}) RETURNING ${idCol} AS id`,
-        params
-    );
-    return getFeature(layer, rows[0].id, client);
-};
-
-const updateFeature = async (client, layer, featureId, payload) => {
-    const idColumn = await getFeatureIdColumn(layer, client);
-    const idCol = qid(idColumn);
-    const sets = [];
-    const params = [];
-    if (Object.prototype.hasOwnProperty.call(payload, 'geometry')) {
-        params.push(JSON.stringify(payload.geometry || null));
-        sets.push(`${geomCol(layer)} = CASE WHEN $${params.length}::jsonb IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromGeoJSON($${params.length}), ${Number(layer.epsg_code || 4326)}) END`);
-    }
-    Object.keys(payload.properties || {}).forEach((key) => {
-        if (IDENTIFIER_RE.test(key) && key !== idColumn && key !== (layer.geometry_column || 'geom')) {
-            params.push(payload.properties[key]);
-            sets.push(`${qid(key)} = $${params.length}`);
-        }
-    });
-    if (!sets.length) { return getFeature(layer, featureId, client); }
-    params.push(featureId);
-    const { rowCount } = await exec(client)(`UPDATE ${tableRef(layer)} SET ${sets.join(', ')} WHERE ${idCol} = $${params.length}`, params);
-    return rowCount ? getFeature(layer, featureId, client) : null;
-};
-
-const deleteFeature = async (client, layer, featureId) => {
-    const idColumn = await getFeatureIdColumn(layer, client);
-    const idCol = qid(idColumn);
-    const oldFeature = await getFeature(layer, featureId, client);
-    if (!oldFeature) { return null; }
-    await exec(client)(`DELETE FROM ${tableRef(layer)} WHERE ${idCol} = $1`, [featureId]);
-    return oldFeature;
-};
-
-const overwriteFeatures = async (client, layer) => exec(client)(`TRUNCATE TABLE ${tableRef(layer)} RESTART IDENTITY`);
 
 const refreshStats = async (client, layerId) => {
     const { rows: layerRows } = await exec(client)('SELECT * FROM gis.layer_registry WHERE id = $1', [layerId]);
@@ -387,8 +241,11 @@ const findImportJobById = async (id) => {
 };
 
 const listImportJobs = async (layerId, { limit = 50, offset = 0 } = {}) => {
-    const { rows } = await db.query('SELECT * FROM gis.layer_import_jobs WHERE layer_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [layerId, limit, offset]);
-    return rows;
+    const [{ rows }, { rows: cnt }] = await Promise.all([
+        db.query('SELECT * FROM gis.layer_import_jobs WHERE layer_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [layerId, limit, offset]),
+        db.query('SELECT COUNT(*)::int AS total FROM gis.layer_import_jobs WHERE layer_id = $1', [layerId]),
+    ]);
+    return { items: rows, pagination: { limit, offset, total: cnt[0].total } };
 };
 
 const insertEditHistory = async (client, { layerId, action, source = 'api', importJobId, featureId, oldData, newData, geometryChanged, changedBy }) => {
@@ -476,10 +333,10 @@ const upsertLayerByCode = async (client, payload) => {
 };
 
 module.exports = {
-    countAll, createImportJob, createLayer, deleteFeature, deleteLayer, findAll, findByCode,
-    findByTableName, findFeatureAtPoint, findImportJobById, geometryColumnExists, getFeature,
-    insertEditHistory, insertFeature, listFeatures, listImportJobs, markPublished, markUnpublished,
-    overwriteFeatures, physicalTableExists, refreshStats, setActive, updateFeature, updateImportJob,
+    countAll, createImportJob, createLayer, deleteLayer, findAll, findByCode,
+    findByTableName, findImportJobById, geometryColumnExists,
+    insertEditHistory, listImportJobs, markPublished, markUnpublished,
+    physicalTableExists, refreshStats, setActive, updateImportJob,
     updateLayer, upsertLayerByCode,
 };
 

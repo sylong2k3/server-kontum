@@ -104,7 +104,7 @@ const featureInfoQuery = Joi.object({
     id: Joi.alternatives().try(Joi.number().integer(), Joi.string().max(120)),
     lng: Joi.number().min(-180).max(180),
     lat: Joi.number().min(-90).max(90),
-    tolerance_meters: Joi.number().min(0).max(1000).default(10),
+    tolerance_meters: Joi.number().min(0).max(100000).default(10),
 }).custom((value, helpers) => {
     if (value.id !== undefined) { return value; }
     if (value.lng !== undefined && value.lat !== undefined) { return value; }

@@ -65,46 +65,6 @@ const setLayerActive = async (req, res) => {
     OK(res, t(payload.is_active ? 'map_layer_activated_success' : 'map_layer_deactivated_success', req.lang), layer);
 };
 
-const listFeatures = async (req, res) => {
-    const query = validate(schemas.listFeaturesQuery, req.query, req.lang);
-    const data = await mapService.listFeatures(req.params.code, query, req.user);
-    OK(res, t('map_feature_list_success', req.lang), data);
-};
-
-const getFeature = async (req, res) => {
-    const data = await mapService.getFeature(req.params.code, req.params.featureId, req.user);
-    OK(res, t('map_feature_get_success', req.lang), data);
-};
-
-const getFeatureInfo = async (req, res) => {
-    const query = validate(schemas.featureInfoQuery, req.query, req.lang);
-    const data = await mapService.getFeatureInfo(req.params.code, query, req.user);
-    OK(res, t('map_feature_info_success', req.lang), data);
-};
-
-const createFeature = async (req, res) => {
-    const payload = validate(schemas.featurePayload, req.body || {}, req.lang);
-    const data = await mapService.createFeature(req.params.code, payload, req.user);
-    CREATED(res, t('map_feature_created_success', req.lang), data);
-};
-
-const updateFeature = async (req, res) => {
-    const payload = validate(schemas.featurePayload, req.body || {}, req.lang);
-    const data = await mapService.updateFeature(req.params.code, req.params.featureId, payload, req.user);
-    OK(res, t('map_feature_updated_success', req.lang), data);
-};
-
-const deleteFeature = async (req, res) => {
-    const data = await mapService.deleteFeature(req.params.code, req.params.featureId, req.user);
-    OK(res, t('map_feature_deleted_success', req.lang), data);
-};
-
-const importFeatures = async (req, res) => {
-    const payload = validate(schemas.importPayload, req.body || {}, req.lang);
-    const data = await mapService.importFeatures(req.params.code, payload, req.user);
-    CREATED(res, t('map_import_success', req.lang), data);
-};
-
 const listImportJobs = async (req, res) => {
     const data = await mapService.listImportJobs(req.params.code, req.query || {}, req.user);
     OK(res, t('map_import_jobs_list_success', req.lang), data);
@@ -141,8 +101,8 @@ const harvestRaster = async (req, res) => {
 };
 
 module.exports = {
-    createFeature, createLayer, deleteFeature, deleteLayer, getFeature, getFeatureInfo, getImportJob,
-    getLayer, harvestRaster, importFeatures, importGeoFile, listFeatures, listImportJobs, listLayers,
-    publishLayer, setLayerActive, unpublishLayer, updateFeature, updateLayer,
+    createLayer, deleteLayer, getImportJob,
+    getLayer, harvestRaster, importGeoFile, listImportJobs, listLayers,
+    publishLayer, setLayerActive, unpublishLayer, updateLayer,
 };
 

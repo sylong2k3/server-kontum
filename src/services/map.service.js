@@ -30,13 +30,6 @@ const requireReadableLayer = async (code, user) => {
     return layer;
 };
 
-const requireEditableLayer = async (code) => {
-    const layer = await requireLayer(code);
-    if (layer.is_editable !== true) { throw new Api403Error(t('map_layer_not_editable'), ['LAYER_NOT_EDITABLE']); }
-    if (layer.geometry_type === 'RASTER') { throw new Api400Error(t('map_raster_feature_not_supported'), ['RASTER_FEATURE_NOT_SUPPORTED']); }
-    return layer;
-};
-
 const listLayers = async (user, { page = 1, limit = 100, filter = {} } = {}) => {
     const offset = (page - 1) * limit;
     const [rows, total] = await Promise.all([
@@ -57,6 +50,8 @@ const createLayer = async (payload, user) => {
         if (payload.geometry_type !== 'RASTER') {
             const tableExists = await layerRepo.physicalTableExists(payload.schema_name || 'gis', payload.table_name, client);
             if (!tableExists) { throw new Api400Error(t('map_gis_table_not_found'), ['GIS_TABLE_NOT_FOUND']); }
+            const tableUsed = await layerRepo.findByTableName(payload.table_name);
+            if (tableUsed) { throw new Api409Error(t('map_layer_table_already_used'), ['LAYER_TABLE_ALREADY_USED']); }
         }
         const layer = await layerRepo.createLayer(client, { ...payload, userId: user?.id || null });
         await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'create', source: 'api', newData: layer, changedBy: user?.id || null });
@@ -143,7 +138,12 @@ const publishLayer = async (code, user) => {
 
 const unpublishLayer = async (code, user) => {
     const layer = await requireLayer(code);
-    if (layer.geoserver_layer) { await geoserver.unpublishLayer(layer.geoserver_layer); }
+    if (layer.geoserver_layer) {
+        await geoserver.unpublishLayer(layer.geoserver_layer).catch((err) => {
+            if (err.status !== 404) { throw err; }
+            console.warn(`[MapService] GeoServer layer ${layer.geoserver_layer} không tồn tại, đánh dấu unpublish trong DB`);
+        });
+    }
     const updated = await layerRepo.markUnpublished({ code, updatedAt: layer.updated_at, updatedBy: user?.id || null });
     if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict'), ['OPTIMISTIC_LOCK_CONFLICT']); }
     const client = await db.pool.connect();
@@ -169,120 +169,18 @@ const setLayerActive = async (code, isActive, user) => {
     return updated;
 };
 
-const listFeatures = async (code, query, user) => layerRepo.listFeatures(await requireReadableLayer(code, user), query);
-const getFeature = async (code, featureId, user) => {
-    const layer = await requireReadableLayer(code, user);
-    const feature = await layerRepo.getFeature(layer, featureId);
-    if (!feature) { throw new Api404Error(t('map_feature_not_found'), ['FEATURE_NOT_FOUND']); }
-    return feature;
-};
-
-const getFeatureInfo = async (code, query, user) => {
-    const layer = await requireReadableLayer(code, user);
-    const feature = query.id !== undefined
-        ? await layerRepo.getFeature(layer, query.id)
-        : await layerRepo.findFeatureAtPoint(layer, query);
-    if (!feature) { throw new Api404Error(t('map_feature_not_found'), ['FEATURE_NOT_FOUND']); }
-    return feature;
-};
-
-const createFeature = async (code, payload, user) => {
-    const layer = await requireEditableLayer(code);
-    const client = await db.pool.connect();
-    try {
-        await client.query('BEGIN');
-        const feature = await layerRepo.insertFeature(client, layer, payload);
-        await layerRepo.refreshStats(client, layer.id);
-        await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'create', source: 'api', featureId: feature.id, newData: feature, geometryChanged: true, changedBy: user?.id || null });
-        await client.query('COMMIT');
-        return feature;
-    } catch (error) { await client.query('ROLLBACK'); throw error; }
-    finally { client.release(); }
-};
-
-const updateFeature = async (code, featureId, payload, user) => {
-    const layer = await requireEditableLayer(code);
-    const client = await db.pool.connect();
-    try {
-        await client.query('BEGIN');
-        const oldFeature = await layerRepo.getFeature(layer, featureId, client);
-        if (!oldFeature) { throw new Api404Error(t('map_feature_not_found'), ['FEATURE_NOT_FOUND']); }
-        const feature = await layerRepo.updateFeature(client, layer, featureId, payload);
-        await layerRepo.refreshStats(client, layer.id);
-        await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'update', source: 'api', featureId, oldData: oldFeature, newData: feature, geometryChanged: Object.prototype.hasOwnProperty.call(payload, 'geometry'), changedBy: user?.id || null });
-        await client.query('COMMIT');
-        return feature;
-    } catch (error) { await client.query('ROLLBACK'); throw error; }
-    finally { client.release(); }
-};
-
-const deleteFeature = async (code, featureId, user) => {
-    const layer = await requireEditableLayer(code);
-    const client = await db.pool.connect();
-    try {
-        await client.query('BEGIN');
-        const oldFeature = await layerRepo.deleteFeature(client, layer, featureId);
-        if (!oldFeature) { throw new Api404Error(t('map_feature_not_found'), ['FEATURE_NOT_FOUND']); }
-        await layerRepo.refreshStats(client, layer.id);
-        await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'delete', source: 'api', featureId, oldData: oldFeature, geometryChanged: true, changedBy: user?.id || null });
-        await client.query('COMMIT');
-        return oldFeature;
-    } catch (error) { await client.query('ROLLBACK'); throw error; }
-    finally { client.release(); }
-};
-
-const toFeatures = (payload) => {
-    if (payload.source_format === 'geojson') {
-        const data = payload.geojson;
-        if (!data) { throw new Api400Error(t('map_geojson_required'), ['GEOJSON_REQUIRED']); }
-        if (data.type === 'FeatureCollection') { return data.features || []; }
-        if (data.type === 'Feature') { return [data]; }
-        throw new Api400Error(t('map_invalid_geojson'), ['INVALID_GEOJSON']);
-    }
-    const rows = payload.csv || [];
-    return rows.map((row) => ({
-        type: 'Feature',
-        geometry: row[payload.geometry_field]
-            ? (typeof row[payload.geometry_field] === 'string' ? JSON.parse(row[payload.geometry_field]) : row[payload.geometry_field])
-            : { type: 'Point', coordinates: [Number(row[payload.lng_field]), Number(row[payload.lat_field])] },
-        properties: Object.fromEntries(Object.entries(row).filter(([key]) => ![payload.geometry_field, payload.lng_field, payload.lat_field].includes(key))),
-    }));
-};
-
-const importFeatures = async (code, payload, user) => {
-    const layer = await requireEditableLayer(code);
-    const features = toFeatures(payload);
-    const client = await db.pool.connect();
-    let job;
-    try {
-        await client.query('BEGIN');
-        job = await layerRepo.createImportJob(client, { layerId: layer.id, sourceFormat: payload.source_format, importMode: payload.import_mode, sridInput: payload.srid_input, encoding: payload.encoding, sourceInfo: { count: features.length }, status: 'processing', progress: 5, createdBy: user?.id || null });
-        if (payload.import_mode === 'overwrite') { await layerRepo.overwriteFeatures(client, layer); }
-        let imported = 0;
-        for (const feature of features) {
-            await layerRepo.insertFeature(client, layer, { geometry: feature.geometry, properties: feature.properties || {} });
-            imported += 1;
-        }
-        const updatedLayer = await layerRepo.refreshStats(client, layer.id);
-        await layerRepo.updateImportJob(client, job.id, { status: 'completed', progress: 100, total_features: features.length, imported_count: imported, failed_count: 0, result_summary: { layer_code: code }, completed_at: new Date() });
-        await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'bulk_import', source: 'import', importJobId: job.id, newData: { imported_count: imported }, geometryChanged: true, changedBy: user?.id || null });
-        await client.query('COMMIT');
-        if (payload.auto_publish && !updatedLayer.geoserver_layer) { await publishLayer(code, user); }
-        return { job_id: job.id, imported_count: imported, layer: updatedLayer };
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally { client.release(); }
-};
-
 const listImportJobs = async (code, query, user) => {
     const layer = await requireReadableLayer(code, user);
     return layerRepo.listImportJobs(layer.id, query);
 };
-const getImportJob = (id) => layerRepo.findImportJobById(id);
+const getImportJob = async (id) => {
+    const job = await layerRepo.findImportJobById(id);
+    if (!job) { throw new Api404Error(t('map_import_job_not_found'), ['IMPORT_JOB_NOT_FOUND']); }
+    return job;
+};
 
 module.exports = {
-    createFeature, createLayer, deleteFeature, deleteLayer, getFeature, getFeatureInfo, getImportJob,
-    getLayer, importFeatures, listFeatures, listImportJobs, listLayers, publishLayer, setLayerActive,
-    unpublishLayer, updateFeature, updateLayer,
+    createLayer, deleteLayer, getImportJob,
+    getLayer, listImportJobs, listLayers, publishLayer, setLayerActive,
+    unpublishLayer, updateLayer,
 };
