@@ -339,9 +339,50 @@ const upsertLayerByCode = async (client, payload) => {
     return rows[0];
 };
 
+/**
+ * Đọc dữ liệu của một lớp từ bảng vật lý dưới dạng GeoJSON Feature[].
+ * Geometry được transform về EPSG:4326. Dùng cho API chia sẻ (US-025).
+ *
+ * @param {object} layer  - row layer_registry (schema_name, table_name, geometry_column, epsg_code)
+ * @param {object} opts   - { bbox: [minLng,minLat,maxLng,maxLat], limit, offset }
+ * @returns {Promise<object[]>} mảng GeoJSON Feature
+ */
+const findFeaturesAsGeoJSON = async (layer, { bbox = null, limit = 500, offset = 0 } = {}) => {
+    const ref      = tableRef(layer);
+    const gcol     = geomCol(layer);
+    const rawGeom  = assertIdentifier(layer.geometry_column || 'geom', 'geometry_column');
+    const epsg     = Number(layer.epsg_code || 4326);
+    const geom4326 = `ST_Transform(ST_SetSRID(${gcol}, ${epsg}), 4326)`;
+
+    const params = [];
+    const where  = [`${gcol} IS NOT NULL`];
+
+    if (bbox) {
+        const [minLng, minLat, maxLng, maxLat] = bbox;
+        params.push(minLng, minLat, maxLng, maxLat);
+        where.push(
+            `${geom4326} && ST_MakeEnvelope($${params.length - 3},$${params.length - 2},$${params.length - 1},$${params.length},4326)`
+        );
+    }
+
+    params.push(limit, offset);
+    const sql = `
+        SELECT jsonb_build_object(
+            'type', 'Feature',
+            'geometry', ST_AsGeoJSON(${geom4326}, 6)::jsonb,
+            'properties', to_jsonb(t.*) - '${rawGeom}'
+        ) AS feature
+        FROM ${ref} t
+        WHERE ${where.join(' AND ')}
+        LIMIT $${params.length - 1} OFFSET $${params.length}`;
+
+    const { rows } = await db.query(sql, params);
+    return rows.map((r) => r.feature);
+};
+
 module.exports = {
     countAll, createImportJob, createLayer, deleteLayer, findAll, findByCode,
-    findByTableName, findImportJobById, geometryColumnExists,
+    findByTableName, findFeaturesAsGeoJSON, findImportJobById, geometryColumnExists,
     insertEditHistory, listImportJobs, markPublished, markUnpublished,
     physicalTableExists, refreshStats, setActive, updateImportJob,
     updateLayer, upsertLayerByCode,
