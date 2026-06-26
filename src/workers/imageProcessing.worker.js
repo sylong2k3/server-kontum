@@ -23,6 +23,7 @@ const fs      = require('fs');
 
 const repo    = require('../repositories/remote-sensing.repository');
 const minio   = require('../services/minio.service');
+const { t }   = require('../utils/i18n.util');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const WORKER_ID         = `worker-${os.hostname()}-${process.pid}`;
@@ -31,6 +32,7 @@ const JOB_BATCH_SIZE    = Number(process.env.WORKER_BATCH_SIZE || 3);
 const THUMBNAIL_WIDTH   = Number(process.env.WORKER_THUMB_WIDTH  || 800);
 const THUMBNAIL_HEIGHT  = Number(process.env.WORKER_THUMB_HEIGHT || 600);
 const THUMBNAIL_FORMAT  = 'png';
+const WORKER_LANG       = process.env.WORKER_LANG || 'vi';
 
 // Flag để tránh chạy đồng thời
 let isRunning = false;
@@ -121,7 +123,7 @@ const calcStatistics = async (inputBuffer) => {
                 total_pixels: total,
             });
         } catch (bandErr) {
-            console.warn(`[Worker] Không thể đọc band ${b}:`, bandErr.message);
+            console.warn(t('worker_band_read_failed', WORKER_LANG, { band: b }), bandErr.message);
         }
     }
 
@@ -133,7 +135,7 @@ const calcStatistics = async (inputBuffer) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const processJob = async (job) => {
-    console.info(`[Worker] Bắt đầu job #${job.id} | type=${job.job_type} | image=${job.image_name}`);
+    console.info(t('worker_job_started', WORKER_LANG, { id: job.id, type: job.job_type, image: job.image_name }));
 
     // Đánh dấu đang xử lý
     await repo.updateJobStatus(job.id, 'processing', { worker_id: WORKER_ID, progress: 0 });
@@ -147,11 +149,11 @@ const processJob = async (job) => {
         const primaryFile = files.find((f) => f.file_role === 'primary');
 
         if (!primaryFile) {
-            throw new Error('Không tìm thấy file GeoTIFF chính.');
+            throw new Error(t('remote_sensing_primary_file_not_found', WORKER_LANG));
         }
 
         // ── Bước 2: Download buffer từ MinIO ─────────────────────────────────
-        console.info(`[Worker] Downloading ${primaryFile.object_key} từ MinIO...`);
+        console.info(t('worker_downloading_from_minio', WORKER_LANG, { objectKey: primaryFile.object_key }));
 
         // CẢNH BÁO: downloadToBuffer nạp toàn bộ file vào RAM.
         // Với file > 500MB trên server RAM thấp, cần xử lý theo chunk.
@@ -166,7 +168,7 @@ const processJob = async (job) => {
         const hasThumbnail = files.some((f) => f.file_role === 'thumbnail');
         if (!hasThumbnail || job.job_type === 'gen_thumbnail' || job.job_type === 'full_pipeline') {
             try {
-                console.info('[Worker] Tạo thumbnail...');
+                console.info(t('worker_thumbnail_creating', WORKER_LANG));
                 const thumbBuffer    = await generateThumbnail(inputBuffer);
                 const thumbObjectKey = minio.buildObjectKey(
                     `job-${job.id}`,
@@ -191,10 +193,10 @@ const processJob = async (job) => {
                     file_size_bytes: thumbBuffer.length,
                 });
 
-                console.info('[Worker] Thumbnail tạo thành công:', thumbObjectKey);
+                console.info(t('worker_thumbnail_created', WORKER_LANG), thumbObjectKey);
             } catch (thumbErr) {
                 // Không fail toàn bộ job nếu thumbnail lỗi
-                console.warn('[Worker] Tạo thumbnail thất bại (non-fatal):', thumbErr.message);
+                console.warn(t('worker_thumbnail_failed', WORKER_LANG), thumbErr.message);
             }
         }
 
@@ -203,15 +205,15 @@ const processJob = async (job) => {
         // ── Bước 4: Tính thống kê band ────────────────────────────────────────
         if (job.job_type === 'calc_statistics' || job.job_type === 'full_pipeline') {
             try {
-                console.info('[Worker] Tính thống kê band...');
+                console.info(t('worker_stats_calculating', WORKER_LANG));
                 const statsArr = await calcStatistics(inputBuffer);
 
                 for (const s of statsArr) {
                     await repo.upsertStatistics(job.image_id, primaryFile.id, s);
                 }
-                console.info(`[Worker] Đã tính ${statsArr.length} band statistics.`);
+                console.info(t('worker_stats_calculated', WORKER_LANG, { count: statsArr.length }));
             } catch (statsErr) {
-                console.warn('[Worker] Tính stats thất bại (non-fatal):', statsErr.message);
+                console.warn(t('worker_stats_failed', WORKER_LANG), statsErr.message);
             }
         }
 
@@ -224,10 +226,10 @@ const processJob = async (job) => {
         });
         await repo.updateImage(job.image_id, { status: 'completed' }, null);
 
-        console.info(`[Worker] Job #${job.id} hoàn tất ✓`);
+        console.info(t('worker_job_completed', WORKER_LANG, { id: job.id }));
 
     } catch (err) {
-        console.error(`[Worker] Job #${job.id} thất bại:`, err.message);
+        console.error(t('worker_job_failed', WORKER_LANG, { id: job.id }), err.message);
 
         const nextRetryAt = new Date(Date.now() + 5 * 60 * 1000); // retry sau 5 phút
 
@@ -264,14 +266,14 @@ const runWorkerCycle = async () => {
         const jobs = await repo.findPendingJobs(JOB_BATCH_SIZE);
         if (jobs.length === 0) { return; }
 
-        console.info(`[Worker] Tìm thấy ${jobs.length} job(s) cần xử lý.`);
+        console.info(t('worker_jobs_found', WORKER_LANG, { count: jobs.length }));
 
         // Xử lý tuần tự (tránh OOM với nhiều file lớn đồng thời)
         for (const job of jobs) {
             await processJob(job);
         }
     } catch (err) {
-        console.error('[Worker] Lỗi trong worker cycle:', err.message);
+        console.error(t('worker_cycle_error', WORKER_LANG), err.message);
     } finally {
         isRunning = false;
     }
@@ -293,7 +295,7 @@ const startWorker = () => {
         scheduled: true,
         timezone:  'Asia/Ho_Chi_Minh',
     });
-    console.info(`[Worker] Image Processing Worker khởi động. Poll interval: ${POLL_INTERVAL}`);
+    console.info(t('worker_started', WORKER_LANG, { interval: POLL_INTERVAL }));
 };
 
 /**
@@ -303,7 +305,7 @@ const stopWorker = () => {
     if (cronTask) {
         cronTask.stop();
         cronTask = null;
-        console.info('[Worker] Image Processing Worker đã dừng.');
+        console.info(t('worker_stopped', WORKER_LANG));
     }
 };
 

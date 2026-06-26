@@ -85,6 +85,8 @@ const updateLayer = Joi.object({
     is_public:         Joi.boolean(),
     is_editable:       Joi.boolean(),
     layer_permissions: Joi.object(),
+    // Optimistic locking (optional): nếu client gửi, backend chỉ update khi updated_at khớp.
+    expectedUpdatedAt: Joi.date().iso(),
 }).min(1);
 
 const activeLayer = Joi.object({ is_active: Joi.boolean().required() });

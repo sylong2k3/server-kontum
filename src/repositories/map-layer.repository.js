@@ -6,6 +6,7 @@
  */
 
 const db = require('../configs/database');
+const { versionCondition } = require('../utils/optimistic-lock.util');
 
 const IDENTIFIER_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const exec = (client) => (text, params) => client ? client.query(text, params) : db.query(text, params);
@@ -154,9 +155,15 @@ const updateLayer = async (client, code, payload) => {
     });
     if (!sets.length) { return findByCode(code, client); }
     params.push(payload.userId || null);
+    const userByIdx = params.length;
+    let lockSql = '';
+    if (payload.expectedUpdatedAt) {
+        params.push(payload.expectedUpdatedAt);
+        lockSql = versionCondition(params.length);
+    }
     const { rows } = await exec(client)(
-        `UPDATE gis.layer_registry SET ${sets.join(', ')}, updated_by = $${params.length}, updated_at = NOW()
-         WHERE code = $1 RETURNING ${LAYER_COLUMNS}`,
+        `UPDATE gis.layer_registry SET ${sets.join(', ')}, updated_by = $${userByIdx}, updated_at = NOW()
+         WHERE code = $1${lockSql} RETURNING ${LAYER_COLUMNS}`,
         params
     );
     return rows[0] || null;
@@ -180,7 +187,7 @@ const markPublished = async (client, { code, geoserverLayer, geoserverStore, upd
 const markUnpublished = async ({ code, updatedAt, updatedBy }) => {
     const { rows } = await db.query(
         `UPDATE gis.layer_registry SET geoserver_layer = NULL, geoserver_store = NULL, last_updated_at = NOW(), updated_at = NOW(), updated_by = $3
-         WHERE code = $1 AND date_trunc('milliseconds', updated_at) = $2::timestamptz RETURNING ${LAYER_COLUMNS}`,
+         WHERE code = $1${versionCondition(2)} RETURNING ${LAYER_COLUMNS}`,
         [code, updatedAt, updatedBy]
     );
     return rows[0] || null;
@@ -189,7 +196,7 @@ const markUnpublished = async ({ code, updatedAt, updatedBy }) => {
 const setActive = async ({ code, isActive, updatedAt, updatedBy }) => {
     const { rows } = await db.query(
         `UPDATE gis.layer_registry SET is_active = $2, last_updated_at = NOW(), updated_at = NOW(), updated_by = $4
-         WHERE code = $1 AND date_trunc('milliseconds', updated_at) = $3::timestamptz RETURNING ${LAYER_COLUMNS}`,
+         WHERE code = $1${versionCondition(3)} RETURNING ${LAYER_COLUMNS}`,
         [code, isActive, updatedAt, updatedBy]
     );
     return rows[0] || null;

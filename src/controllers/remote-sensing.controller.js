@@ -16,17 +16,31 @@ const {
     triggerProcessSchema,
 } = require('../validators/remote-sensing.validator');
 const { Api400Error } = require('../core/error.response');
+const { t } = require('../utils/i18n.util');
 
 // ── Helper validation ─────────────────────────────────────────────────────────
-const validate = (schema, data, options = {}) => {
+const validate = (schema, data, lang = 'vi', options = {}) => {
     const { error, value } = schema.validate(data, {
         abortEarly: false,
         stripUnknown: true,
         ...options,
     });
     if (error) {
-        const messages = error.details.map((d) => d.message).join('; ');
-        throw new Api400Error(messages, error.details.map((d) => d.type));
+        const messages = error.details.map((detail) => {
+            const path = detail.path.join('.');
+            const type = detail.type;
+            const context = detail.context || {};
+
+            const specificKey = `${path}.${type}`;
+            const generalKey = type;
+
+            let translated = t(specificKey, lang, context);
+            if (translated === specificKey) {
+                translated = t(generalKey, lang, context);
+            }
+            return translated === generalKey ? detail.message : translated;
+        });
+        throw new Api400Error(t('invalid_data', lang), messages);
     }
     return value;
 };
@@ -48,11 +62,11 @@ const uploadImage = async (req, res, next) => {
         const metaJsonFile  = req.files?.metadata_json?.[0] || null;
 
         if (!rasterFile) {
-            throw new Api400Error('Vui lòng đính kèm file GeoTIFF (field: raster_file).', ['RASTER_FILE_REQUIRED']);
+            throw new Api400Error(t('remote_sensing_file_required', req.lang), ['RASTER_FILE_REQUIRED']);
         }
 
         // Validate metadata từ body
-        const metadata = validate(createImageSchema, req.body);
+        const metadata = validate(createImageSchema, req.body, req.lang);
 
         const result = await svc.uploadImage({
             metadata,
@@ -60,11 +74,12 @@ const uploadImage = async (req, res, next) => {
             thumbnailFile,
             metaJsonFile,
             user: req.user,
+            lang: req.lang,
         });
 
         res.status(201).json({
             success: true,
-            message: 'Upload ảnh viễn thám thành công.',
+            message: t('remote_sensing_upload_success', req.lang),
             data: {
                 image:  result.image,
                 file:   result.file,
@@ -81,12 +96,12 @@ const uploadImage = async (req, res, next) => {
 // ══════════════════════════════════════════════════════════════════════════════
 const listImages = async (req, res, next) => {
     try {
-        const filters = validate(listImagesSchema, req.query);
-        const result  = await svc.listImages(filters, req.user);
+        const filters = validate(listImagesSchema, req.query, req.lang);
+        const result  = await svc.listImages(filters, req.user, req.lang);
 
         res.json({
             success: true,
-            message: 'Lấy danh sách ảnh thành công.',
+            message: t('remote_sensing_list_success', req.lang),
             data:    result.rows,
             meta: {
                 total:       result.total,
@@ -106,11 +121,11 @@ const listImages = async (req, res, next) => {
 const getImageDetail = async (req, res, next) => {
     try {
         const { id }  = req.params;
-        const detail  = await svc.getImageDetail(id, req.user);
+        const detail  = await svc.getImageDetail(id, req.user, req.lang);
 
         res.json({
             success: true,
-            message: 'Lấy chi tiết ảnh thành công.',
+            message: t('remote_sensing_get_success', req.lang),
             data: {
                 ...detail.image,
                 files:        detail.files,
@@ -129,16 +144,16 @@ const getImageDetail = async (req, res, next) => {
 const updateImage = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const data   = validate(updateImageSchema, req.body);
-        const result = await svc.updateImage(id, data, req.user);
+        const data   = validate(updateImageSchema, req.body, req.lang);
+        const result = await svc.updateImage(id, data, req.user, req.lang);
 
         if (!result) {
-            throw new Api400Error('Không tìm thấy ảnh hoặc không có thay đổi.', ['NOT_FOUND_OR_NO_CHANGE']);
+            throw new Api400Error(t('remote_sensing_no_change', req.lang), ['NOT_FOUND_OR_NO_CHANGE']);
         }
 
         res.json({
             success: true,
-            message: 'Cập nhật ảnh viễn thám thành công.',
+            message: t('remote_sensing_update_success', req.lang),
             data:    result,
         });
     } catch (err) {
@@ -152,18 +167,19 @@ const updateImage = async (req, res, next) => {
 const deleteImage = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const query  = validate(deleteImageSchema, req.query);
+        const query  = validate(deleteImageSchema, req.query, req.lang);
 
         const result = await svc.deleteImage(id, {
             hardDelete: query.hard_delete,
             user:       req.user,
+            lang:       req.lang,
         });
 
         res.json({
             success: true,
             message: query.hard_delete
-                ? 'Đã xóa ảnh và file MinIO thành công.'
-                : 'Đã xóa ảnh thành công (soft delete).',
+                ? t('remote_sensing_delete_hard_success', req.lang)
+                : t('remote_sensing_delete_soft_success', req.lang),
             data: result,
         });
     } catch (err) {
@@ -177,17 +193,18 @@ const deleteImage = async (req, res, next) => {
 const getDownloadUrl = async (req, res, next) => {
     try {
         const { id }  = req.params;
-        const query   = validate(downloadSchema, req.query);
+        const query   = validate(downloadSchema, req.query, req.lang);
         const result  = await svc.getDownloadUrl(id, {
             fileId:    query.file_id,
             user:      req.user,
             ip:        getClientIp(req),
             userAgent: req.headers['user-agent'],
+            lang:      req.lang,
         });
 
         res.json({
             success: true,
-            message: 'Tạo link tải thành công. Link hết hạn sau 15 phút.',
+            message: t('remote_sensing_download_success', req.lang),
             data:    result,
         });
     } catch (err) {
@@ -201,11 +218,11 @@ const getDownloadUrl = async (req, res, next) => {
 const getCogUrl = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const result = await svc.getCogUrl(id, req.user);
+        const result = await svc.getCogUrl(id, req.user, req.lang);
 
         res.json({
             success: true,
-            message: 'Lấy COG URL thành công.',
+            message: t('remote_sensing_cog_url_success', req.lang),
             data:    result,
         });
     } catch (err) {
@@ -218,12 +235,12 @@ const getCogUrl = async (req, res, next) => {
 // ══════════════════════════════════════════════════════════════════════════════
 const getLayers = async (req, res, next) => {
     try {
-        const filters = validate(layersQuerySchema, req.query);
-        const layers  = await svc.getLayersForWebGIS(filters);
+        const filters = validate(layersQuerySchema, req.query, req.lang);
+        const layers  = await svc.getLayersForWebGIS(filters, req.lang);
 
         res.json({
             success: true,
-            message: 'Lấy danh sách layers thành công.',
+            message: t('remote_sensing_layers_success', req.lang),
             data:    layers,
             meta:    { count: layers.length },
         });
@@ -238,15 +255,16 @@ const getLayers = async (req, res, next) => {
 const triggerProcess = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const body   = validate(triggerProcessSchema, req.body);
+        const body   = validate(triggerProcessSchema, req.body, req.lang);
         const result = await svc.triggerProcessingJob(id, {
             ...body,
             user: req.user,
+            lang: req.lang,
         });
 
         res.status(202).json({
             success: true,
-            message: 'Đã tạo job xử lý ảnh. Kết quả sẽ được cập nhật sau.',
+            message: t('remote_sensing_process_queued', req.lang),
             data:    result,
         });
     } catch (err) {
@@ -260,11 +278,11 @@ const triggerProcess = async (req, res, next) => {
 const getStatistics = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const result = await svc.getStatistics(id, req.user);
+        const result = await svc.getStatistics(id, req.user, req.lang);
 
         res.json({
             success: true,
-            message: 'Lấy thống kê band thành công.',
+            message: t('remote_sensing_stats_success', req.lang),
             data:    result,
         });
     } catch (err) {
@@ -279,19 +297,22 @@ const getPresignedUploadUrl = async (req, res, next) => {
     try {
         const { file_name } = req.query;
         if (!file_name) {
-            throw new Api400Error('Vui lòng cung cấp tên file (query: file_name).', ['FILE_NAME_REQUIRED']);
+            throw new Api400Error(t('remote_sensing_filename_required', req.lang), ['FILE_NAME_REQUIRED']);
         }
         const result = await svc.getPresignedUploadUrl({
             fileName: file_name,
             user:     req.user,
+            lang:     req.lang,
         });
 
         res.json({
             success: true,
-            message: 'Tạo presigned upload URL thành công.',
+            message: t('remote_sensing_presigned_success', req.lang),
             data: {
                 ...result,
-                instructions: 'Dùng HTTP PUT với URL này để upload file trực tiếp lên MinIO. Đính kèm header: Content-Type: image/tiff',
+                instructions: req.lang === 'en'
+                    ? 'Use HTTP PUT with this URL to upload file directly to MinIO. Attach header: Content-Type: image/tiff'
+                    : 'Dùng HTTP PUT với URL này để upload file trực tiếp lên MinIO. Đính kèm header: Content-Type: image/tiff',
             },
         });
     } catch (err) {

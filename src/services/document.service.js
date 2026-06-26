@@ -129,7 +129,7 @@ const updateDocumentMeta = async (actor, id, payload, context = {}) => {
     if (!existing) {throw new Api404Error(t('document_not_found', context.lang));}
 
     const updated = await documentRepository.updateMeta(id, payload);
-    if (!updated) {throw new Api409Error('Tài liệu đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');}
+    if (!updated) {throw new Api409Error(t('document_optimistic_lock_conflict', context.lang));}
 
     return { message: t('document_updated_success', context.lang), document: { id: updated.id, docType: updated.doc_type, isPublic: updated.is_public } };
 };
@@ -180,7 +180,7 @@ const updateDocumentFull = async (actor, id, payload, context = {}) => {
 
         const metaUpdated = await documentRepository.updateMeta(id, metaPayload, { client });
         if (!metaUpdated) {
-            throw new Api409Error('Tài liệu đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');
+            throw new Api409Error(t('document_optimistic_lock_conflict', context.lang));
         }
 
         // 2. Upsert từng bản dịch trong cùng transaction.

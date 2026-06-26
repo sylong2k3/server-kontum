@@ -46,12 +46,10 @@ const bboxSchema = Joi.alternatives().try(
  */
 const createImageSchema = Joi.object({
     // Thông tin bắt buộc
-    name:             Joi.string().trim().min(2).max(500).required()
-                         .messages({ 'string.empty': 'Tên ảnh không được để trống' }),
+    name:             Joi.string().trim().min(2).max(500).required(),
     satellite:        Joi.string().valid(...SATELLITE_TYPES).required(),
     image_type:       Joi.string().valid(...IMAGE_TYPES).required(),
-    acquisition_date: Joi.date().iso().max('now').required()
-                         .messages({ 'date.max': 'Ngày chụp không thể trong tương lai' }),
+    acquisition_date: Joi.date().iso().max('now').required(),
 
     // Không gian địa lý
     bbox:             bboxSchema.optional(),
@@ -97,14 +95,12 @@ const listImagesSchema = Joi.object({
 
     // Lọc theo khoảng ngày
     date_from:     Joi.date().iso().optional(),
-    date_to:       Joi.date().iso().min(Joi.ref('date_from')).optional()
-                      .messages({ 'date.min': 'date_to phải sau date_from' }),
+    date_to:       Joi.date().iso().min(Joi.ref('date_from')).optional(),
 
     // Bộ lọc không gian (bbox: "minLon,minLat,maxLon,maxLat")
     bbox:          Joi.string()
                       .pattern(/^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$/)
-                      .optional()
-                      .messages({ 'string.pattern.base': 'bbox phải có dạng: minLon,minLat,maxLon,maxLat' }),
+                      .optional(),
 
     // Phân trang
     page:          Joi.number().integer().min(1).default(1),
@@ -142,7 +138,9 @@ const updateImageSchema = Joi.object({
     is_featured:      Joi.boolean().optional(),
     status:           Joi.string().valid(...PROCESSING_STATUSES).optional(),
     extra_metadata:   Joi.object().optional(),
-}).min(1).messages({ 'object.min': 'Vui lòng cung cấp ít nhất một trường cần cập nhật' });
+    // Optimistic locking (optional): nếu client gửi, backend chỉ update khi updated_at khớp.
+    expectedUpdatedAt: Joi.date().iso().optional(),
+}).min(1);
 
 /**
  * DELETE /api/v1/remote-sensing/images/:id

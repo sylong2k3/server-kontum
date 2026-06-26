@@ -9,6 +9,9 @@ require('dotenv').config();
 const db = require('../../configs/database');
 const userRepository = require('../../repositories/user.repository');
 const { hashPassword } = require('../../utils/cryptoHelper.util');
+const { t } = require('../../utils/i18n.util');
+
+const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 
 // Mật khẩu mặc định DÙNG CHUNG cho cả 4 tài khoản (thỏa: >=8 ký tự, có chữ thường, chữ hoa, số).
 const DEFAULT_PASSWORD = 'Kontum@2026';
@@ -48,7 +51,11 @@ const USERS = [
 
             if (existing) {
                 await userRepository.updatePassword(existing.id, passwordHash);
-                console.log(`↻ Cập nhật mật khẩu: id=${existing.id} ${u.email} [${u.roleCode}]`);
+                console.log(t('seed_user_password_updated', getLang(), {
+                    id: existing.id,
+                    email: u.email,
+                    role: u.roleCode,
+                }));
                 continue;
             }
 
@@ -60,10 +67,14 @@ const USERS = [
                 roleCode: u.roleCode,
             });
 
-            console.log(`✓ Tạo: id=${created.id} ${u.email} [${u.roleCode}]`);
+            console.log(t('seed_user_created', getLang(), {
+                id: created.id,
+                email: u.email,
+                role: u.roleCode,
+            }));
         }
 
-        console.log(`\nSeed người dùng hoàn tất. Mật khẩu chung: ${DEFAULT_PASSWORD}`);
+        console.log(`\n${t('seed_user_completed', getLang(), { password: DEFAULT_PASSWORD })}`);
         await db.pool.end();
         process.exit(0);
     } catch (e) {

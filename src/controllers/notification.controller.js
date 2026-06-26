@@ -48,11 +48,11 @@ const sendNotification = async (req, res) => {
 
     let notification;
     if (target === 'user') {
-        notification = await notificationService.sendToUser(userId, payload);
+        notification = await notificationService.sendToUser(userId, payload, { lang: req.lang });
     } else if (target === 'role') {
-        notification = await notificationService.broadcastToRole(roleCode, payload);
+        notification = await notificationService.broadcastToRole(roleCode, payload, { lang: req.lang });
     } else {
-        notification = await notificationService.broadcastToAll(payload);
+        notification = await notificationService.broadcastToAll(payload, { lang: req.lang });
     }
 
     CREATED(res, t('notification_sent', req.lang), { id: notification.id });

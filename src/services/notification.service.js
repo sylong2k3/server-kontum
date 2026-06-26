@@ -16,9 +16,9 @@ const roleTopic = (roleCode) => `role_${roleCode}`;
  * Gửi thông báo cá nhân tới 1 người dùng.
  * Luồng: lưu DB → đẩy WebSocket (nếu online) → push FCM (mọi thiết bị đã đăng ký).
  */
-const sendToUser = async (userId, { type, title, body, data = {}, channel = 'system', expiresAt = null }) => {
+const sendToUser = async (userId, { type, title, body, data = {}, channel = 'system', expiresAt = null }, context = {}) => {
     if (!userId || !type || !title) {
-        throw new Api400Error('userId, type, title là bắt buộc');
+        throw new Api400Error(t('notification_send_user_required', context.lang));
     }
 
     const notification = await notificationRepository.create({
@@ -47,9 +47,9 @@ const sendToUser = async (userId, { type, title, body, data = {}, channel = 'sys
 /**
  * Gửi thông báo broadcast tới toàn bộ người dùng.
  */
-const broadcastToAll = async ({ type, title, body, data = {}, channel = 'system', expiresAt = null }) => {
+const broadcastToAll = async ({ type, title, body, data = {}, channel = 'system', expiresAt = null }, context = {}) => {
     if (!type || !title) {
-        throw new Api400Error('type, title là bắt buộc');
+        throw new Api400Error(t('notification_send_all_required', context.lang));
     }
 
     const notification = await notificationRepository.create({
@@ -72,9 +72,9 @@ const broadcastToAll = async ({ type, title, body, data = {}, channel = 'system'
 /**
  * Gửi thông báo broadcast tới toàn bộ người dùng thuộc 1 vai trò.
  */
-const broadcastToRole = async (roleCode, { type, title, body, data = {}, channel = 'system', expiresAt = null }) => {
+const broadcastToRole = async (roleCode, { type, title, body, data = {}, channel = 'system', expiresAt = null }, context = {}) => {
     if (!roleCode || !type || !title) {
-        throw new Api400Error('roleCode, type, title là bắt buộc');
+        throw new Api400Error(t('notification_send_role_required', context.lang));
     }
 
     const notification = await notificationRepository.create({

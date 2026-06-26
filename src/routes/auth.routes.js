@@ -5,6 +5,7 @@ const asyncHandler = require('../helpers/async-handler');
 const authController = require('../controllers/auth.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 const { validate } = require('../middlewares/validate.middleware');
+const { t } = require('../utils/i18n.util');
 const {
     registerSchema,
     loginSchema,
@@ -22,17 +23,19 @@ const {
 } = require('../validators/auth.validator');
 
 const router = Router();
+const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
+const tooManyRequestsMessage = () => ({
+    success: false,
+    message: t('too_many_requests', getLang()),
+    errors: ['TOO_MANY_REQUESTS'],
+});
 
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: parseInt(process.env.AUTH_RATE_LIMIT, 10) || 20,
     standardHeaders: true,
     legacyHeaders: false,
-    message: {
-        success: false,
-        message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.',
-        errors: ['TOO_MANY_REQUESTS'],
-    },
+    message: tooManyRequestsMessage,
 });
 
 const passwordResetLimiter = rateLimit({
@@ -40,11 +43,7 @@ const passwordResetLimiter = rateLimit({
     max: parseInt(process.env.RESET_RATE_LIMIT, 10) || 5,
     standardHeaders: true,
     legacyHeaders: false,
-    message: {
-        success: false,
-        message: 'Quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.',
-        errors: ['TOO_MANY_REQUESTS'],
-    },
+    message: tooManyRequestsMessage,
 });
 
 router.post('/register', authLimiter, validate(registerSchema), asyncHandler(authController.register));

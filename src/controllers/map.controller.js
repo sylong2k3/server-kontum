@@ -28,50 +28,50 @@ const listLayers = async (req, res) => {
 };
 
 const getLayer = async (req, res) => {
-    const layer = await mapService.getLayer(req.params.code, req.user);
+    const layer = await mapService.getLayer(req.params.code, req.user, req.lang);
     OK(res, t('map_layer_get_success', req.lang), layer);
 };
 
 const createLayer = async (req, res) => {
     const payload = validate(schemas.createLayer, req.body || {}, req.lang);
-    const layer = await mapService.createLayer(payload, req.user);
+    const layer = await mapService.createLayer(payload, req.user, req.lang);
     CREATED(res, t('map_layer_created_success', req.lang), layer);
 };
 
 const updateLayer = async (req, res) => {
     const payload = validate(schemas.updateLayer, req.body || {}, req.lang);
-    const layer = await mapService.updateLayer(req.params.code, payload, req.user);
+    const layer = await mapService.updateLayer(req.params.code, payload, req.user, req.lang);
     OK(res, t('map_layer_updated_success', req.lang), layer);
 };
 
 const deleteLayer = async (req, res) => {
-    const layer = await mapService.deleteLayer(req.params.code, req.user);
+    const layer = await mapService.deleteLayer(req.params.code, req.user, req.lang);
     OK(res, t('map_layer_deleted_success', req.lang), layer);
 };
 
 const publishLayer = async (req, res) => {
-    const layer = await mapService.publishLayer(req.params.code, req.user);
+    const layer = await mapService.publishLayer(req.params.code, req.user, req.lang);
     CREATED(res, t('map_layer_published_success', req.lang), layer);
 };
 
 const unpublishLayer = async (req, res) => {
-    const layer = await mapService.unpublishLayer(req.params.code, req.user);
+    const layer = await mapService.unpublishLayer(req.params.code, req.user, req.lang);
     OK(res, t('map_layer_unpublished_success', req.lang), layer);
 };
 
 const setLayerActive = async (req, res) => {
     const payload = validate(schemas.activeLayer, req.body || {}, req.lang);
-    const layer = await mapService.setLayerActive(req.params.code, payload.is_active, req.user);
+    const layer = await mapService.setLayerActive(req.params.code, payload.is_active, req.user, req.lang);
     OK(res, t(payload.is_active ? 'map_layer_activated_success' : 'map_layer_deactivated_success', req.lang), layer);
 };
 
 const listImportJobs = async (req, res) => {
-    const data = await mapService.listImportJobs(req.params.code, req.query || {}, req.user);
+    const data = await mapService.listImportJobs(req.params.code, req.query || {}, req.user, req.lang);
     OK(res, t('map_import_jobs_list_success', req.lang), data);
 };
 
 const getImportJob = async (req, res) => {
-    const data = await mapService.getImportJob(req.params.jobId);
+    const data = await mapService.getImportJob(req.params.jobId, req.lang);
     OK(res, t('map_import_job_get_success', req.lang), data);
 };
 

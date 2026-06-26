@@ -16,9 +16,12 @@ const os   = require('os');
 const db   = require('../configs/database');
 const geoImportService = require('../services/geo-import.service');
 
+const { t } = require('../utils/i18n.util');
+
 const WORKER_ID      = `geo-worker-${os.hostname()}-${process.pid}`;
 const POLL_INTERVAL  = process.env.GEO_WORKER_POLL_CRON || '*/15 * * * * *';
 const JOB_BATCH_SIZE = Number(process.env.GEO_WORKER_BATCH_SIZE || 2);
+const WORKER_LANG    = process.env.APP_LANG || process.env.LANG || 'vi';
 
 // Format geo file (phân biệt với remote-sensing jobs)
 const GEO_FORMATS = ['shapefile', 'geojson', 'kml', 'geotiff', 'filegdb'];
@@ -62,7 +65,7 @@ const tick = async () => {
     try {
         jobs = await fetchPendingJobs();
     } catch (err) {
-        console.error(`[${WORKER_ID}] Lỗi query pending jobs:`, err.message);
+        console.error(t('geo_worker_query_failed', WORKER_LANG, { workerId: WORKER_ID }), err.message);
         isRunning = false;
         return;
     }
@@ -72,16 +75,16 @@ const tick = async () => {
         return;
     }
 
-    console.log(`[${WORKER_ID}] Xử lý ${jobs.length} geo import job(s)...`);
+    console.log(t('geo_worker_jobs_processing', WORKER_LANG, { workerId: WORKER_ID, count: jobs.length }));
 
     await Promise.allSettled(
         jobs.map(async (job) => {
             try {
                 await markProcessing(job.id);
-                await geoImportService.runImportJob(job.id);
-                console.log(`[${WORKER_ID}] Job #${job.id} hoàn thành`);
+                await geoImportService.runImportJob(job.id, WORKER_LANG);
+                console.log(t('geo_worker_job_completed', WORKER_LANG, { workerId: WORKER_ID, id: job.id }));
             } catch (err) {
-                console.error(`[${WORKER_ID}] Job #${job.id} thất bại:`, err.message);
+                console.error(t('geo_worker_job_failed', WORKER_LANG, { workerId: WORKER_ID, id: job.id }), err.message);
             }
         })
     );
@@ -93,7 +96,7 @@ const tick = async () => {
 
 const startWorker = () => {
     if (cronJob) { return; }
-    console.log(`[${WORKER_ID}] GeoImport Worker khởi động (cron: ${POLL_INTERVAL})`);
+    console.log(t('geo_worker_started', WORKER_LANG, { workerId: WORKER_ID, cron: POLL_INTERVAL }));
     cronJob = cron.schedule(POLL_INTERVAL, tick);
 };
 
@@ -101,7 +104,7 @@ const stopWorker = () => {
     if (cronJob) {
         cronJob.stop();
         cronJob = null;
-        console.log(`[${WORKER_ID}] GeoImport Worker đã dừng`);
+        console.log(t('geo_worker_stopped', WORKER_LANG, { workerId: WORKER_ID }));
     }
 };
 

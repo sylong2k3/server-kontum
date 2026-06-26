@@ -1,9 +1,11 @@
 const { Readable }   = require('stream');
 const repo    = require('../repositories/remote-sensing.repository');
 const minio   = require('./minio.service');
-const { Api404Error, Api403Error, Api400Error } = require('../core/error.response');
+const { Api404Error, Api403Error, Api400Error, Api409Error } = require('../core/error.response');
+const { t } = require('../utils/i18n.util');
+const { v4: uuidv4 } = require('uuid');
 
-const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, user }) => {
+const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, user, lang }) => {
     const imageUuid    = uuidv4();
     const uploadedKeys = [];
 
@@ -21,7 +23,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
         rasterEtag = result.etag;
         uploadedKeys.push({ objectKey: rasterObjectKey, bucket: minio.BUCKET_REMOTE_SENSING });
     } catch (err) {
-        throw new Error(`Upload file GeoTIFF lên MinIO thất bại: ${err.message}`);
+        throw new Error(t('remote_sensing_minio_upload_failed', lang, { msg: err.message }));
     }
 
     let thumbnailObjectKey = null;
@@ -35,7 +37,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
             });
             uploadedKeys.push({ objectKey: thumbnailObjectKey, bucket: minio.BUCKET_REMOTE_SENSING });
         } catch (err) {
-            console.warn('[RemoteSensing] Upload thumbnail thất bại:', err.message);
+            console.warn(t('remote_sensing_thumbnail_upload_failed_log', lang), err.message);
             thumbnailObjectKey = null;
         }
     }
@@ -50,7 +52,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
             });
             uploadedKeys.push({ objectKey: metaJsonObjectKey, bucket: minio.BUCKET_REMOTE_SENSING });
         } catch (err) {
-            console.warn('[RemoteSensing] Upload metadata JSON thất bại:', err.message);
+            console.warn(t('remote_sensing_metadata_upload_failed_log', lang), err.message);
             metaJsonObjectKey = null;
         }
     }
@@ -110,13 +112,13 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
 
     } catch (err) {
         // ⚠ Rollback: xóa tất cả objects đã upload lên MinIO
-        console.error('[RemoteSensing] DB insert thất bại, rollback MinIO:', err.message);
+        console.error(t('remote_sensing_db_insert_failed_rollback', lang), err.message);
         for (const { objectKey, bucket } of uploadedKeys) {
             try {
                 await minio.removeObject(objectKey, bucket);
-                console.info(`[RemoteSensing] Đã rollback object: ${objectKey}`);
+                console.info(t('remote_sensing_rollback_object_done', lang, { objectKey }));
             } catch (rollbackErr) {
-                console.error(`[RemoteSensing] Không thể xóa object ${objectKey}:`, rollbackErr.message);
+                console.error(t('remote_sensing_rollback_object_failed', lang, { objectKey }), rollbackErr.message);
             }
         }
         throw err;
@@ -133,7 +135,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
  * Tạo presigned PUT URL để client upload file lớn trực tiếp lên MinIO.
  * Phù hợp khi file > 500MB (tránh qua Node.js server).
  */
-const getPresignedUploadUrl = async ({ fileName }) => {
+const getPresignedUploadUrl = async ({ fileName, user, lang }) => {
     const imageUuid   = uuidv4();
     const objectKey   = minio.buildObjectKey(imageUuid, fileName, 'raster');
     const result      = await minio.getPresignedUploadUrl(objectKey);
@@ -144,7 +146,7 @@ const getPresignedUploadUrl = async ({ fileName }) => {
 //  LIST / DETAIL
 // ══════════════════════════════════════════════════════════════════════════════
 
-const listImages = async (filters, user) => {
+const listImages = async (filters, user, lang) => {
     // Thêm viewer_role để filter is_public cho citizen
     const viewer_role = user?.role || 'citizen';
     const result = await repo.findImages({ ...filters, viewer_role });
@@ -153,15 +155,15 @@ const listImages = async (filters, user) => {
     return result;
 };
 
-const getImageDetail = async (idOrUuid, user) => {
+const getImageDetail = async (idOrUuid, user, lang) => {
     const image = await repo.findImageById(idOrUuid);
-    if (!image) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!image) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     // Kiểm tra quyền xem
     if (!image.is_public) {
-        if (!user) { throw new Api403Error('Ảnh này không công khai. Vui lòng đăng nhập.'); }
+        if (!user) { throw new Api403Error(t('remote_sensing_not_public_login', lang)); }
         const role = user.role;
-        if (role === 'citizen') { throw new Api403Error('Bạn không có quyền xem ảnh này.'); }
+        if (role === 'citizen') { throw new Api403Error(t('remote_sensing_no_view_permission', lang)); }
     }
 
     // Lấy danh sách files
@@ -187,33 +189,39 @@ const getImageDetail = async (idOrUuid, user) => {
 //  UPDATE
 // ══════════════════════════════════════════════════════════════════════════════
 
-const updateImage = async (idOrUuid, data, user) => {
+const updateImage = async (idOrUuid, data, user, lang) => {
     const existing = await repo.findImageById(idOrUuid);
-    if (!existing) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!existing) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     // Chỉ owner hoặc admin mới được sửa
     const isOwner = existing.created_by === user.id;
     const isAdmin = ['system_admin', 'so_nnmt'].includes(user.role);
     if (!isOwner && !isAdmin) {
-        throw new Api403Error('Bạn không có quyền cập nhật ảnh này.');
+        throw new Api403Error(t('remote_sensing_no_update_permission', lang));
     }
 
-    return repo.updateImage(existing.id, data, user.id);
+    const updated = await repo.updateImage(existing.id, data, user.id);
+    if (!updated) {
+        // existing đã xác nhận tồn tại ở trên → null nghĩa là expectedUpdatedAt lệch (conflict)
+        if (data.expectedUpdatedAt) { throw new Api409Error(t('optimistic_lock_conflict', lang)); }
+        throw new Api404Error(t('remote_sensing_not_found', lang));
+    }
+    return updated;
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  DELETE
 // ══════════════════════════════════════════════════════════════════════════════
 
-const deleteImage = async (idOrUuid, { hardDelete = false, user }) => {
+const deleteImage = async (idOrUuid, { hardDelete = false, user, lang }) => {
     const existing = await repo.findImageById(idOrUuid);
-    if (!existing) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!existing) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     // Chỉ owner hoặc admin mới được xóa
     const isOwner = existing.created_by === user.id;
     const isAdmin = ['system_admin'].includes(user.role);
     if (!isOwner && !isAdmin) {
-        throw new Api403Error('Bạn không có quyền xóa ảnh này.');
+        throw new Api403Error(t('remote_sensing_no_delete_permission', lang));
     }
 
     // Hard delete: xóa objects trên MinIO
@@ -223,9 +231,9 @@ const deleteImage = async (idOrUuid, { hardDelete = false, user }) => {
         if (objectKeys.length > 0) {
             try {
                 await minio.removeObjects(objectKeys, minio.BUCKET_REMOTE_SENSING);
-                console.info(`[RemoteSensing] Đã xóa ${objectKeys.length} objects trên MinIO.`);
+                console.info(t('remote_sensing_minio_objects_deleted', lang, { count: objectKeys.length }));
             } catch (err) {
-                console.error('[RemoteSensing] Lỗi xóa MinIO objects:', err.message);
+                console.error(t('remote_sensing_minio_delete_failed', lang), err.message);
             }
         }
     }
@@ -238,17 +246,17 @@ const deleteImage = async (idOrUuid, { hardDelete = false, user }) => {
 //  DOWNLOAD
 // ══════════════════════════════════════════════════════════════════════════════
 
-const getDownloadUrl = async (idOrUuid, { fileId, user, ip, userAgent }) => {
+const getDownloadUrl = async (idOrUuid, { fileId, user, ip, userAgent, lang }) => {
     const image = await repo.findImageById(idOrUuid);
-    if (!image) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!image) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     // Kiểm tra quyền download
     if (!image.is_public) {
-        if (!user) { throw new Api403Error('Vui lòng đăng nhập để tải ảnh.'); }
+        if (!user) { throw new Api403Error(t('remote_sensing_no_download_login', lang)); }
         const role = user.role;
         const perms = user.role_permissions?.remote_sensing || {};
         if (role !== 'system_admin' && !perms.download) {
-            throw new Api403Error('Bạn không có quyền tải ảnh này.');
+            throw new Api403Error(t('remote_sensing_no_download_permission', lang));
         }
     }
 
@@ -257,7 +265,7 @@ const getDownloadUrl = async (idOrUuid, { fileId, user, ip, userAgent }) => {
     if (fileId) {
         targetFile = await repo.findFileById(fileId);
         if (!targetFile || targetFile.image_id !== image.id) {
-            throw new Api404Error('File không tồn tại trong ảnh này.');
+            throw new Api404Error(t('remote_sensing_file_not_found', lang));
         }
     } else {
         const files = await repo.findFilesByImageId(image.id);
@@ -266,7 +274,7 @@ const getDownloadUrl = async (idOrUuid, { fileId, user, ip, userAgent }) => {
                   || files.find((f) => f.file_role === 'primary')
                   || files[0];
     }
-    if (!targetFile) { throw new Api404Error('Không tìm thấy file để tải.'); }
+    if (!targetFile) { throw new Api404Error(t('remote_sensing_download_file_not_found', lang)); }
 
     // Tạo presigned URL 15 phút
     const expireSeconds = Number(process.env.MINIO_PRESIGNED_EXPIRE_SECONDS) || 900;
@@ -297,19 +305,19 @@ const getDownloadUrl = async (idOrUuid, { fileId, user, ip, userAgent }) => {
 //  COG URL / WEBGIS
 // ══════════════════════════════════════════════════════════════════════════════
 
-const getCogUrl = async (idOrUuid, user) => {
+const getCogUrl = async (idOrUuid, user, lang) => {
     const image = await repo.findImageById(idOrUuid);
-    if (!image) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!image) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     if (!image.is_public && !user) {
-        throw new Api403Error('Ảnh này không công khai.');
+        throw new Api403Error(t('remote_sensing_not_public', lang));
     }
 
     const files     = await repo.findFilesByImageId(image.id);
     const cogFile   = files.find((f) => f.file_role === 'cog')
                    || files.find((f) => f.file_role === 'primary');
 
-    if (!cogFile) { throw new Api404Error('Chưa có file COG cho ảnh này.'); }
+    if (!cogFile) { throw new Api404Error(t('remote_sensing_no_cog', lang)); }
 
     // Presigned URL cho COG — expire 15 phút
     const expireSeconds = Number(process.env.MINIO_PRESIGNED_EXPIRE_SECONDS) || 900;
@@ -336,7 +344,7 @@ const getCogUrl = async (idOrUuid, user) => {
     };
 };
 
-const getLayersForWebGIS = async (filters) => {
+const getLayersForWebGIS = async (filters, lang) => {
     const rows = await repo.findLayersForWebGIS(filters);
 
     // Gắn presigned URL cho từng layer (batch)
@@ -390,9 +398,9 @@ const getLayersForWebGIS = async (filters) => {
 //  TRIGGER JOB
 // ══════════════════════════════════════════════════════════════════════════════
 
-const triggerProcessingJob = async (idOrUuid, { job_type, priority, user }) => {
+const triggerProcessingJob = async (idOrUuid, { job_type, priority, user, lang }) => {
     const image = await repo.findImageById(idOrUuid);
-    if (!image) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!image) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     const files       = await repo.findFilesByImageId(image.id);
     const primaryFile = files.find((f) => f.file_role === 'primary');
@@ -411,12 +419,12 @@ const triggerProcessingJob = async (idOrUuid, { job_type, priority, user }) => {
 //  STATISTICS
 // ══════════════════════════════════════════════════════════════════════════════
 
-const getStatistics = async (idOrUuid, user) => {
+const getStatistics = async (idOrUuid, user, lang) => {
     const image = await repo.findImageById(idOrUuid);
-    if (!image) { throw new Api404Error('Không tìm thấy ảnh viễn thám.'); }
+    if (!image) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
 
     if (!image.is_public && !user) {
-        throw new Api403Error('Vui lòng đăng nhập để xem thống kê.');
+        throw new Api403Error(t('remote_sensing_no_stats_login', lang));
     }
 
     const stats = await repo.findStatsByImageId(image.id);

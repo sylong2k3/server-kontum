@@ -548,6 +548,11 @@ const updateMe = async (userId, data, context = {}) => {
     };
 
     const updated = await userRepository.updateProfile(userId, normalized);
+    if (!updated) {
+        // user đã xác nhận tồn tại ở trên → null nghĩa là expectedUpdatedAt lệch (conflict)
+        if (normalized.expectedUpdatedAt) { throw new Api409Error(t('optimistic_lock_conflict', context.lang)); }
+        throw new Api404Error(t('user_not_found', context.lang));
+    }
     await _logActivity(userId, 'update_profile', 'success', context);
     return _sanitizeUser(updated, context.lang);
 };

@@ -209,7 +209,7 @@ const updatePdfMapFull = async (actor, id, payload, context = {}) => {
 
         const metaUpdated = await pdfMapRepository.updateMeta(id, metaPayload, { client });
         if (!metaUpdated) {
-            throw new Api409Error('Bản đồ đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');
+            throw new Api409Error(t('optimistic_lock_conflict', context.lang));
         }
 
         // 2. Upsert từng bản dịch

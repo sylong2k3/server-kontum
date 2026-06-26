@@ -2,6 +2,7 @@ const {
     DEFAULT_ALLOWED_PARAMS,
     assertGeoserverConfigured,
 } = require('../configs/geoserver');
+const { t } = require('./i18n.util');
 
 // ─── Custom Error ─────────────────────────────────────────────────────────────
 
@@ -86,14 +87,14 @@ const publishVectorLayer = async (layer) => {
 
     return `${workspace}:${featureName}`;
 };
-const publishRasterLayer = async (layer) => {
+const publishRasterLayer = async (layer, lang = 'vi') => {
     const config = assertGeoserverConfigured();
     const workspace = config.workspace;
     const storeName = layer.geoserver_store || layer.table_name;
     const sourceUrl = layer.source_url;
 
     if (!sourceUrl) {
-        throw new Error('publishRasterLayer: layer.source_url là bắt buộc');
+        throw new Error(t('geoserver_raster_source_required', lang));
     }
 
     // Tạo CoverageStore
@@ -131,14 +132,14 @@ const publishRasterLayer = async (layer) => {
 
     return `${workspace}:${storeName}`;
 };
-const publishTimelapseLayer = async (layer) => {
+const publishTimelapseLayer = async (layer, lang = 'vi') => {
     const config = assertGeoserverConfigured();
     const workspace = config.workspace;
     const storeName = layer.geoserver_store || layer.table_name;
     const mosaicPath = layer.mosaic_path;
 
     if (!mosaicPath) {
-        throw new Error('publishTimelapseLayer: layer.mosaic_path là bắt buộc');
+        throw new Error(t('geoserver_timelapse_mosaic_required', lang));
     }
 
     const fileUrl = mosaicPath.startsWith('file://') ? mosaicPath : `file://${mosaicPath}`;

@@ -1,4 +1,5 @@
 const db = require('../configs/database');
+const { versionCondition } = require('../utils/optimistic-lock.util');
 
 // ─── Sort whitelist ───────────────────────────────────────────────────────────
 
@@ -246,15 +247,15 @@ const updateMeta = async (id, payload, options = {}) => {
     params.push(id);
     const idParamIndex = params.length;
 
-    let versionCondition = '';
+    let lockSql = '';
     if (payload.expectedUpdatedAt) {
         params.push(payload.expectedUpdatedAt);
-        versionCondition = ` AND updated_at = $${params.length}::timestamptz`;
+        lockSql = versionCondition(params.length);
     }
 
     const result = await queryExecutor.query(
         `UPDATE cms.news SET ${fields.join(', ')}
-         WHERE id = $${idParamIndex} AND deleted_at IS NULL${versionCondition} RETURNING *`,
+         WHERE id = $${idParamIndex} AND deleted_at IS NULL${lockSql} RETURNING *`,
         params
     );
     return result.rows[0] || null;

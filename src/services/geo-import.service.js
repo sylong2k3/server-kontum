@@ -24,38 +24,23 @@ const GEO_IMPORT_SYNC_MAX_BYTES = Number(process.env.GEO_IMPORT_SYNC_MAX_BYTES |
 
 // ── Raster storage ────────────────────────────────────────────────────────────
 
-const getRasterDestDir = () => {
+const getRasterDestDir = (lang) => {
     const dir = process.env.GEOSERVER_DATA_DIR;
-    if (!dir) { throw new Api400Error(t('map_geo_raster_dir_missing'), ['RASTER_DIR_MISSING']); }
+    if (!dir) { throw new Api400Error(t('map_geo_raster_dir_missing', lang), ['RASTER_DIR_MISSING']); }
     return dir;
 };
 
-// ── Cleanup helper ────────────────────────────────────────────────────────────
 
 const safeUnlink = (filePath) => {
     if (!filePath) { return; }
     try { fs.unlinkSync(filePath); } catch { /* đã xóa hoặc không tồn tại */ }
 };
 
-// ── Build table name từ code ──────────────────────────────────────────────────
 
 const codeToTableName = (code) =>
     code.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z_]/, '_$&');
 
-// ── Enqueue: lưu job và chạy ngay nếu file nhỏ ───────────────────────────────
-
-/**
- * Tiếp nhận yêu cầu import file GIS.
- * - File nhỏ (< GEO_IMPORT_SYNC_MAX_BYTES): xử lý đồng bộ luôn.
- * - File lớn: tạo job pending, worker sẽ nhận và chạy.
- *
- * @param {object} opts
- * @param {Express.Multer.File} opts.file     - File đã upload (multer disk)
- * @param {object}              opts.payload  - Validated fields từ geo-import.validator
- * @param {object}              [opts.user]   - req.user (có thể null)
- * @returns {Promise<{job_id: number, code: string, status: string, sync: boolean}>}
- */
-const enqueueImport = async ({ file, payload, user }) => {
+const enqueueImport = async ({ file, payload, user, lang }) => {
     const code      = payload.code;
     const tableName = payload.table_name || codeToTableName(code);
     const userId    = user?.id || null;
@@ -120,8 +105,8 @@ const enqueueImport = async ({ file, payload, user }) => {
 
     if (isSmall) {
         // Chạy đồng bộ (không await để không block response)
-        runImportJob(job.id).catch((err) =>
-            console.error(`[GeoImport] Job #${job.id} sync lỗi:`, err.message)
+        runImportJob(job.id, lang).catch((err) =>
+            console.error(t('geo_import_sync_job_error', lang, { id: job.id }), err.message)
         );
     }
 
@@ -141,10 +126,10 @@ const enqueueImport = async ({ file, payload, user }) => {
  *
  * @param {number} jobId
  */
-const runImportJob = async (jobId) => {
+const runImportJob = async (jobId, lang = 'vi') => {
     // Lấy job
     const job = await layerRepo.findImportJobById(jobId);
-    if (!job) { throw new Error(`GeoImport: job #${jobId} không tìm thấy`); }
+    if (!job) { throw new Error(t('map_geo_import_job_not_found_with_id', lang, { id: jobId })); }
     if (job.status === 'completed' || job.status === 'cancelled') { return; }
 
     const info     = job.source_info || {};
@@ -172,9 +157,9 @@ const runImportJob = async (jobId) => {
             await updateProgress(10);
             let inspectResult;
             try {
-                inspectResult = await ogr.inspect(filePath, info.source_layer_name || null);
+                inspectResult = await ogr.inspect(filePath, info.source_layer_name || null, lang);
             } catch (err) {
-                throw new Error(`${t('map_geo_inspect_failed')}: ${err.message}`);
+                throw new Error(`${t('map_geo_inspect_failed', lang)}: ${err.message}`);
             }
 
             geometryType = inspectResult.geometryType;
@@ -193,11 +178,11 @@ const runImportJob = async (jobId) => {
                     sourceLayerName:  info.source_layer_name || null,
                     onProgress: async (pct, msg) => {
                         await updateProgress(20 + Math.round(pct * 0.5));
-                        console.log(`[GeoImport] Job #${jobId}: ${msg}`);
                     },
+                    lang,
                 });
             } catch (err) {
-                throw new Error(`${t('map_geo_ogr_failed')}: ${err.message}`);
+                throw new Error(`${t('map_geo_ogr_failed', lang)}: ${err.message}`);
             }
 
             await updateProgress(70);
@@ -211,13 +196,13 @@ const runImportJob = async (jobId) => {
             });
 
             // 4. Cập nhật layer_id trong job
-            await _finalizeJob(jobId, layerRow, featureCount, code, 'vector', payload.auto_publish);
+            await _finalizeJob(jobId, layerRow, featureCount, code, 'vector', payload.auto_publish, lang);
         }
 
         // ── Raster (GeoTIFF) ──────────────────────────────────────────────────
         else {
             await updateProgress(20);
-            const destDir  = getRasterDestDir();
+            const destDir  = getRasterDestDir(lang);
             const destFile = path.join(destDir, `${code}_${Date.now()}${path.extname(filePath)}`);
             fs.copyFileSync(filePath, destFile);
 
@@ -235,7 +220,7 @@ const runImportJob = async (jobId) => {
                 userId,
             });
 
-            await _finalizeJob(jobId, layerRow, 0, code, 'raster', payload.auto_publish);
+            await _finalizeJob(jobId, layerRow, 0, code, 'raster', payload.auto_publish, lang);
         }
 
         safeUnlink(filePath);
@@ -298,7 +283,7 @@ const _upsertAndRefresh = async ({ code, tableName, payload, geometryType, epsgC
     }
 };
 
-const _finalizeJob = async (jobId, layerRow, featureCount, code, kind, autoPublish) => {
+const _finalizeJob = async (jobId, layerRow, featureCount, code, kind, autoPublish, lang = 'vi') => {
     const client = await db.pool.connect();
     try {
         await layerRepo.updateImportJob(client, jobId, {
@@ -333,17 +318,17 @@ const _finalizeJob = async (jobId, layerRow, featureCount, code, kind, autoPubli
                         updatedBy:      layerRow.updated_by,
                     });
                 } finally { pubClient.release(); }
-                console.log(`[GeoImport] Job #${jobId}: published → ${geoserverLayerName}`);
+                console.log(t('geo_import_published', lang, { id: jobId, layer: geoserverLayerName }));
             } catch (pubErr) {
-                console.error(`[GeoImport] Job #${jobId}: auto-publish thất bại (không rollback import):`, pubErr.message);
+                console.error(t('geo_import_auto_publish_failed', lang, { id: jobId }), pubErr.message);
             }
         } else {
             // Re-import: layer đã publish → chỉ xóa tile cache cũ
             try {
                 await geoserver.truncateGwcLayer(layerRow.geoserver_layer);
-                console.log(`[GeoImport] Job #${jobId}: tile cache truncated cho ${layerRow.geoserver_layer}`);
+                console.log(t('geo_import_cache_truncated', lang, { id: jobId, layer: layerRow.geoserver_layer }));
             } catch (cacheErr) {
-                console.warn(`[GeoImport] Job #${jobId}: truncate cache lỗi (bỏ qua):`, cacheErr.message);
+                console.warn(t('geo_import_truncate_cache_failed', lang, { id: jobId }), cacheErr.message);
             }
         }
     }

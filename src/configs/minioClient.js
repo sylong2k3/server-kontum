@@ -7,6 +7,7 @@
  */
 
 const Minio = require('minio');
+const { t } = require('../utils/i18n.util');
 
 // ── Cấu hình từ biến môi trường ───────────────────────────────────────────────
 const MINIO_CONFIG = {
@@ -19,6 +20,8 @@ const MINIO_CONFIG = {
 
 const BUCKET_REMOTE_SENSING = process.env.MINIO_BUCKET_REMOTE_SENSING || 'remote-sensing-images';
 const DEFAULT_REGION         = process.env.MINIO_REGION || 'us-east-1';
+
+const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 
 // ── Khởi tạo client (singleton) ───────────────────────────────────────────────
 let _client = null;
@@ -39,9 +42,9 @@ const ensureBucket = async (client, bucketName) => {
     const exists = await client.bucketExists(bucketName);
     if (!exists) {
         await client.makeBucket(bucketName, DEFAULT_REGION);
-        console.info(`[MinIO] Bucket "${bucketName}" đã được tạo.`);
+        console.info(t('minio_bucket_created', getLang(), { bucket: bucketName }));
     } else {
-        console.info(`[MinIO] Bucket "${bucketName}" đã tồn tại.`);
+        console.info(t('minio_bucket_exists', getLang(), { bucket: bucketName }));
     }
 };
 
@@ -53,10 +56,10 @@ const initMinio = async () => {
     try {
         const client = getClient();
         await ensureBucket(client, BUCKET_REMOTE_SENSING);
-        console.info('[MinIO] Kết nối thành công.');
+        console.info(t('minio_connected', getLang()));
     } catch (err) {
         // Không crash server nếu MinIO chưa sẵn sàng — worker sẽ retry
-        console.error('[MinIO] Không thể kết nối:', err.message);
+        console.error(t('minio_connection_failed', getLang()), err.message);
     }
 };
 

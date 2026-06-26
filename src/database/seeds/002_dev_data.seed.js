@@ -1,9 +1,12 @@
 require('dotenv').config();
 const db = require('../../configs/database');
+const { t } = require('../../utils/i18n.util');
+
+const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 
 (async () => {
     try {
-        console.log('=== KHỞI TẠO SEED DỮ LIỆU ĐỂ DEV (NEWS, DOCUMENTS, FEEDBACK, NOTIFICATIONS) ===');
+        console.log(t('seed_dev_start', getLang()));
 
         // 1. Lấy thông tin các user mặc định
         const userRes = await db.query(`
@@ -15,8 +18,8 @@ const db = require('../../configs/database');
 
         const users = userRes.rows;
         if (users.length === 0) {
-            console.error('❌ Không tìm thấy user mặc định nào trong database.');
-            console.error('👉 Vui lòng chạy lệnh seed user trước: node src/database/seeds/001_users.seed.js');
+            console.error(t('seed_default_user_missing', getLang()));
+            console.error(t('seed_run_user_first', getLang()));
             process.exit(1);
         }
 
@@ -26,7 +29,7 @@ const db = require('../../configs/database');
         const citizenUser = users.find(u => u.role_code === 'citizen');
 
         if (!adminUser || !ubndUser || !sonnUser || !citizenUser) {
-            console.warn('⚠ Cảnh báo: Thiếu một số vai trò mặc định (system_admin, ubnd_tinh, so_nnmt, citizen) trong database.');
+            console.warn(t('seed_default_roles_missing', getLang()));
         }
 
         // Dùng user có sẵn làm dự phòng nếu thiếu
@@ -35,19 +38,19 @@ const db = require('../../configs/database');
         const authorUbnd = ubndUser?.id || users[0].id;
         const authorCitizen = citizenUser?.id || users[0].id;
 
-        console.log('✓ Xác định tác giả thành công:');
+        console.log(t('seed_authors_resolved', getLang()));
         console.log(`  - Admin ID: ${authorAdmin}`);
-        console.log(`  - Sở NN&MT ID: ${authorSonn}`);
-        console.log(`  - UBND Tỉnh ID: ${authorUbnd}`);
-        console.log(`  - Người dân ID: ${authorCitizen}`);
+        console.log(t('seed_author_sonn', getLang(), { id: authorSonn }));
+        console.log(t('seed_author_ubnd', getLang(), { id: authorUbnd }));
+        console.log(t('seed_author_citizen', getLang(), { id: authorCitizen }));
 
         // 2. Làm sạch dữ liệu cũ để tránh trùng lặp
-        console.log('\n🧹 Đang làm sạch dữ liệu cũ...');
+        console.log(`\n${t('seed_cleaning_old_data', getLang())}`);
         await db.query('TRUNCATE TABLE field.feedback_status_log, field.feedback, cms.news_translations, cms.news, cms.document_translations, cms.documents, core.notification_reads, core.notifications RESTART IDENTITY CASCADE');
-        console.log('✓ Đã làm sạch các bảng news, documents, feedback, notifications.');
+        console.log(t('seed_cleaned_old_data', getLang()));
 
         // 3. Seed News (Tin tức)
-        console.log('\n📰 Đang seed dữ liệu Tin tức (cms.news & cms.news_translations)...');
+        console.log(`\n${t('seed_news_start', getLang())}`);
         const newsItems = [
             {
                 cover_url: 'https://images.unsplash.com/photo-1542273917363-3b1817f69a2d?auto=format&fit=crop&w=800&q=80',
@@ -118,11 +121,11 @@ const db = require('../../configs/database');
                     [newsId, trans.lang, trans.title, trans.slug, trans.summary, trans.content]
                 );
             }
-            console.log(`  ✓ Đã seed tin tức: "${item.translations[0].title}"`);
+            console.log(t('seed_news_item_done', getLang(), { title: item.translations[0].title }));
         }
 
         // 4. Seed Documents (Tài liệu/Bản đồ)
-        console.log('\n📁 Đang seed dữ liệu Tài liệu (cms.documents & cms.document_translations)...');
+        console.log(`\n${t('seed_documents_start', getLang())}`);
         const documentItems = [
             {
                 doc_type: 'van_ban',
@@ -189,11 +192,11 @@ const db = require('../../configs/database');
                     [docId, trans.lang, trans.title, trans.description]
                 );
             }
-            console.log(`  ✓ Đã seed tài liệu: "${item.translations[0].title}"`);
+            console.log(t('seed_document_item_done', getLang(), { title: item.translations[0].title }));
         }
 
         // 5. Seed Feedback (Phản ánh hiện trường)
-        console.log('\n💬 Đang seed dữ liệu Phản ánh hiện trường (field.feedback & field.feedback_status_log)...');
+        console.log(`\n${t('seed_feedback_start', getLang())}`);
         const feedbackItems = [
             {
                 user_id: authorCitizen,
@@ -271,11 +274,11 @@ const db = require('../../configs/database');
                     [fbId, log.from_status, log.to_status, log.note, log.changed_by]
                 );
             }
-            console.log(`  ✓ Đã seed phản ánh: "${item.title}"`);
+            console.log(t('seed_feedback_item_done', getLang(), { title: item.title }));
         }
 
         // 6. Seed Notifications (Thông báo)
-        console.log('\n🔔 Đang seed dữ liệu Thông báo (core.notifications)...');
+        console.log(`\n${t('seed_notifications_start', getLang())}`);
         const notificationItems = [
             {
                 user_id: null,
@@ -328,14 +331,14 @@ const db = require('../../configs/database');
                     item.title, item.body, item.data
                 ]
             );
-            console.log(`  ✓ Đã seed thông báo: "${item.title}"`);
+            console.log(t('seed_notification_item_done', getLang(), { title: item.title }));
         }
 
-        console.log('\n🎉 ĐÃ KHỞI TẠO SEED DỮ LIỆU THÀNH CÔNG!');
+        console.log(`\n${t('seed_dev_completed', getLang())}`);
         await db.pool.end();
         process.exit(0);
     } catch (e) {
-        console.error('❌ SEED DỮ LIỆU THẤT BẠI:', e);
+        console.error(t('seed_dev_failed', getLang()), e);
         await db.pool.end().catch(() => {});
         process.exit(1);
     }

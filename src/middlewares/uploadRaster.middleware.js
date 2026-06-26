@@ -12,6 +12,7 @@
 const path    = require('path');
 const multer  = require('multer');
 const { Api400Error } = require('../core/error.response');
+const { t } = require('../utils/i18n.util');
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -84,14 +85,14 @@ const rasterUploader = multer({
         fileSize: RASTER_MAX_SIZE,
         files: 1,           // Mỗi request chỉ 1 file raster chính
     },
-    fileFilter: (_req, file, cb) => {
+    fileFilter: (req, file, cb) => {
         if (isRasterFile(file)) {
             cb(null, true);
         } else {
             const ext = path.extname(file.originalname).toLowerCase();
             cb(
                 new Api400Error(
-                    `Định dạng file không được phép: ${file.mimetype} (${ext}). Chỉ chấp nhận GeoTIFF (.tif, .tiff).`,
+                    t('upload_invalid_type_with_ext', req.lang, { mime: file.mimetype, ext }),
                     ['INVALID_RASTER_FILE_TYPE'],
                 ),
                 false,
@@ -115,14 +116,14 @@ const multiRasterUploader = multer({
         fileSize: RASTER_MAX_SIZE, // Áp dụng cho file lớn nhất trong request
         files: 3,
     },
-    fileFilter: (_req, file, cb) => {
+    fileFilter: (req, file, cb) => {
         if (isRasterFile(file) || isThumbnailFile(file) || isJsonFile(file)) {
             cb(null, true);
         } else {
             const ext = path.extname(file.originalname).toLowerCase();
             cb(
                 new Api400Error(
-                    `File "${file.originalname}" có định dạng không hợp lệ (${ext}).`,
+                    t('upload_invalid_file_name_ext', req.lang, { name: file.originalname, ext }),
                     ['INVALID_FILE_TYPE'],
                 ),
                 false,
@@ -163,7 +164,7 @@ const uploadRasterFields = (req, res, next) => {
 const requireRasterFile = (req, _res, next) => {
     const file = req.file || (req.files && req.files.raster_file?.[0]);
     if (!file) {
-        return next(new Api400Error('Vui lòng đính kèm file GeoTIFF (field: raster_file).', ['RASTER_FILE_REQUIRED']));
+        return next(new Api400Error(t('remote_sensing_file_required', req.lang), ['RASTER_FILE_REQUIRED']));
     }
     next();
 };
@@ -176,16 +177,16 @@ const handleRasterUploadError = (err, req, _res, next) => {
             case 'LIMIT_FILE_SIZE': {
                 const maxMB = Math.round(RASTER_MAX_SIZE / MB);
                 return next(new Api400Error(
-                    `File quá lớn. Giới hạn tối đa: ${maxMB} MB (${Math.round(maxMB / 1024)} GB).`,
+                    t('upload_file_too_large_limit', req.lang, { max: maxMB, gb: Math.round(maxMB / 1024) }),
                     ['FILE_TOO_LARGE'],
                 ));
             }
             case 'LIMIT_FILE_COUNT':
-                return next(new Api400Error('Vượt quá số lượng file cho phép.', ['TOO_MANY_FILES']));
+                return next(new Api400Error(t('upload_too_many_files_limit', req.lang), ['TOO_MANY_FILES']));
             case 'LIMIT_UNEXPECTED_FILE':
-                return next(new Api400Error(`Field upload không hợp lệ: ${err.field}`, ['UNEXPECTED_FIELD']));
+                return next(new Api400Error(t('upload_invalid_field', req.lang, { field: err.field }), ['UNEXPECTED_FIELD']));
             default:
-                return next(new Api400Error(`Lỗi upload: ${err.message}`, [err.code]));
+                return next(new Api400Error(t('upload_failed_msg', req.lang, { msg: err.message }), [err.code]));
         }
     }
     next(err);

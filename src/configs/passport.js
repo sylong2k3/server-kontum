@@ -4,7 +4,10 @@ const { Strategy: GoogleStrategy } = require('passport-google-oauth20');
 const { JWT_SECRET, JWT_ALGORITHM } = require('../utils/tokenManager.util');
 const userRepository = require('../repositories/user.repository');
 const tokenRepository = require('../repositories/token.repository');
+const { t } = require('../utils/i18n.util');
 require('dotenv').config();
+
+const getLang = (req) => req?.lang || process.env.APP_LANG || process.env.LANG || 'vi';
 
 const initPassport = () => {
     const jwtOptions = {
@@ -21,15 +24,15 @@ const initPassport = () => {
                 if (payload.jti) {
                     const blacklisted = await tokenRepository.isBlacklisted(payload.jti);
                     if (blacklisted) {
-                        return done(null, false, { message: 'Token đã bị thu hồi' });
+                        return done(null, false, { message: t('token_revoked', getLang(req)) });
                     }
                 }
                 const user = await userRepository.findByIdSafe(payload.userId);
                 if (!user) {
-                    return done(null, false, { message: 'User không tồn tại' });
+                    return done(null, false, { message: t('passport_user_not_found', getLang(req)) });
                 }
                 if (!user.is_active) {
-                    return done(null, false, { message: 'Tài khoản đã bị vô hiệu hóa' });
+                    return done(null, false, { message: t('passport_account_disabled', getLang(req)) });
                 }
                 return done(null, { ...user, jti: payload.jti, exp: payload.exp });
             } catch (error) {

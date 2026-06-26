@@ -1,4 +1,5 @@
 const db = require('../configs/database');
+const { versionCondition } = require('../utils/optimistic-lock.util');
 
 const USER_SELECT = `
     SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.avatar_url,
@@ -212,7 +213,7 @@ const updateTemporaryPassword = async (userId, passwordHash) => {
     return rows[0] || null;
 };
 
-const updateProfile = async (userId, { fullName, phone, avatarUrl }) => {
+const updateProfile = async (userId, { fullName, phone, avatarUrl, expectedUpdatedAt }) => {
     const sets = [];
     const params = [];
     let idx = 1;
@@ -224,8 +225,15 @@ const updateProfile = async (userId, { fullName, phone, avatarUrl }) => {
     if (!sets.length) {return findByIdSafe(userId);}
 
     params.push(userId);
+    const idIdx = params.length;
+    // auth.users có trigger trigger_users_updated_at tự set updated_at = NOW() mỗi lần UPDATE.
+    let lockSql = '';
+    if (expectedUpdatedAt) {
+        params.push(expectedUpdatedAt);
+        lockSql = versionCondition(params.length);
+    }
     const { rows } = await db.query(
-        `UPDATE auth.users SET ${sets.join(', ')} WHERE id = $${idx} AND deleted_at IS NULL RETURNING id`,
+        `UPDATE auth.users SET ${sets.join(', ')} WHERE id = $${idIdx} AND deleted_at IS NULL${lockSql} RETURNING id`,
         params
     );
     return rows[0] ? findByIdSafe(rows[0].id) : null;

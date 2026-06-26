@@ -15,11 +15,15 @@
  *   - PUSH_ENABLED=false              : tắt cứng dù đã có credentials
  */
 
+const { t } = require('./i18n.util');
+
 let admin = null;            // module firebase-admin (lazy)
 let messaging = null;        // instance messaging
 let initialized = false;     // đã thử init chưa
 let available = false;       // FCM dùng được không
 let warnedUnavailable = false;
+
+const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 
 const isExplicitlyDisabled = () => process.env.PUSH_ENABLED === 'false';
 
@@ -43,7 +47,7 @@ const loadServiceAccount = () => {
 
 const warnOnce = (message) => {
     if (!warnedUnavailable) {
-        console.warn(`[PUSH] ${message} — push notifications disabled (WebSocket + DB vẫn hoạt động).`);
+        console.warn(t('push_disabled_warning', getLang(), { message }));
         warnedUnavailable = true;
     }
 };
@@ -61,7 +65,7 @@ const init = () => {
         // eslint-disable-next-line global-require
         admin = require('firebase-admin');
     } catch (_) {
-        warnOnce('Chưa cài đặt package "firebase-admin"');
+        warnOnce(t('push_firebase_admin_missing', getLang()));
         return false;
     }
 
@@ -70,7 +74,7 @@ const init = () => {
         const hasDefault = !!process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
         if (!serviceAccount && !hasDefault) {
-            warnOnce('Chưa cấu hình FIREBASE_SERVICE_ACCOUNT / GOOGLE_APPLICATION_CREDENTIALS');
+            warnOnce(t('push_credentials_missing', getLang()));
             return false;
         }
 
@@ -84,9 +88,9 @@ const init = () => {
 
         messaging = admin.messaging();
         available = true;
-        console.log('  ✓ Push provider (FCM) initialized');
+        console.log(t('push_initialized', getLang()));
     } catch (err) {
-        warnOnce(`Khởi tạo FCM thất bại: ${err.message}`);
+        warnOnce(t('push_init_failed', getLang(), { msg: err.message }));
         available = false;
     }
 

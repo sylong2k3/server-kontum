@@ -156,7 +156,7 @@ const updateNewsMeta = async (actor, id, payload, file, context = {}) => {
     updatePayload.expectedUpdatedAt = payload.expectedUpdatedAt;
 
     const updated = await newsRepository.updateMeta(id, updatePayload);
-    if (!updated) {throw new Api409Error('Bản tin đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');}
+    if (!updated) {throw new Api409Error(t('news_optimistic_lock_conflict', context.lang));}
 
     return { message: t('news_updated_success', context.lang), news: { id: updated.id, status: updated.status, coverUrl: updated.cover_url } };
 };
@@ -224,7 +224,7 @@ const updateNewsFull = async (actor, id, payload, file, context = {}) => {
 
         const metaUpdated = await newsRepository.updateMeta(id, metaPayload, { client });
         if (!metaUpdated) {
-            throw new Api409Error('Bản tin đã được cập nhật bởi người dùng khác. Vui lòng tải lại dữ liệu mới nhất.');
+            throw new Api409Error(t('news_optimistic_lock_conflict', context.lang));
         }
 
         // 2. Upsert từng bản dịch trong cùng transaction.

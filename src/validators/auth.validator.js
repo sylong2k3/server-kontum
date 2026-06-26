@@ -103,6 +103,8 @@ const updateProfileSchema = Joi.object({
     fullName: Joi.string().min(2).max(255).trim().optional(),
     phone: Joi.string().pattern(/^[0-9+\-\s()]{8,20}$/).optional().allow(null, ''),
     avatarUrl: Joi.string().uri().max(2048).optional().allow(null, ''),
+    // Optimistic locking (optional): nếu client gửi, backend chỉ update khi updated_at khớp.
+    expectedUpdatedAt: Joi.date().iso().optional(),
 });
 
 module.exports = {

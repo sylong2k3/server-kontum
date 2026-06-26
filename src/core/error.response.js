@@ -1,4 +1,7 @@
 const { StatusCodes, ReasonPhrases } = require("./http-status-code");
+const { t } = require('../utils/i18n.util');
+
+const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 
 class BaseError extends Error {
   constructor(message, status, errors, isOperational) {
@@ -79,7 +82,7 @@ class Api404Error extends BaseError {
 
 class SatelliteError extends BaseError {
   constructor(
-    message = "Lỗi xử lý ảnh vệ tinh",
+    message = t('satellite_processing_error', getLang()),
     errors = [],
     status = StatusCodes.INTERNAL_SERVER_ERROR,
     isOperational = true,
@@ -90,7 +93,7 @@ class SatelliteError extends BaseError {
 
 class EarthEngineError extends BaseError {
   constructor(
-    message = "Lỗi từ Earth Engine",
+    message = t('earth_engine_error', getLang()),
     errors = [],
     status = StatusCodes.INTERNAL_SERVER_ERROR,
     isOperational = true,
@@ -101,7 +104,7 @@ class EarthEngineError extends BaseError {
 
 class GeometryValidationError extends BaseError {
   constructor(
-    message = "Geometry không hợp lệ",
+    message = t('invalid_geometry', getLang()),
     errors = [],
     status = StatusCodes.BAD_REQUEST,
     isOperational = true,
@@ -112,7 +115,7 @@ class GeometryValidationError extends BaseError {
 
 class DateRangeValidationError extends BaseError {
   constructor(
-    message = "Khoảng thời gian không hợp lệ",
+    message = t('invalid_date_range', getLang()),
     errors = [],
     status = StatusCodes.BAD_REQUEST,
     isOperational = true,

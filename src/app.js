@@ -12,6 +12,7 @@ const routes = require("./routes");
 const { errorHandler, notFoundHandler } = require("./middlewares/error-handler");
 const { initPassport } = require("./configs/passport");
 const localeMiddleware = require("./middlewares/locale.middleware");
+const { t } = require('./utils/i18n.util');
 
 initPassport();
 
@@ -124,7 +125,7 @@ app.use("/api/v1", routes);
 app.get("/", (req, res) => {
     res.json({
         status: "success",
-        message: "Welcome to App Quản Lý GIS KONTUM",
+        message: t('root_welcome', req.lang),
         version: "1.0.0",
         timestamp: new Date().toISOString(),
     });

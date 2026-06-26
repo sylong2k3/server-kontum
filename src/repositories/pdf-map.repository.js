@@ -1,4 +1,5 @@
 const db = require('../configs/database');
+const { versionCondition } = require('../utils/optimistic-lock.util');
 
 // ─── Sort whitelist ───────────────────────────────────────────────────────────
 
@@ -248,16 +249,15 @@ const updateMeta = async (id, payload, options = {}) => {
     params.push(id);
     const idParamIndex = params.length;
 
-    let versionCondition = '';
+    let lockSql = '';
     if (payload.expectedUpdatedAt) {
         params.push(payload.expectedUpdatedAt);
-        // date_trunc('milliseconds') để tránh lệch do JS Date truncate microseconds → milliseconds
-        versionCondition = ` AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $${params.length}::timestamptz)`;
+        lockSql = versionCondition(params.length);
     }
 
     const result = await queryExecutor.query(
         `UPDATE cms.pdf_maps SET ${fields.join(', ')}
-         WHERE id = $${idParamIndex} AND deleted_at IS NULL${versionCondition} RETURNING *`,
+         WHERE id = $${idParamIndex} AND deleted_at IS NULL${lockSql} RETURNING *`,
         params
     );
     return result.rows[0] || null;

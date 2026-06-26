@@ -9,9 +9,9 @@ const ADMIN_ROLES = new Set(['system_admin', 'so_nnmt']);
 const isAdmin = (user) => user && ADMIN_ROLES.has(user.role);
 const hasRolePermission = (user, action) => user?.role === 'system_admin' || user?.role_permissions?.map_layers?.[action] === true;
 
-const requireLayer = async (code) => {
+const requireLayer = async (code, lang) => {
     const layer = await layerRepo.findByCode(code);
-    if (!layer) { throw new Api404Error(t('map_layer_not_found'), ['LAYER_NOT_FOUND']); }
+    if (!layer) { throw new Api404Error(t('map_layer_not_found', lang), ['LAYER_NOT_FOUND']); }
     return layer;
 };
 
@@ -24,9 +24,9 @@ const canReadLayer = (layer, user) => {
     return rolePermissions.read === true || hasRolePermission(user, 'read');
 };
 
-const requireReadableLayer = async (code, user) => {
-    const layer = await requireLayer(code);
-    if (!canReadLayer(layer, user)) { throw new Api403Error(t('map_layer_read_forbidden'), ['MAP_LAYER_READ_FORBIDDEN']); }
+const requireReadableLayer = async (code, user, lang) => {
+    const layer = await requireLayer(code, lang);
+    if (!canReadLayer(layer, user)) { throw new Api403Error(t('map_layer_read_forbidden', lang), ['MAP_LAYER_READ_FORBIDDEN']); }
     return layer;
 };
 
@@ -39,19 +39,19 @@ const listLayers = async (user, { page = 1, limit = 100, filter = {} } = {}) => 
     return { items: rows, pagination: { page, limit, total, total_pages: Math.ceil(total / limit) } };
 };
 
-const getLayer = async (code, user) => requireReadableLayer(code, user);
+const getLayer = async (code, user, lang) => requireReadableLayer(code, user, lang);
 
-const createLayer = async (payload, user) => {
+const createLayer = async (payload, user, lang) => {
     const client = await db.pool.connect();
     try {
         await client.query('BEGIN');
         const existed = await layerRepo.findByCode(payload.code, client);
-        if (existed) { throw new Api409Error(t('map_layer_code_exists'), ['LAYER_CODE_EXISTS']); }
+        if (existed) { throw new Api409Error(t('map_layer_code_exists', lang), ['LAYER_CODE_EXISTS']); }
         if (payload.geometry_type !== 'RASTER') {
             const tableExists = await layerRepo.physicalTableExists(payload.schema_name || 'gis', payload.table_name, client);
-            if (!tableExists) { throw new Api400Error(t('map_gis_table_not_found'), ['GIS_TABLE_NOT_FOUND']); }
+            if (!tableExists) { throw new Api400Error(t('map_gis_table_not_found', lang), ['GIS_TABLE_NOT_FOUND']); }
             const tableUsed = await layerRepo.findByTableName(payload.table_name);
-            if (tableUsed) { throw new Api409Error(t('map_layer_table_already_used'), ['LAYER_TABLE_ALREADY_USED']); }
+            if (tableUsed) { throw new Api409Error(t('map_layer_table_already_used', lang), ['LAYER_TABLE_ALREADY_USED']); }
         }
         const layer = await layerRepo.createLayer(client, { ...payload, userId: user?.id || null });
         await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'create', source: 'api', newData: layer, changedBy: user?.id || null });
@@ -65,19 +65,23 @@ const createLayer = async (payload, user) => {
     }
 };
 
-const updateLayer = async (code, payload, user) => {
+const updateLayer = async (code, payload, user, lang) => {
     const client = await db.pool.connect();
     try {
         await client.query('BEGIN');
-        const oldLayer = await requireLayer(code);
+        const oldLayer = await requireLayer(code, lang);
         if (payload.table_name || payload.schema_name) {
             const schema = payload.schema_name || oldLayer.schema_name;
             const table = payload.table_name || oldLayer.table_name;
             const tableExists = await layerRepo.physicalTableExists(schema, table, client);
-            if (!tableExists) { throw new Api400Error(t('map_gis_table_not_found'), ['GIS_TABLE_NOT_FOUND']); }
+            if (!tableExists) { throw new Api400Error(t('map_gis_table_not_found', lang), ['GIS_TABLE_NOT_FOUND']); }
         }
         const updated = await layerRepo.updateLayer(client, code, { ...payload, userId: user?.id || null });
-        if (!updated) { throw new Api404Error(t('map_layer_not_found'), ['LAYER_NOT_FOUND']); }
+        if (!updated) {
+            // oldLayer đã xác nhận tồn tại ở trên → null nghĩa là expectedUpdatedAt lệch (conflict)
+            if (payload.expectedUpdatedAt) { throw new Api409Error(t('map_optimistic_lock_conflict', lang), ['OPTIMISTIC_LOCK_CONFLICT']); }
+            throw new Api404Error(t('map_layer_not_found', lang), ['LAYER_NOT_FOUND']);
+        }
         await layerRepo.insertEditHistory(client, { layerId: updated.id, action: 'update', source: 'api', oldData: oldLayer, newData: updated, changedBy: user?.id || null });
         await client.query('COMMIT');
         return updated;
@@ -89,9 +93,9 @@ const updateLayer = async (code, payload, user) => {
     }
 };
 
-const deleteLayer = async (code, user) => {
-    const layer = await requireLayer(code);
-    if (layer.geoserver_layer) { throw new Api400Error(t('map_layer_still_published'), ['LAYER_STILL_PUBLISHED']); }
+const deleteLayer = async (code, user, lang) => {
+    const layer = await requireLayer(code, lang);
+    if (layer.geoserver_layer) { throw new Api400Error(t('map_layer_still_published', lang), ['LAYER_STILL_PUBLISHED']); }
     const client = await db.pool.connect();
     try {
         await client.query('BEGIN');
@@ -109,13 +113,13 @@ const deleteLayer = async (code, user) => {
     }
 };
 
-const publishLayer = async (code, user) => {
-    const layer = await requireLayer(code);
-    if (layer.is_active !== true) { throw new Api400Error(t('map_layer_inactive'), ['LAYER_INACTIVE']); }
-    if (layer.geoserver_layer) { throw new Api400Error(t('map_layer_already_published'), ['LAYER_ALREADY_PUBLISHED']); }
+const publishLayer = async (code, user, lang) => {
+    const layer = await requireLayer(code, lang);
+    if (layer.is_active !== true) { throw new Api400Error(t('map_layer_inactive', lang), ['LAYER_INACTIVE']); }
+    if (layer.geoserver_layer) { throw new Api400Error(t('map_layer_already_published', lang), ['LAYER_ALREADY_PUBLISHED']); }
     if (layer.geometry_type !== 'RASTER') {
         const exists = await layerRepo.physicalTableExists(layer.schema_name, layer.table_name);
-        if (!exists) { throw new Api400Error(t('map_gis_table_not_found'), ['GIS_TABLE_NOT_FOUND']); }
+        if (!exists) { throw new Api400Error(t('map_gis_table_not_found', lang), ['GIS_TABLE_NOT_FOUND']); }
     }
     let geoserverLayerName = null;
     if ((layer.geometry_type || '').toUpperCase() === 'RASTER') { geoserverLayerName = await geoserver.publishRasterLayer(layer); }
@@ -129,37 +133,37 @@ const publishLayer = async (code, user) => {
         return updated;
     } catch (err) {
         await client.query('ROLLBACK');
-        if (geoserverLayerName) { await geoserver.unpublishLayer(geoserverLayerName).catch((e) => console.error('[MapService] Rollback GeoServer unpublish lỗi:', e.message)); }
+        if (geoserverLayerName) { await geoserver.unpublishLayer(geoserverLayerName).catch((e) => console.error(t('map_geoserver_rollback_unpublish_failed', lang), e.message)); }
         throw err;
     } finally {
         client.release();
     }
 };
 
-const unpublishLayer = async (code, user) => {
-    const layer = await requireLayer(code);
+const unpublishLayer = async (code, user, lang) => {
+    const layer = await requireLayer(code, lang);
     if (layer.geoserver_layer) {
         await geoserver.unpublishLayer(layer.geoserver_layer).catch((err) => {
             if (err.status !== 404) { throw err; }
-            console.warn(`[MapService] GeoServer layer ${layer.geoserver_layer} không tồn tại, đánh dấu unpublish trong DB`);
+            console.warn(t('map_geoserver_layer_missing_mark_unpublish', lang, { layer: layer.geoserver_layer }));
         });
     }
     const updated = await layerRepo.markUnpublished({ code, updatedAt: layer.updated_at, updatedBy: user?.id || null });
-    if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict'), ['OPTIMISTIC_LOCK_CONFLICT']); }
+    if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict', lang), ['OPTIMISTIC_LOCK_CONFLICT']); }
     const client = await db.pool.connect();
     try { await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'unpublish', source: 'api', oldData: { geoserver_layer: layer.geoserver_layer }, changedBy: user?.id || null }); }
     finally { client.release(); }
     return updated;
 };
 
-const setLayerActive = async (code, isActive, user) => {
-    const layer = await requireLayer(code);
+const setLayerActive = async (code, isActive, user, lang) => {
+    const layer = await requireLayer(code, lang);
     const updated = await layerRepo.setActive({ code, isActive, updatedAt: layer.updated_at, updatedBy: user?.id || null });
-    if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict'), ['OPTIMISTIC_LOCK_CONFLICT']); }
+    if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict', lang), ['OPTIMISTIC_LOCK_CONFLICT']); }
 
     if (layer.geoserver_layer) {
         await geoserver.setLayerEnabled(layer.geoserver_layer, isActive).catch((err) => {
-            console.warn(`[MapService] Không thể đồng bộ trạng thái GeoServer cho ${layer.geoserver_layer}:`, err.message);
+            console.warn(t('map_geoserver_sync_status_failed', lang, { layer: layer.geoserver_layer }), err.message);
         });
     }
 
@@ -169,13 +173,13 @@ const setLayerActive = async (code, isActive, user) => {
     return updated;
 };
 
-const listImportJobs = async (code, query, user) => {
-    const layer = await requireReadableLayer(code, user);
+const listImportJobs = async (code, query, user, lang) => {
+    const layer = await requireReadableLayer(code, user, lang);
     return layerRepo.listImportJobs(layer.id, query);
 };
-const getImportJob = async (id) => {
+const getImportJob = async (id, lang) => {
     const job = await layerRepo.findImportJobById(id);
-    if (!job) { throw new Api404Error(t('map_import_job_not_found'), ['IMPORT_JOB_NOT_FOUND']); }
+    if (!job) { throw new Api404Error(t('map_import_job_not_found', lang), ['IMPORT_JOB_NOT_FOUND']); }
     return job;
 };
 

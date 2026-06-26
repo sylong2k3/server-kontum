@@ -7,6 +7,7 @@
  */
 
 const db = require('../configs/database');   // pool pg hiện tại của dự án
+const { versionCondition } = require('../utils/optimistic-lock.util');
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  IMAGES
@@ -251,10 +252,16 @@ const updateImage = async (id, data, updatedBy) => {
     }
 
     params.push(id); // id luôn ở cuối
+    // Optimistic locking (optional): chỉ áp khi client gửi expectedUpdatedAt.
+    let lockSql = '';
+    if (data.expectedUpdatedAt) {
+        params.push(data.expectedUpdatedAt);
+        lockSql = versionCondition(params.length);
+    }
     const sql = `
         UPDATE raster.remote_sensing_images
         SET    ${sets.join(', ')}
-        WHERE  id = $${pi} AND deleted_at IS NULL
+        WHERE  id = $${pi} AND deleted_at IS NULL${lockSql}
         RETURNING id, uuid, name, satellite, image_type, status, updated_at,
                   ST_AsGeoJSON(bbox)::jsonb AS bbox_geojson
     `;

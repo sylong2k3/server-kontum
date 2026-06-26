@@ -14,6 +14,7 @@
 
 const { spawn } = require('child_process');
 const path       = require('path');
+const { t }      = require('./i18n.util');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ const runProcess = (cmd, args, env = {}) =>
 
         child.on('error', (err) => {
             if (err.code === 'ENOENT') {
-                reject(new Error(`ogr.util: '${cmd}' không tìm thấy. Cài GDAL: apt-get install -y gdal-bin`));
+                reject(new Error(t('ogr_command_not_found', env.lang, { cmd })));
             } else {
                 reject(err);
             }
@@ -94,10 +95,10 @@ const runProcess = (cmd, args, env = {}) =>
 
 // ── Build connection string ───────────────────────────────────────────────────
 
-const buildPgConn = () => {
+const buildPgConn = (lang = 'vi') => {
     const { DB_HOST, DB_PORT, DB_NAME, DB_USER } = process.env;
     if (!DB_HOST || !DB_NAME || !DB_USER) {
-        throw new Error('ogr.util: DB_HOST, DB_NAME, DB_USER là bắt buộc trong .env');
+        throw new Error(t('ogr_db_config_required', lang));
     }
     return `PG:host=${DB_HOST} port=${DB_PORT || 5432} dbname=${DB_NAME} user=${DB_USER}`;
 };
@@ -117,13 +118,13 @@ const buildPgConn = () => {
  *   layers: string[],       // danh sách layer trong file
  * }>}
  */
-const inspect = async (filePath, layerName = null) => {
+const inspect = async (filePath, layerName = null, lang = 'vi') => {
     const safePath = assertSafePath(filePath);
 
     // Lấy danh sách layers trước
     const listResult = await runProcess('ogrinfo', ['-al', '-so', safePath]);
     if (listResult.code !== 0 && !listResult.stdout) {
-        throw new Error(`ogrinfo thất bại: ${listResult.stderr.slice(0, 500)}`);
+        throw new Error(t('ogrinfo_failed', lang, { msg: listResult.stderr.slice(0, 500) }));
     }
 
     const layers = [];
@@ -194,13 +195,14 @@ const loadToPostgis = async ({
     mode = 'overwrite',
     sourceLayerName = null,
     onProgress = null,
+    lang = 'vi',
 } = {}) => {
     const safePath   = assertSafePath(filePath);
     const safeSchema = assertIdentifier(schema, 'schema');
     const safeTable  = assertIdentifier(table, 'table');
-    const connStr    = buildPgConn();
+    const connStr    = buildPgConn(lang);
 
-    if (onProgress) { onProgress(5, 'Chuẩn bị ogr2ogr...'); }
+    if (onProgress) { onProgress(5, t('ogr_prepare', lang)); }
 
     // Xác định input dùng VSI nếu cần
     let inputPath = safePath;
@@ -238,7 +240,7 @@ const loadToPostgis = async ({
         args.push('-overwrite');
     }
 
-    if (onProgress) { onProgress(10, 'Đang nạp dữ liệu vào PostGIS...'); }
+    if (onProgress) { onProgress(10, t('ogr_loading_postgis', lang)); }
 
     const result = await runProcess('ogr2ogr', args, {
         PGPASSWORD: process.env.DB_PASSWORD || '',
@@ -246,10 +248,10 @@ const loadToPostgis = async ({
 
     if (result.code !== 0) {
         const msg = (result.stderr || result.stdout).slice(0, 1000);
-        throw new Error(`ogr2ogr thất bại (exit ${result.code}): ${msg}`);
+        throw new Error(t('ogr2ogr_failed', lang, { code: result.code, msg }));
     }
 
-    if (onProgress) { onProgress(80, 'Nạp dữ liệu hoàn thành.'); }
+    if (onProgress) { onProgress(80, t('ogr_load_completed', lang)); }
 };
 
 // ── Availability check ────────────────────────────────────────────────────────

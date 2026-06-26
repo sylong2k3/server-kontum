@@ -13,10 +13,6 @@ const {
 } = require('../validators/user.validator');
 
 const adminRouter = Router();
-
-// ─── Admin endpoints — mounted at /admin/users ───────────────────────────────
-
-// GET /admin/users — danh sách users
 adminRouter.get(
     '/',
     verifyToken,
@@ -26,7 +22,6 @@ adminRouter.get(
     asyncHandler(userController.listUsers)
 );
 
-// POST /admin/users — tạo user mới
 adminRouter.post(
     '/',
     verifyToken,

@@ -11,6 +11,7 @@ const os     = require('os');
 const fs     = require('fs');
 const multer = require('multer');
 const { Api400Error } = require('../core/error.response');
+const { t } = require('../utils/i18n.util');
 
 const MB = 1024 * 1024;
 
@@ -72,17 +73,17 @@ const storage = multer.diskStorage({
     },
 });
 
-const fileFilter = (_req, file, cb) => {
+const fileFilter = (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(ext)) {
         return cb(new Api400Error(
-            `Định dạng file không được hỗ trợ: ${ext}. Chấp nhận: .zip, .geojson, .json, .kml, .kmz, .tif, .tiff`,
+            t('upload_geo_unsupported_format_with_ext', req.lang, { ext }),
             ['GEO_UNSUPPORTED_FORMAT'],
         ), false);
     }
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
         // Không từ chối hoàn toàn — một số client gửi mime không chuẩn
-        console.warn(`[uploadGeoFile] MIME không chuẩn: ${file.mimetype} (${file.originalname}) — tiếp tục xử lý.`);
+        console.warn(t('upload_geo_non_standard_mime', req.lang, { mime: file.mimetype, name: file.originalname }));
     }
     cb(null, true);
 };
@@ -105,7 +106,7 @@ const uploadGeoFile = (req, res, next) => {
             if (err instanceof multer.MulterError) {
                 if (err.code === 'LIMIT_FILE_SIZE') {
                     return next(new Api400Error(
-                        `File quá lớn. Giới hạn: ${GEO_MAX_SIZE / MB} MB`,
+                        t('upload_geo_file_too_large_limit', req.lang, { max: GEO_MAX_SIZE / MB }),
                         ['GEO_FILE_TOO_LARGE'],
                     ));
                 }
@@ -114,7 +115,7 @@ const uploadGeoFile = (req, res, next) => {
             return next(err);
         }
         if (!req.file) {
-            return next(new Api400Error('Vui lòng đính kèm file GIS (field: file).', ['GEO_FILE_REQUIRED']));
+            return next(new Api400Error(t('upload_geo_file_required', req.lang), ['GEO_FILE_REQUIRED']));
         }
         req.geoFile = req.file;
         next();
