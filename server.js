@@ -6,6 +6,7 @@ const geoserverClient = require("./src/utils/geoserver.client");
 
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
+const weatherJob = require("./src/jobs/weather.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const geoImportWorker       = require("./src/workers/geoImport.worker");
 const {
@@ -80,6 +81,7 @@ async function gracefulShutdown(signal) {
 
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
+  weatherJob.stop();
   imageProcessingWorker.stopWorker();
   geoImportWorker.stopWorker();
   closeWebSocketServer();
@@ -141,6 +143,7 @@ const initializeAndStartServer = async () => {
     if (IS_SINGLETON_WORKER) {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
+      weatherJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
     }
@@ -181,6 +184,7 @@ const initializeAndStartServer = async () => {
     if (IS_SINGLETON_WORKER) {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
+      weatherJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
     }
