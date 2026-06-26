@@ -121,6 +121,17 @@
       "key": "pdfMapId",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "mapApiId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "mapApiKey",
+      "value": "",
+      "type": "string",
+      "description": "Raw API key trả về 1 lần khi tạo hoặc regenerate. Script test sẽ tự lưu."
     }
   ],
   "item": [
@@ -3114,6 +3125,303 @@
                 }
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🌤 Thời tiết (EP-05)",
+      "description": "Thời tiết thời gian thực & dự báo. Tile proxy qua backend (không lộ API key). Wind-grid dùng Open-Meteo (miễn phí, không cần key). Point & tile cần OPENWEATHER_API_KEY trong .env.",
+      "item": [
+        {
+          "name": "Danh sách layer tile",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weather/layers?type=temp&lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["weather", "layers"],
+              "query": [
+                { "key": "type", "value": "temp", "description": "temp | rain | cloud | wind | pressure" },
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Trả về URL template tile của loại lớp được chọn (proxy qua /weather/tiles). Không lộ API key ra client."
+          }
+        },
+        {
+          "name": "Thời tiết tại điểm (Current Weather)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weather/point?lng=107.9&lat=14.35&lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["weather", "point"],
+              "query": [
+                { "key": "lng", "value": "107.9" },
+                { "key": "lat", "value": "14.35" },
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Nhiệt độ, độ ẩm, gió, trời tại tọa độ. Cần OPENWEATHER_API_KEY. Cache 1 giờ, fallback stale khi upstream lỗi."
+          }
+        },
+        {
+          "name": "Lưới gió (Wind Grid — Open-Meteo)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weather/wind-grid?bbox=107.0,13.8,108.6,15.5&grid=8&lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["weather", "wind-grid"],
+              "query": [
+                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "description": "minLng,minLat,maxLng,maxLat" },
+                { "key": "grid", "value": "8", "description": "Số điểm mỗi chiều (1-16, mặc định 8)" },
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Lưới NxN điểm gió với u/v component (m/s). Dùng Open-Meteo, không cần API key. Frontend dùng để vẽ streamlines."
+          }
+        },
+        {
+          "name": "Proxy Tile (PNG)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weather/tiles/temp/8/200/115",
+              "host": ["{{baseUrl}}"],
+              "path": ["weather", "tiles", "temp", "8", "200", "115"],
+              "query": []
+            },
+            "description": "Proxy tile PNG từ OpenWeather (không lộ appid). z=8, x=200, y=115 là tile Kon Tum vùng zoom 8."
+          }
+        },
+        {
+          "name": "Làm mới cache (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weather/refresh?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["weather", "refresh"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Warm cache: lưới gió Kon Tum + điểm trung tâm. Cần quyền weather:manage (system_admin / so_nnmt)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🗝 Chia sẻ API Lớp GIS (US-025)",
+      "description": "=== SERVER MÌNH LÀ NHÀ CUNG CẤP — CẤP KEY CHO BÊN THỨ BA ===\n\nCác Sở, đơn vị khác hoặc đối tác muốn lấy dữ liệu GIS của tỉnh Kon Tum sẽ được system_admin cấp một API key. Họ dùng key đó gọi thẳng vào server mình, KHÔNG cần tài khoản, KHÔNG cần JWT.\n\nKhác OpenWeather:\n- OpenWeather: mình là khách, gọi API của họ bằng OPENWEATHER_API_KEY\n- Folder này: mình là chủ, cấp key cho người khác dùng X-Map-Api-Key\n\n--- Luồng sử dụng ---\n1. Admin gọi 'Tạo API Key' → server trả raw key (mapk_xxx...) — chỉ hiện 1 lần, script tự lưu vào {{mapApiKey}}\n2. Giao raw key cho đối tác (qua email / Zalo / ...)\n3. Đối tác gọi /map-data/layer để xem lớp được cấp\n4. Đối tác gọi /map-data/features?bbox=... để lấy GeoJSON\n\n--- Bảo mật ---\n• Key format: mapk_ + 64 ký tự base64url (~69 ký tự tổng)\n• DB KHÔNG lưu raw key, chỉ lưu sha256 hash + 12 ký tự đầu + 4 ký tự cuối\n• Rate limit theo scope.rate_per_min (mặc định 60 req/phút)\n• Có thể giới hạn bbox, tắt key, đặt ngày hết hạn\n\n--- Nhóm request ---\n• Admin (cần JWT): Tạo / Xem / Sửa / Xoay key / Xóa\n• Consumer (chỉ cần X-Map-Api-Key): Metadata lớp, Features GeoJSON",
+      "item": [
+        {
+          "name": "Admin — Tạo API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  if (json.data.id) pm.collectionVariables.set('mapApiId', String(json.data.id));",
+                  "  if (json.data.apiKey) pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Key demo bên thứ ba\",\n  \"layer_id\": 1,\n  \"scope\": {\n    \"read\": true,\n    \"rate_per_min\": 30,\n    \"bbox_limit\": [107.0, 13.8, 108.6, 15.5]\n  },\n  \"is_active\": true,\n  \"expires_at\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/map-apis?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-apis"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Cấp API key cho đối tác/đơn vị muốn lấy dữ liệu lớp GIS.\n\nBody:\n• name: tên gợi nhớ (ví dụ 'Sở TNMT - ranh giới hành chính')\n• layer_id: ID lớp GIS được cấp quyền đọc (xem bảng gis.layer_registry)\n• scope.read: phải là true (hiện chỉ hỗ trợ read)\n• scope.rate_per_min: số request tối đa mỗi phút (mặc định 60)\n• scope.bbox_limit: [minLng,minLat,maxLng,maxLat] giới hạn vùng được truy vấn (bỏ qua nếu không cần)\n• expires_at: ngày hết hạn ISO 8601, null = không hết hạn\n\nRAW KEY chỉ trả về 1 lần duy nhất trong response → script test tự lưu vào {{mapApiKey}}.\nSau khi đóng tab/response, không thể xem lại — muốn key mới phải dùng 'Xoay Key'.\n\nCần quyền: system_admin (map_apis:create)."
+          }
+        },
+        {
+          "name": "Admin — Danh sách API Key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map-apis?page=1&limit=20&lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-apis"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "lang", "value": "{{lang}}" },
+                { "key": "is_active", "value": "true", "disabled": true },
+                { "key": "layer_id", "value": "1", "disabled": true }
+              ]
+            },
+            "description": "Xem tất cả API key đã cấp cho đối tác.\n\nQuery filter (bỏ disabled để dùng):\n• is_active=true → chỉ key đang hoạt động\n• layer_id=1 → key thuộc lớp cụ thể\n\nResponse KHÔNG bao giờ trả raw key — chỉ thấy key_prefix (12 ký tự đầu) và key_last4 (4 ký tự cuối) để nhận dạng.\n\nCần quyền: system_admin (map_apis:read)."
+          }
+        },
+        {
+          "name": "Admin — Xem API Key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-apis", "{{mapApiId}}"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Chi tiết một API key theo ID.\n\nResponse bao gồm: tên, scope, trạng thái, ngày tạo, lần dùng cuối, tổng số request, lớp GIS gắn kèm.\n\nLưu ý: KHÔNG bao giờ trả raw key hay key_hash — chỉ thấy key_prefix + key_last4 để đối chiếu với đối tác.\n\nCần quyền: system_admin (map_apis:read)."
+          }
+        },
+        {
+          "name": "Admin — Cập nhật API Key",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Key demo - đã cập nhật\",\n  \"scope\": {\n    \"read\": true,\n    \"rate_per_min\": 60\n  },\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-apis", "{{mapApiId}}"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Chỉnh sửa thông tin key đã cấp — KHÔNG tạo key mới.\n\nCó thể sửa:\n• name: đổi tên gợi nhớ\n• scope: thay đổi rate_per_min hoặc bbox_limit\n• is_active: false = tắt key ngay lập tức (đối tác gọi sẽ nhận 401)\n• expires_at: thay đổi ngày hết hạn\n\nKHÔNG thể sửa layer_id — muốn đổi lớp phải xóa rồi tạo key mới.\n\nCần quyền: system_admin (map_apis:update)."
+          }
+        },
+        {
+          "name": "Admin — Xoay Key (Regenerate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data && json.data.apiKey) {",
+                  "  pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map-apis/{{mapApiId}}/regenerate?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-apis", "{{mapApiId}}", "regenerate"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Tạo key mới thay thế key cũ — dùng khi nghi ngờ key bị lộ.\n\nHành vi:\n• Key cũ bị vô hiệu NGAY LẬP TỨC (đối tác gọi ngay sau sẽ nhận 401)\n• Sinh key hoàn toàn mới cho cùng layer_id và scope\n• Raw key mới chỉ hiện 1 lần — script test tự lưu vào {{mapApiKey}}\n• ID record KHÔNG đổi\n\nCần quyền: system_admin (map_apis:update)."
+          }
+        },
+        {
+          "name": "Admin — Xóa API Key",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-apis", "{{mapApiId}}"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "Xóa vĩnh viễn API key khỏi hệ thống.\n\nSau khi xóa:\n• Đối tác gọi với key cũ → 401 MAP_API_INVALID_KEY\n• Không thể khôi phục — phải tạo key mới nếu cần\n\nNếu chỉ muốn tạm dừng (không xóa hẳn) → dùng 'Cập nhật' với is_active=false.\n\nCần quyền: system_admin (map_apis:delete)."
+          }
+        },
+        {
+          "name": "Consumer — Metadata Lớp",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "X-Map-Api-Key", "value": "{{mapApiKey}}", "description": "Raw key nhận từ admin (mapk_xxx...)" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map-data/layer?lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-data", "layer"],
+              "query": [
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "=== DÀNH CHO ĐỐI TÁC / BÊN THỨ BA ===\n\nXem thông tin lớp GIS mà key này được cấp quyền truy cập.\n\nCách dùng:\n• KHÔNG cần đăng nhập, KHÔNG cần JWT\n• Truyền raw key qua header X-Map-Api-Key (đã điền sẵn {{mapApiKey}})\n• Key có dạng: mapk_AbCd... (~69 ký tự)\n\nResponse trả về:\n• Tên lớp, loại geometry (Point/LineString/Polygon/...)\n• EPSG code (hệ tọa độ)\n• Scope: rate_per_min, bbox_limit (vùng được phép truy vấn)\n\nLỗi có thể gặp:\n• 401 MAP_API_INVALID_KEY → key sai hoặc không tồn tại\n• 401 MAP_API_KEY_DISABLED → admin đã tắt key\n• 401 MAP_API_KEY_EXPIRED → key hết hạn"
+          }
+        },
+        {
+          "name": "Consumer — Lấy Features (GeoJSON)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "X-Map-Api-Key", "value": "{{mapApiKey}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map-data/features?bbox=107.5,14.0,108.2,14.8&limit=50&offset=0&lang={{lang}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-data", "features"],
+              "query": [
+                { "key": "bbox", "value": "107.5,14.0,108.2,14.8", "description": "minLng,minLat,maxLng,maxLat — tọa độ WGS84 (EPSG:4326)" },
+                { "key": "limit", "value": "50", "description": "Số feature tối đa trả về, max 500" },
+                { "key": "offset", "value": "0", "description": "Bỏ qua N feature đầu (phân trang)" },
+                { "key": "lang", "value": "{{lang}}" }
+              ]
+            },
+            "description": "=== DÀNH CHO ĐỐI TÁC / BÊN THỨ BA — API CHÍNH LẤY DỮ LIỆU ===\n\nTrả về GeoJSON FeatureCollection từ lớp GIS đã được cấp quyền.\n\nCách dùng:\n• Header X-Map-Api-Key: raw key từ admin\n• bbox bắt buộc — khu vực cần lấy dữ liệu (WGS84)\n• Phân trang: tăng offset theo từng trang (limit=50, offset=0→50→100...)\n\nResponse:\n  {\n    type: 'FeatureCollection',\n    features: [...],  // GeoJSON Feature objects\n    total: 150,       // tổng feature trong bbox\n    returned: 50,     // số feature trả về lần này\n    hasMore: true     // còn trang tiếp → tăng offset\n  }\n\nRate limit (xem response headers):\n• X-RateLimit-Limit: giới hạn/phút theo scope\n• X-RateLimit-Remaining: còn lại trong cửa sổ hiện tại\n• X-RateLimit-Reset: timestamp (giây) khi cửa sổ reset\n• Vượt giới hạn → 429 + header Retry-After\n\nLỗi có thể gặp:\n• 400 MAP_API_BBOX_TOO_LARGE → bbox vượt quá bbox_limit trong scope\n• 403 MAP_API_SCOPE_DENIED → scope.read = false\n• 429 MAP_API_RATE_LIMIT_EXCEEDED → quá rate_per_min"
+          }
+        },
+        {
+          "name": "Consumer — Test Key sai (expect 401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "X-Map-Api-Key", "value": "mapk_wrong_key_test_0000000000000000000000000000000" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map-data/layer",
+              "host": ["{{baseUrl}}"],
+              "path": ["map-data", "layer"]
+            },
+            "description": "Request kiểm thử bảo mật — truyền key giả để xác nhận server từ chối đúng.\n\nKỳ vọng: 401 MAP_API_INVALID_KEY\n\nCơ chế xác thực:\n1. Server đọc 12 ký tự đầu của key (prefix) để tra cứu nhanh trong DB\n2. Nếu tìm thấy prefix → so sánh sha256(key_gửi) với key_hash lưu trong DB\n   (dùng crypto.timingSafeEqual để chống timing attack)\n3. Không khớp → 401\n4. Khớp hash → kiểm tra is_active, expires_at, layer_is_active\n\nKhông bao giờ trả thông tin gợi ý key đúng hay sai từng phần."
           }
         }
       ]

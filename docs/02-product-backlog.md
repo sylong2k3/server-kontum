@@ -10,7 +10,7 @@
 | EP-02 | Quản trị người dùng & hồ sơ | P0 | ✅ Done |
 | EP-03 | Lớp dữ liệu bản đồ & WebGIS core | P0 | ⬜ |
 | EP-04 | Ảnh vệ tinh & Google Earth Engine | P1 | ⬜ |
-| EP-05 | Thời tiết thời gian gần thực | P1 | ⬜ |
+| EP-05 | Thời tiết thời gian gần thực | P1 | ✅ Backend Done |
 | EP-06 | Dự báo & cảnh báo cháy rừng | P0 | ⬜ |
 | EP-07 | Phân tích không gian & Thống kê | P2 | ⬜ |
 | EP-08 | CMS: Tin tức, Văn bản, Bản đồ PDF | P2 | 🟡 |
@@ -68,7 +68,7 @@ Scenario: Sai mật khẩu vượt ngưỡng
 | US-022 | Là người dân, tôi muốn xem các lớp công khai trên bản đồ. | API trả GeoJSON/MVT theo bbox+zoom; chỉ lớp `is_public`. | P0 | 8 | ⬜ |
 | US-023 | Là người dùng, tôi muốn click đối tượng để xem thuộc tính (popup). | API feature-info theo tọa độ/id; trả thuộc tính. | P1 | 5 | ⬜ |
 | US-024 | Là `system_admin`, tôi muốn publish/unpublish và bật/tắt layer qua GeoServer REST. | Node cập nhật metadata `gis.layer_registry`, gọi GeoServer REST để đồng bộ trạng thái; frontend dùng GeoServer public OGC cho dữ liệu đọc. | P0 | 8 | ⬜ |
-| US-025 | Là `system_admin`, tôi muốn tạo & phân quyền API bản đồ. | Bảng `gis.map_apis` + api-key/scope; rate-limit riêng. | P2 | 8 | ⬜ |
+| US-025 | Là `system_admin`, tôi muốn tạo & phân quyền API bản đồ. | Bảng `gis.map_apis` + api-key/scope; rate-limit riêng. Admin CRUD `/map-apis`; consumer `/map-data/*` qua header `X-Map-Api-Key`. | P2 | 8 | ✅ |
 | US-026 | Là người dùng WebGIS, tôi muốn chọn lớp nền & bật/tắt layer, xem 3D. | Layer switcher, lớp nền (vệ tinh/đường phố), terrain 3D. | P1 | 5 | ⬜ |
 
 **Gherkin mẫu — US-022**
@@ -98,9 +98,9 @@ Scenario: Người dân xem lớp công khai trong khung nhìn
 
 | ID | User Story | AC | P | SP | TT |
 |----|-----------|----|---|----|----|
-| US-040 | Là người dùng, tôi muốn xem nhiệt độ/mưa/mây/gió trên bản đồ. | Raster OpenWeather + lưới gió Open-Meteo (windy streamlines). | P1 | 8 | ⬜ |
-| US-041 | Là hệ thống, tôi muốn ingest thời tiết theo cron mỗi giờ. | `WEATHER_CRON=0 * * * *`; lưu `gis`/cache; fallback khi API lỗi. | P1 | 5 | ⬜ |
-| US-042 | Là người dùng, tôi muốn click điểm bất kỳ xem thời tiết. | Popup nhiệt độ/gió/mưa tại tọa độ. | P2 | 3 | ⬜ |
+| US-040 | Là người dùng, tôi muốn xem nhiệt độ/mưa/mây/gió trên bản đồ. | Raster OpenWeather (tile proxy `/weather/tiles`) + lưới gió Open-Meteo `/weather/wind-grid` (u,v cho streamlines). | P1 | 8 | ✅ BE (FE animation pending) |
+| US-041 | Là hệ thống, tôi muốn ingest thời tiết theo cron mỗi giờ. | `WEATHER_CRON=0 * * * *`; cache `gis.weather_cache`; fallback bản ghi gần nhất khi API lỗi. | P1 | 5 | ✅ |
+| US-042 | Là người dùng, tôi muốn click điểm bất kỳ xem thời tiết. | `GET /weather/point?lng=&lat=` popup nhiệt/gió/mưa/ẩm tại tọa độ. | P2 | 3 | ✅ |
 
 ---
 
