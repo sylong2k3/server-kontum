@@ -64,7 +64,7 @@ flowchart TB
 | Auth | jsonwebtoken (HS256), passport (JWT + Google OAuth20) | access 15m/refresh 30d |
 | Validation | Joi | `validate.middleware.js` |
 | DB | PostgreSQL + PostGIS, driver `pg` (pool) | schema gis/fire/cms/field |
-| Bản đồ server | GeoServer (WMS/WFS), bind nội bộ | proxy qua API |
+| Bản đồ server | GeoServer (WMS/WFS/WMTS/MVT) | public read-only OGC; REST admin chỉ backend gọi |
 | Realtime | `ws` | `realtime/websocket.server.js` |
 | Lịch | node-cron | token-cleanup, fire, firms, weather |
 | Email | nodemailer | xác thực/reset |
@@ -158,19 +158,22 @@ flowchart TB
     end
     subgraph DBServer[DB Server]
         PG[(PostgreSQL + PostGIS)]
-        GS[GeoServer - chỉ 127.0.0.1]
+    end
+    subgraph GeoServerZone[GeoServer]
+        GS[GeoServer - public OGC / secured REST]
     end
     CDN --> N1
     CDN --> N2
+    CDN --> GS
     N1 --> PG
     N3 --> PG
-    N1 -->|proxy| GS
+    N1 -->|REST admin publish/active/harvest| GS
     GS --> PG
 ```
 
-**Lưu ý vận hành (từ `.env.example`):**
 - `trust proxy = 1` → chạy sau reverse proxy.
-- GeoServer **không** expose ra internet; chỉ API proxy mới gọi.
+- GeoServer expose các endpoint OGC public/read-only cho WMS/WFS/WMTS/MVT công khai; REST admin phải được bảo vệ và chỉ backend dùng.
+- Node.js chỉ quản lý metadata GIS trong `gis.layer_registry` và gọi GeoServer REST API khi publish/unpublish/bật/tắt/harvest.
 - Dùng `CLUSTER_WORKER_ID` để chỉ 1 worker chạy cron (tránh chạy trùng job).
 - Rate-limit áp ở `/api/`.
 
@@ -180,10 +183,11 @@ flowchart TB
 |---|-----------|-------|----------|
 | ADR-1 | PostGIS làm kho không gian trung tâm | Chuẩn OGC, mạnh về spatial query | Cần kỹ năng GIS SQL |
 | ADR-2 | GEE tính chỉ số thay vì tự xử ảnh | Tiết kiệm hạ tầng, dữ liệu sẵn | Phụ thuộc hạn ngạch GEE |
-| ADR-3 | GeoServer proxy nội bộ | Bảo mật, cache tile WMS/WFS | Thêm 1 thành phần vận hành |
+| ADR-3 | Frontend gọi trực tiếp GeoServer public OGC, Node quản lý metadata/REST admin | Giảm tải backend, đúng vai trò OGC server, phù hợp layer công khai/chỉ đọc | Cần cấu hình CORS/rate-limit/cache và bảo vệ REST admin trên GeoServer |
 | ADR-4 | Tách schema gis/fire/cms/field | Module hóa, phân quyền rõ | Quản lý migration nhiều schema |
 | ADR-5 | Cron trong app (node-cron) | Đơn giản, ít hạ tầng | Phải chống chạy trùng khi scale |
 | ADR-6 | Stack render: PostGIS → GeoServer → Mapbox GL JS | 1 client thống nhất; GeoServer chuẩn OGC + cache | Cần extension MVT, vận hành thêm GeoServer |
+| ADR-7 | Layer Registry Pattern cho quản lý lớp GIS ở admin | 1 UI admin thống nhất quản lý mọi lớp qua `gis.layer_registry`; dynamic query an toàn (table_name từ DB, không từ user input); per-layer RBAC qua JSONB; dễ thêm lớp mới không cần deploy code | Cần bảng bổ trợ (registry, import_jobs, edit_history); query động khó debug hơn query tĩnh |
 
 ## 7. Bảo mật xuyên suốt
 - RBAC theo `auth.roles.permissions` (JSONB) — linh hoạt không cần migration.

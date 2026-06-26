@@ -2,9 +2,12 @@ const app = require("./src/app");
 const db = require("./src/configs/database");
 const { initializeEarthEngine, isInitialized } = require("./src/configs/gge");
 const { initMinio, healthCheck: minioHealthCheck } = require("./src/configs/minioClient");
+const geoserverClient = require("./src/utils/geoserver.client");
+
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
+const geoImportWorker       = require("./src/workers/geoImport.worker");
 const {
   initWebSocketServer,
   closeWebSocketServer,
@@ -25,7 +28,7 @@ function formatField(label, value) {
   return `${label.padEnd(14)}: ${value}`;
 }
 
-function printStartupBanner({ dbStatus, minioStatus, earthEngineStatus }) {
+function printStartupBanner({ dbStatus, minioStatus, earthEngineStatus, geoserverStatus }) {
   const publicHost = HOST === "0.0.0.0" ? "localhost" : HOST;
   const lines = [
     "APP QUẢN LÝ GIS KONTUM",
@@ -39,6 +42,7 @@ function printStartupBanner({ dbStatus, minioStatus, earthEngineStatus }) {
     formatField("PostgreSQL", dbStatus),
     formatField("MinIO",      minioStatus),
     formatField("Earth Engine", earthEngineStatus),
+    formatField("GeoServer",    geoserverStatus),
   ];
 
   const width = Math.max(...lines.map((line) => line.length), 48);
@@ -76,7 +80,8 @@ async function gracefulShutdown(signal) {
 
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
-  imageProcessingWorker.stopWorker(); // ← dừng Image Processing Worker
+  imageProcessingWorker.stopWorker();
+  geoImportWorker.stopWorker();
   closeWebSocketServer();
 
   if (server) {
@@ -122,9 +127,13 @@ const initializeAndStartServer = async () => {
       ? `✓ Connected (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`
       : `⚠ Unavailable (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`;
     const earthEngineStatus = earthEngineInitialized ? "Initialized" : "Uninitialized";
+    const geoserverOk       = await geoserverClient.healthCheck();
+    const geoserverStatus   = geoserverOk
+      ? `✓ Connected (${process.env.GEOSERVER_URL || 'http://localhost:8080/geoserver'})`
+      : `⚠ Unavailable (${process.env.GEOSERVER_URL || 'http://localhost:8080/geoserver'})`;
 
     server = app.listen(PORT, HOST, () => {
-      printStartupBanner({ dbStatus, minioStatus, earthEngineStatus });
+      printStartupBanner({ dbStatus, minioStatus, earthEngineStatus, geoserverStatus });
     });
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
@@ -133,6 +142,7 @@ const initializeAndStartServer = async () => {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
       imageProcessingWorker.startWorker();
+      geoImportWorker.startWorker();
     }
 
     process.on("unhandledRejection", (error) => {
@@ -158,9 +168,13 @@ const initializeAndStartServer = async () => {
       ? `✓ Connected (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`
       : `⚠ Unavailable (${process.env.MINIO_ENDPOINT || 'localhost'}:${process.env.MINIO_PORT || 9000})`;
     const earthEngineStatus = "⚠ Unavailable";
+    const geoserverOk       = await geoserverClient.healthCheck();
+    const geoserverStatus   = geoserverOk
+      ? `✓ Connected (${process.env.GEOSERVER_URL || 'http://localhost:8080/geoserver'})`
+      : `⚠ Unavailable (${process.env.GEOSERVER_URL || 'http://localhost:8080/geoserver'})`;
 
     server = app.listen(PORT, HOST, () => {
-      printStartupBanner({ dbStatus, minioStatus, earthEngineStatus });
+      printStartupBanner({ dbStatus, minioStatus, earthEngineStatus, geoserverStatus });
     });
     initWebSocketServer(server, { path: WS_PATH });
 
@@ -168,6 +182,7 @@ const initializeAndStartServer = async () => {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
       imageProcessingWorker.startWorker();
+      geoImportWorker.startWorker();
     }
 
     process.on("unhandledRejection", (error) => {

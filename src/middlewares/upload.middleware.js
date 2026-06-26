@@ -59,6 +59,16 @@ const FILE_CATEGORIES = {
             '.txt', '.csv', '.zip', '.rar', '.7z',
         ],
     },
+    pdf_map: {
+        dir: 'pdf-maps',
+        maxSize: Number(process.env.UPLOAD_PDF_MAP_MAX_MB || 100) * MB,
+        mimeTypes: [
+            'application/pdf',
+            'image/jpeg', 'image/png', 'image/webp',
+            'image/tiff', 'image/bmp', 'image/gif',
+        ],
+        extensions: ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.bmp', '.gif'],
+    },
 };
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'public', 'uploads');
@@ -168,9 +178,60 @@ const handleUploadError = (err, req, res, next) => {
     return next(err);
 };
 
+// createFieldsUploader — multer.fields() với mỗi field một category riêng.
+// fieldCategoryMap: { fieldName: 'category_key', … }
+const createFieldsUploader = (fieldCategoryMap) => {
+    const maxSize = Math.max(...Object.values(fieldCategoryMap).map((c) => FILE_CATEGORIES[c].maxSize));
+
+    const storage = multer.diskStorage({
+        destination: (req, file, cb) => {
+            const categoryKey = fieldCategoryMap[file.fieldname];
+            const cfg = FILE_CATEGORIES[categoryKey];
+            const now = new Date();
+            const year = String(now.getFullYear());
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const dest = path.join(UPLOAD_ROOT, cfg.dir, year, month);
+            try {
+                ensureDir(dest);
+                file._relativeDir = `/uploads/${cfg.dir}/${year}/${month}`;
+                file._category = categoryKey;
+                cb(null, dest);
+            } catch (err) {
+                cb(err);
+            }
+        },
+        filename: (req, file, cb) => {
+            cb(null, generateFilename(file.originalname));
+        },
+    });
+
+    const fileFilter = (req, file, cb) => {
+        const categoryKey = fieldCategoryMap[file.fieldname];
+        if (!categoryKey) {
+            return cb(new Api400Error(t('upload_invalid_type', req.lang), [`UNEXPECTED_FIELD: ${file.fieldname}`]), false);
+        }
+        const cfg = FILE_CATEGORIES[categoryKey];
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (cfg.mimeTypes.includes(file.mimetype) && cfg.extensions.includes(ext)) {
+            return cb(null, true);
+        }
+        return cb(new Api400Error(
+            t('upload_invalid_type', req.lang),
+            [`INVALID_FILE_TYPE: ${file.originalname} (${file.mimetype}) for field "${file.fieldname}"`],
+        ), false);
+    };
+
+    const fields = Object.keys(fieldCategoryMap).map((name) => ({ name, maxCount: 1 }));
+
+    return multer({ storage, fileFilter, limits: { fileSize: maxSize, files: fields.length } }).fields(fields);
+};
+
 const uploadImage = createUploader(['image']);
 const uploadVideo = createUploader(['video']);
 const uploadDocument = createUploader(['document']);
+const uploadPdfMap = createUploader(['pdf_map']);
+// file=PDF bản đồ (bắt buộc), thumbnail=ảnh preview (tuỳ chọn)
+const uploadPdfMapFields = createFieldsUploader({ file: 'pdf_map', thumbnail: 'image' });
 const uploadMedia = createUploader(['image', 'video']);
 const uploadAny = createUploader(['image', 'video', 'document']);
 
@@ -178,9 +239,12 @@ module.exports = {
     uploadImage,
     uploadVideo,
     uploadDocument,
+    uploadPdfMap,
+    uploadPdfMapFields,
     uploadMedia,
     uploadAny,
     handleUploadError,
     createUploader,
+    createFieldsUploader,
     FILE_CATEGORIES,
 };

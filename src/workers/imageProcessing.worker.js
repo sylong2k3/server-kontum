@@ -21,8 +21,8 @@ const os      = require('os');
 const path    = require('path');
 const fs      = require('fs');
 
-const repo    = require('../repositories/remoteSensing.repository');
-const minio   = require('../services/minioStorage.service');
+const repo    = require('../repositories/remote-sensing.repository');
+const minio   = require('../services/minio.service');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const WORKER_ID         = `worker-${os.hostname()}-${process.pid}`;

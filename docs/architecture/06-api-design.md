@@ -34,6 +34,34 @@
 ### Mã trạng thái dùng chung
 `200 OK`, `201 Created`, `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`, `409 Conflict`, `422 Validation`, `429 Too Many Requests`, `500 Server Error`.
 
+### Danh sách chức năng chi tiết theo quyền
+
+> Ma trận này là cơ sở thiết kế API và RBAC. Tên role kỹ thuật tương ứng: `system_admin`, `ubnd_tinh`, `so_nnmt`, `citizen`.
+
+| Nhóm chức năng | Quản trị hệ thống | UBND tỉnh | Sở NN&MT tỉnh | Người dân |
+|---|---|---|---|---|
+| Đăng nhập / Đăng ký | Đăng nhập | Đăng nhập | Đăng nhập | Đăng nhập, Đăng ký |
+| Quản trị người dùng | Thêm/xóa tài khoản, phân quyền, khóa tài khoản, cấp lại mật khẩu | Xem người dùng nếu được phân quyền | Quản lý tài khoản chuyên môn cấp sở | Quản lý hồ sơ cá nhân |
+| Quản trị ảnh vệ tinh | Thêm, xóa, phân loại, quản lý ảnh vệ tinh | Xem ảnh vệ tinh | Tìm kiếm, khai thác ảnh vệ tinh phục vụ giám sát | Xem ảnh được chia sẻ công khai |
+| Quản trị lớp dữ liệu bản đồ | Thêm/sửa/xóa lớp dữ liệu, phân quyền, import shapefile/excel | Xem lớp dữ liệu tổng hợp | Quản lý dữ liệu lớp phủ rừng, chuyên đề môi trường | Xem lớp dữ liệu công khai |
+| API dữ liệu bản đồ | Tạo API, chia sẻ API, phân quyền API | Sử dụng API báo cáo điều hành | Khai thác API tích hợp hệ thống chuyên ngành | Không |
+| Quản trị tin tức | Thêm/sửa/xóa tin tức | Đọc tin tức | Đăng tin chuyên ngành | Đọc, tìm kiếm, bình luận |
+| Quản trị báo cáo – văn bản | Thêm/xóa báo cáo, văn bản | Xem báo cáo quản lý | Quản lý báo cáo nghiệp vụ | Xem tài liệu công khai |
+| Quản trị bản đồ PDF | Thêm/sửa/xóa bản đồ PDF | Xem, tải bản đồ PDF | Quản lý bản đồ chuyên đề PDF | Xem, tải bản đồ PDF |
+| Thông tin cập nhật từ MobileGIS | Theo dõi cập nhật, xác thực thông tin | Xem tổng hợp phản ánh | Xem thay đổi hiện trạng, xác minh thực địa | Gửi dữ liệu hiện trạng |
+| Tương tác bản đồ WebGIS | Toàn quyền thao tác | Xem bản đồ, tra cứu đối tượng, 3D, lớp nền | Khai thác bản đồ chuyên sâu, lớp chuyên ngành | Tra cứu bản đồ công khai |
+| Tương tác dữ liệu thời tiết | Quản trị nguồn dữ liệu | Theo dõi nhiệt độ, mưa | Theo dõi thời tiết phục vụ cảnh báo | Xem thông tin thời tiết |
+| Tương tác ảnh vệ tinh | Quản trị toàn bộ chức năng | Xem, so sánh hiện trạng | Phân loại đối tượng, tính diện tích, xuất vector | Xem dữ liệu công khai |
+| Thống kê | Quản trị cấu hình thống kê | Xem báo cáo, biểu đồ điều hành | Thống kê diện tích lớp phủ, theo huyện, theo thời gian | Xem thống kê công khai |
+| Phân tích không gian | Quản trị mô hình phân tích | Xem cảnh báo thay đổi rừng | Phân tích thay đổi rừng, khoảng cách dân cư–rừng | Không |
+| Dự báo cháy rừng | Quản trị thuật toán, cấu hình | Xem cảnh báo cháy cấp tỉnh | Theo dõi chỉ số nhiệt, độ ẩm, hướng gió, nguy cơ cháy | Xem cảnh báo công khai |
+| Tin tức | Quản lý nội dung | Đọc tin | Đọc, đăng tin chuyên môn | Đọc, tìm kiếm, bình luận |
+| Báo cáo | Quản lý báo cáo | Xem báo cáo điều hành | Xem báo cáo chuyên ngành | Xem báo cáo công khai |
+| Gửi phản ánh | Tiếp nhận và quản lý phản ánh | Theo dõi phản ánh toàn tỉnh | Xử lý phản ánh lĩnh vực rừng | Gửi phản ánh kèm ảnh vi phạm |
+| MobileGIS – tương tác bản đồ | Quản trị ứng dụng | Theo dõi dữ liệu hiện trường | Sử dụng GPS, đo đạc, cập nhật đối tượng | Xem bản đồ, GPS, tìm đường |
+| MobileGIS – giám sát hiện trạng | Theo dõi dữ liệu gửi lên | Xem báo cáo hiện trường | Chụp ảnh, cập nhật hiện trạng rừng | Chụp ảnh, gửi hiện trạng |
+| MobileGIS – tin tức / văn bản | Quản trị nội dung | Đọc | Đọc, tra cứu | Đọc, tra cứu kiểm tra tiến độ |
+
 ---
 
 ## 2. Auth (đã hiện thực) — `/api/v1/auth`
@@ -103,11 +131,49 @@
 }
 ```
 
-### GeoServer proxy — `/api/v1/map`
+### Map metadata & GeoServer management — `/api/v1/map`
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | `/wms` | Proxy WMS (ẩn credential, cache) |
-| GET | `/wfs` | Proxy WFS |
+| GET | `/layers` | Lấy metadata layer active/public theo quyền |
+| POST | `/layers/:code/publish` | Publish layer lên GeoServer qua REST API *(admin)* |
+| DELETE | `/layers/:code/publish` | Unpublish layer khỏi GeoServer *(admin)* |
+| PATCH | `/layers/:code/active` | Bật/tắt layer, đồng bộ `is_active` và GeoServer `enabled` *(admin)* |
+| POST | `/rasters/:coverageStore/harvest` | Harvest GeoTIFF vào ImageMosaic + truncate GWC nếu cần *(admin)* |
+
+### Import file GIS — `/api/v1/map` *(EP-03b)*
+
+| Method | Endpoint | Quyền | Mô tả |
+|--------|----------|-------|-------|
+| POST | `/layers/import-file` | `map_layers.import` | Upload file GIS (multipart `file`). Nạp vào PostGIS qua `ogr2ogr`, đăng ký `layer_registry`, auto-publish GeoServer. Trả **202** + `job_id`. |
+| GET | `/import-jobs/:jobId` | `map_layers.import` | Poll tiến độ job (`status`, `progress`, `imported_count`, `error_log`). |
+| GET | `/layers/:code/import-jobs` | `map_layers.import` | Lịch sử import của một layer. |
+
+**Multipart fields cho `POST /layers/import-file`:**
+
+| Field | Kiểu | Bắt buộc | Ghi chú |
+|-------|------|----------|---------|
+| `file` | File | ✅ | `.zip` (shapefile/KMZ/GDB), `.geojson`, `.json`, `.kml`, `.tif/.tiff` |
+| `code` | text | ✅ | Mã layer (tạo mới hoặc re-import nếu trùng) |
+| `name_vi` | text | ✅ (tạo mới) | Tên hiển thị tiếng Việt |
+| `source_format` | text | ✅ | `shapefile` \| `geojson` \| `kml` \| `geotiff` \| `filegdb` |
+| `import_mode` | text | — | `overwrite` (mặc định) \| `append` |
+| `srid_input` | int | — | SRID nguồn nếu file thiếu CRS (mặc định 4326) |
+| `source_layer_name` | text | — | Layer con trong FileGDB/KML nhiều layer |
+| `category`, `layer_kind`, `layer_group`, `data_year`, `is_public` | text | — | Metadata phân loại |
+| `auto_publish` | bool | — | Mặc định `true` — tự publish GeoServer sau import |
+
+**Response 202:**
+```jsonc
+{
+  "success": true,
+  "message": "Yêu cầu import đã được tiếp nhận, đang xử lý",
+  "data": { "job_id": 42, "code": "ranh_gioi_rung", "status": "processing", "sync": true }
+}
+```
+
+> Luồng render FE sau import: `GET /map/layers` → FE nhận `geoserver_layer` → build URL WMS/WFS/WMTS/MVT → render trực tiếp trên GeoServer. Node không proxy tile.
+
+> WMS/WFS/WMTS/MVT không đi qua Node.js. Frontend gọi trực tiếp GeoServer public URL cho layer công khai/chỉ đọc.
 
 ### Map APIs — `/api/v1/map-apis` *(admin)* CRUD + cấp `api_key`, `scope`.
 

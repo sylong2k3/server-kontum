@@ -1,13 +1,16 @@
 # 12 — Module Design: Tích hợp GeoServer
 
-> Chi tiết hóa US-024 và ADR-3. GeoServer đóng vai trò **map server** chuẩn OGC (WMS/WFS/WMTS) phục vụ các lớp dữ liệu lớn từ PostGIS, đặt sau API proxy và **không expose ra internet** (theo `.env.example`).
+> Chi tiết hóa US-024 và ADR-3. GeoServer đóng vai trò **map server** chuẩn OGC (WMS/WFS/WMTS/MVT) phục vụ các lớp dữ liệu GIS từ PostGIS/GeoTIFF. Node.js **không proxy tile/geodata**; Node.js chỉ quản lý metadata trong `gis.layer_registry` và gọi GeoServer REST API khi publish/unpublish/bật/tắt layer.
+>
+> **Cập nhật:** Đồng bộ với **Layer Registry Pattern** (`gis.layer_registry`) — xem chi tiết tại [05-database-design.md §4](../architecture/05-database-design.md).
 
 ## 0. Quyết định kiến trúc (đã chốt)
 
-> **Luồng render chính:** `PostGIS (lưu trữ) → GeoServer (OGC tiles/features) → Node proxy → Mapbox GL JS (render)`.
+> **Luồng render chính:** `PostGIS/GeoTIFF (lưu trữ) → GeoServer (WMS/WFS/WMTS/MVT) → Frontend Mapbox/MapLibre (render)`.
 
-- Mapbox GL JS là **client duy nhất** để vẽ bản đồ trên WebGIS.
-- Mọi lớp dữ liệu lấy qua **GeoServer** (backed by PostGIS), đi qua **Node proxy** (ẩn credential, RBAC).
+- Mapbox GL JS / MapLibre là client để vẽ bản đồ trên WebGIS.
+- Frontend gọi **trực tiếp GeoServer** cho dữ liệu công khai: WMS bản đồ nền, WMTS/tile cache, WFS chỉ đọc, Vector Tile, raster, ranh giới hành chính, điểm du lịch công khai.
+- Node.js chỉ cung cấp API metadata (`/api/v1/map/layers`) và API quản trị publish/unpublish/enable layer qua GeoServer REST API.
 - API GeoJSON trực tiếp từ PostGIS (`/map/layers/:code/features`) chỉ giữ cho **lớp rất nhỏ/động hoặc dữ liệu nghiệp vụ đã tính sẵn** (vd popup chi tiết), **không** dùng làm đường render lớp nền.
 
 | Loại lớp | Nguồn cho Mapbox | Kiểu source Mapbox |
@@ -31,20 +34,20 @@
 
 ```mermaid
 flowchart LR
-    Web[WebGIS Mapbox/MapLibre] -->|/api/v1/map/wms| Proxy[Node proxy\ngeoserver.client.js]
-    Mobile[MobileGIS] -->|/api/v1/map/wms| Proxy
-    Proxy -->|Basic auth nội bộ| GS[GeoServer\n127.0.0.1:8080]
+    Web[WebGIS Mapbox/MapLibre] -->|WMS/WFS/WMTS/MVT trực tiếp| GS[GeoServer]
+    Mobile[MobileGIS] -->|WMS/WFS/WMTS/MVT trực tiếp| GS
     GS --> GWC[GeoWebCache\ntile cache]
-    GS -->|JDBC| PG[(PostGIS\nschema gis)]
-    Admin[system_admin] -->|publish layer| API[/api/v1/map/layers/:code/publish]
-    API --> REST[GeoServer REST API]
-    REST --> GS
+    GS -->|JDBC read-only| PG[(PostGIS\nschema gis)]
+    Admin[system_admin] -->|publish/unpublish/active| API[/api/v1/map/layers/...]
+    API -->|REST API quản trị| GS
+    API -->|metadata| PG
 ```
 
 **Luồng:**
-1. Admin import dữ liệu vào PostGIS (US-021).
-2. Admin gọi API publish → Node dùng **GeoServer REST API** tạo layer trong workspace `kontum`, datastore `kontum_postgis`.
-3. Client gọi `/api/v1/map/wms` → Node proxy thêm credential nội bộ → GeoServer trả ảnh tile/WFS.
+1. Admin import dữ liệu vào PostGIS qua `POST /api/v1/admin/gis/layers/:id/import` → tạo `layer_import_jobs`.
+2. Import thành công → API/worker gọi **GeoServer REST API** publish layer (auto-publish) + cập nhật `gis.layer_registry.geoserver_layer`.
+3. Admin bật/tắt hiển thị lớp qua `is_active` trong `gis.layer_registry` → Node đồng bộ `enabled` trên GeoServer.
+4. Client gọi `GET /api/v1/map/layers` để lấy metadata layer đang active/public, sau đó tự build URL WMS/WFS/WMTS/MVT tới GeoServer.
 
 ## 3. Cấu hình GeoServer (theo biến `.env`)
 
@@ -67,6 +70,8 @@ GEOSERVER_DATASTORE=kontum_postgis
 
 ## 4. Quy trình publish layer (GeoServer REST API)
 
+### 4.1 Publish thủ công
+
 ```mermaid
 sequenceDiagram
     participant Admin
@@ -75,60 +80,200 @@ sequenceDiagram
     participant PG as PostGIS
 
     Admin->>API: POST /map/layers/:code/publish
-    API->>PG: kiểm tra bảng/layer tồn tại + SRID 4326
-    API->>GS: PUT featuretype (workspace=kontum, store=kontum_postgis)
-    GS->>PG: đọc schema bảng
+    API->>PG: SELECT * FROM gis.layer_registry WHERE code = :code
+    Note over API: Lấy schema_name, table_name từ registry (KHÔNG từ user input)
+    API->>PG: Kiểm tra bảng tồn tại + SRID 4326
+    API->>GS: PUT featuretype (workspace=kontum, store=kontum_postgis, name=table_name)
+    GS->>PG: Đọc schema bảng
     GS-->>API: 201 Created
-    API->>GS: PUT style SLD + gán layer.defaultStyle
-    API->>PG: cập nhật gis.map_layers (source_type='geoserver', geoserver_layer)
+    API->>GS: PUT style SLD + gán defaultStyle (từ layer_registry.default_style)
+    API->>PG: UPDATE gis.layer_registry SET geoserver_layer = 'kontum:table_name'
     API-->>Admin: 200 OK (đã publish)
 ```
+
+### 4.2 Auto-publish sau import thành công
+
+Khi `layer_import_jobs.status` chuyển sang `completed`:
+
+```mermaid
+sequenceDiagram
+    participant Worker as Import Worker
+    participant PG as PostGIS
+    participant GS as GeoServer REST
+    participant GWC as GeoWebCache
+
+    Worker->>PG: INSERT features vào bảng vật lý (gis.ao_ho, gis.duong_bo...)
+    Worker->>PG: UPDATE layer_import_jobs SET status='completed'
+    Worker->>PG: SELECT * FROM gis.layer_registry WHERE id = layer_id
+
+    alt geoserver_layer IS NULL (chưa publish lần nào)
+        Worker->>GS: POST featuretype (publish lần đầu)
+        Worker->>GS: PUT style SLD
+        Worker->>PG: UPDATE layer_registry SET geoserver_layer = 'kontum:table_name'
+    else Đã publish rồi (re-import / overwrite)
+        Worker->>GWC: POST truncate cache layer (xóa tile cũ)
+    end
+
+    Worker->>PG: UPDATE layer_registry SET feature_count=X, bbox=Y, last_updated_at=NOW()
+```
+
+> **Quy tắc auto-publish:** Chỉ publish khi `layer_registry.is_active = true`. Nếu admin tắt lớp (`is_active = false`) thì import vẫn hoạt động nhưng không tự publish lên GeoServer.
+
+### 4.3 Bật/tắt hiển thị lớp (is_active) — Luồng xử lý
+
+Cột `gis.layer_registry.is_active` kiểm soát lớp có được hiển thị trên bản đồ hay không.
+
+#### Khi admin **tắt** lớp (`is_active = false`)
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant API as Node API
+    participant GS as GeoServer REST
+    participant PG as PostGIS
+
+    Admin->>API: PATCH /api/v1/map/layers/:code/active { is_active: false }
+    API->>PG: UPDATE gis.layer_registry SET is_active=false WHERE code=:code
+    API->>GS: PUT /rest/layers/kontum:table_name { enabled: false }
+    Note over GS: GeoServer disable layer → WMS/WFS/WMTS trả 404
+    API-->>Admin: 200 OK (đã tắt)
+```
+
+#### Khi admin **bật** lớp (`is_active = true`)
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant API as Node API
+    participant GS as GeoServer REST
+    participant PG as PostGIS
+
+    Admin->>API: PATCH /api/v1/map/layers/:code/active { is_active: true }
+    API->>PG: UPDATE gis.layer_registry SET is_active=true WHERE code=:code
+    API->>GS: PUT /rest/layers/kontum:table_name { enabled: true }
+    Note over GS: GeoServer enable layer → WMS/WFS/WMTS hoạt động
+    API-->>Admin: 200 OK (đã bật)
+```
+
+#### Code mẫu xử lý bật/tắt (geoserver.client.js)
+
+```js
+// src/utils/geoserver.client.js
+
+async function setLayerEnabled(geoserverLayerName, enabled) {
+  // geoserverLayerName = 'kontum:ao_ho'
+  const url = `${process.env.GEOSERVER_URL}/rest/layers/${geoserverLayerName}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Basic ' + Buffer.from(
+        `${process.env.GEOSERVER_USER}:${process.env.GEOSERVER_PASSWORD}`
+      ).toString('base64'),
+    },
+    body: JSON.stringify({ layer: { enabled } }),
+  });
+  if (!res.ok) throw new Error(`GeoServer setEnabled failed: ${res.status}`);
+}
+```
+
+#### Client dùng metadata để build URL GeoServer
+
+Node.js không còn middleware proxy. Trạng thái `is_active` được thực thi bằng 2 lớp:
+- API `/api/v1/map/layers` chỉ trả layer được phép hiển thị cho user hiện tại.
+- Khi admin tắt layer, service cũng gọi GeoServer REST `enabled=false`, nên request WMS/WFS/WMTS/MVT trực tiếp tới GeoServer sẽ không phục vụ layer đó.
+
+```js
+const GEOSERVER_PUBLIC_URL = 'https://geoserver.humgsoftware.pro.vn/geoserver';
+const WORKSPACE = 'kontum';
+
+function buildWmsTileUrl(layer) {
+  const geoserverLayer = layer.geoserver_layer || `${WORKSPACE}:${layer.table_name}`;
+  return `${GEOSERVER_PUBLIC_URL}/${WORKSPACE}/wms?service=WMS&version=1.3.0&request=GetMap` +
+    `&layers=${encodeURIComponent(geoserverLayer)}` +
+    `&styles=&bbox={bbox-epsg-3857}&width=256&height=256` +
+    `&crs=EPSG:3857&format=image/png&transparent=true`;
+}
+```
+
+#### Client hiển thị danh sách lớp (chỉ lớp active)
+
+Khi client load bản đồ, gọi API lấy danh sách lớp đang bật:
+
+```js
+// Frontend - load danh sách lớp từ API
+const response = await fetch('/api/v1/map/layers');
+const layers = await response.json();
+// API chỉ trả các layer có is_active=true (+ is_public=true nếu citizen)
+
+layers.forEach(layer => {
+  if (layer.geometry_type.includes('POLYGON')) {
+    // Thêm WMS source cho polygon lớn
+    map.addSource(layer.code, {
+      type: 'raster',
+      tiles: [buildWmsTileUrl(layer)],
+      tileSize: 256
+    });
+    map.addLayer({
+      id: `${layer.code}-layer`,
+      type: 'raster',
+      source: layer.code,
+      layout: { visibility: 'visible' }  // Toggle bằng UI checkbox
+    });
+  }
+});
+
+// Toggle visibility khi user nhấn checkbox trong Layer Panel
+function toggleLayer(layerCode, visible) {
+  map.setLayoutProperty(
+    `${layerCode}-layer`,
+    'visibility',
+    visible ? 'visible' : 'none'
+  );
+}
+```
+
+> **Phân biệt 2 cấp ẩn/hiện:**
+> | Cấp | Ai kiểm soát | Ảnh hưởng | Cách hoạt động |
+> |-----|-------------|-----------|----------------|
+> | **is_active** (server) | Admin qua API | Toàn hệ thống — tất cả user | API không trả layer + GeoServer disable layer |
+> | **visibility** (client) | User trên bản đồ | Chỉ phiên làm việc của user đó | `map.setLayoutProperty('visibility', 'none')` — dữ liệu vẫn có, chỉ ẩn render |
 
 Các REST endpoint GeoServer dùng (nội bộ):
 - `POST /rest/workspaces` — tạo workspace (1 lần).
 - `POST /rest/workspaces/kontum/datastores` — tạo PostGIS store (1 lần).
 - `POST /rest/workspaces/kontum/datastores/kontum_postgis/featuretypes` — publish 1 layer.
 - `POST /rest/styles` + `PUT /rest/layers/{layer}` — gán SLD.
+- `PUT /rest/layers/{layer}` — bật/tắt layer (`enabled: true/false`).
 - `DELETE /rest/layers/{layer}` — gỡ publish.
+- `POST /gwc/rest/seed/{layer}.json` — truncate tile cache.
 
-## 5. API proxy phía Node (US-024)
+## 5. API Node phía quản trị metadata/publish (không proxy tile)
 
 | Method | Endpoint | Mô tả |
 |--------|----------|-------|
-| GET | `/api/v1/map/wms` | Proxy WMS `GetMap/GetFeatureInfo/GetCapabilities` |
-| GET | `/api/v1/map/wfs` | Proxy WFS `GetFeature` (GeoJSON) |
-| GET | `/api/v1/map/wmts/{layer}/{z}/{x}/{y}` | Proxy tile (GeoWebCache) |
-| POST | `/api/v1/map/layers/:code/publish` | (admin) publish layer PostGIS → GeoServer |
-| DELETE | `/api/v1/map/layers/:code/publish` | (admin) gỡ publish |
+| GET | `/api/v1/map/layers` | Trả metadata layer active/public theo quyền để frontend build URL GeoServer |
+| POST | `/api/v1/map/layers/:code/publish` | Admin publish layer PostGIS/GeoTIFF → GeoServer REST |
+| DELETE | `/api/v1/map/layers/:code/publish` | Admin gỡ publish khỏi GeoServer + clear metadata |
+| PATCH | `/api/v1/map/layers/:code/active` | Admin bật/tắt layer, đồng bộ `gis.layer_registry.is_active` và GeoServer `enabled` |
+| POST | `/api/v1/map/rasters/:coverageStore/harvest` | Harvest GeoTIFF mới vào ImageMosaic + truncate GWC nếu cần |
 
-**Yêu cầu proxy:**
-- Ẩn hoàn toàn `GEOSERVER_URL` + credential; client không bao giờ gọi trực tiếp.
-- Chỉ cho phép tham số an toàn (allowlist: `service`, `version`, `request`, `layers`, `bbox`, `width`, `height`, `srs`, `format`, `query_layers`, `i`, `j`...). Chặn tham số lạ để tránh SSRF/abuse.
-- Kiểm tra layer được yêu cầu có `is_public` hoặc user có quyền (đối chiếu `gis.map_layers`).
-- Stream response (ảnh tile) để không buffer toàn bộ vào RAM.
-- Áp rate-limit + cache header cho tile.
+**Nguyên tắc:**
+- Node.js không expose `/api/v1/map/wms`, `/api/v1/map/wfs`, `/api/v1/map/wmts`.
+- Frontend gọi trực tiếp GeoServer public URL cho các layer công khai/chỉ đọc.
+- Node.js chỉ gọi GeoServer REST API cho tác vụ quản trị: publish, unpublish, enable/disable, harvest, truncate cache.
+- Không đưa `GEOSERVER_USER/GEOSERVER_PASSWORD` cho frontend. Public GeoServer nên dùng cấu hình anonymous/read-only hoặc rule security riêng cho layer công khai.
 
-### Phác thảo proxy (Express 5, đề xuất)
+**Ví dụ frontend:**
 ```js
-// src/utils/geoserver.client.js
-const ALLOWED = new Set(['service','version','request','layers','query_layers',
-  'bbox','width','height','srs','crs','format','styles','transparent','i','j',
-  'typeName','outputFormat','cql_filter','maxFeatures']);
-
-function buildUpstreamUrl(reqQuery, path = 'wms') {
-  const url = new URL(`${process.env.GEOSERVER_URL}/${process.env.GEOSERVER_WORKSPACE}/${path}`);
-  for (const [k, v] of Object.entries(reqQuery)) {
-    if (ALLOWED.has(k.toLowerCase())) url.searchParams.set(k, v);
-  }
-  return url;
-}
-// proxy: fetch upstream với Authorization Basic nội bộ, rồi stream về client
+const metadata = await fetch('/api/v1/map/layers').then((r) => r.json());
+const publicGeoServer = 'https://geoserver.humgsoftware.pro.vn/geoserver';
+// Build WMS/WFS/WMTS URL từ metadata.data[*].geoserver_layer.
 ```
-> Lưu ý: KHÔNG forward header `Authorization` của client lên GeoServer; dùng credential nội bộ riêng. Đây là ranh giới bảo mật (US-024 AC: "ẩn credential").
 
 ## 6. Styling: SLD (GeoServer) vs Mapbox style (client)
 - **Lớp WMS render server-side** → dùng **SLD** trong GeoServer (legend nhất quán cho mọi client).
-- **Lớp GeoJSON/MVT render client-side** → dùng style trong `gis.map_layers.style` (JSONB) cho Mapbox GL.
+- **Lớp GeoJSON/MVT render client-side** → dùng style trong `gis.layer_registry.default_style` (JSONB) cho Mapbox GL.
 - Khuyến nghị: lớp nền nặng dùng WMS+SLD; lớp tương tác/click dùng GeoJSON/MVT + Mapbox style.
 
 ## 7. Tích hợp Mapbox GL JS (luồng render chính)
@@ -140,7 +285,7 @@ function buildUpstreamUrl(reqQuery, path = 'wms') {
 map.addSource('rung-wms', {
   type: 'raster',
   tiles: [
-    '/api/v1/map/wms?service=WMS&version=1.3.0&request=GetMap' +
+    'https://geoserver.humgsoftware.pro.vn/geoserver/kontum/wms?service=WMS&version=1.3.0&request=GetMap' +
     '&layers=kontum:ranh_gioi_rung&styles=' +
     '&bbox={bbox-epsg-3857}&width=256&height=256' +
     '&crs=EPSG:3857&format=image/png&transparent=true'
@@ -155,7 +300,7 @@ map.addLayer({ id: 'rung-raster', type: 'raster', source: 'rung-wms' });
 ```js
 map.addSource('tieu-khu', {
   type: 'vector',
-  tiles: ['/api/v1/map/wmts/kontum:tieu_khu/{z}/{x}/{y}.pbf'],
+  tiles: ['https://geoserver.humgsoftware.pro.vn/geoserver/gwc/service/tms/1.0.0/kontum:tieu_khu@EPSG:900913@pbf/{z}/{x}/{y}.pbf'],
   minzoom: 8, maxzoom: 16
 });
 map.addLayer({
@@ -176,7 +321,7 @@ map.on('click', 'tieu-khu-fill', (e) => {
 ```js
 map.addSource('firms', {
   type: 'geojson',
-  data: '/api/v1/map/wfs?service=WFS&version=2.0.0&request=GetFeature' +
+  data: 'https://geoserver.humgsoftware.pro.vn/geoserver/kontum/wfs?service=WFS&version=2.0.0&request=GetFeature' +
         '&typeName=kontum:active_fire_point&outputFormat=application/json&srsName=EPSG:4326'
 });
 map.addLayer({
@@ -205,9 +350,9 @@ map.addLayer({
 - Invalidate cache khi layer cập nhật (gọi GWC `truncate` qua REST sau khi import lại).
 
 ## 9. Bảo mật (tổng hợp)
-- GeoServer bind `127.0.0.1` (hoặc mạng nội bộ Docker), **không** mở firewall ra ngoài.
-- Đổi mật khẩu admin mặc định; tạo user GeoServer riêng cho proxy (read-only).
-- Chỉ truy cập qua Node proxy đã RBAC + allowlist tham số.
+- GeoServer public URL chỉ bật anonymous/read-only cho layer công khai; REST admin vẫn phải bảo vệ bằng user/password mạnh và chỉ Node/backend được dùng.
+- Đổi mật khẩu admin mặc định; tạo user GeoServer riêng cho Node.js gọi REST quản trị.
+- Với layer không công khai, không expose qua anonymous GeoServer; dùng GeoServer security rules hoặc tách workspace/store riêng.
 - Tắt các service không dùng (vd OWS không cần) để giảm bề mặt tấn công.
 
 ## 10. Triển khai (Docker đề xuất)
@@ -227,13 +372,13 @@ services:
 ## 11. Bổ sung vào Backlog (đề xuất tách US-024)
 | ID | Story | SP |
 |----|-------|----|
-| US-024a | Proxy WMS/WFS an toàn (allowlist + RBAC + stream) | 5 |
+| US-024a | API metadata layer cho frontend build URL GeoServer | 3 |
 | US-024b | API publish/unpublish layer PostGIS qua GeoServer REST | 5 |
 | US-024c | Cấu hình GeoWebCache + seed/invalidate | 3 |
 
 ## 12. Kiểm thử
-- Proxy chặn tham số ngoài allowlist (chống SSRF).
-- Layer `is_public=false` không truy cập được qua proxy nếu thiếu quyền.
-- Publish layer mới → `GetCapabilities` qua proxy thấy layer.
+- `GET /api/v1/map/layers` chỉ trả layer active/public phù hợp quyền user.
+- Publish layer mới → `geoserver_layer` được cập nhật và `GetCapabilities` trực tiếp trên GeoServer thấy layer.
+- Tắt layer → `gis.layer_registry.is_active=false` và GeoServer `enabled=false`.
 - Tile cache trả nhanh + invalidate đúng sau khi cập nhật dữ liệu.
-- Credential GeoServer không lộ trong response/headers gửi về client.
+- Credential GeoServer REST không lộ cho frontend/client.

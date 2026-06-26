@@ -1,0 +1,278 @@
+'use strict';
+
+/**
+ * ogr.util.js — bọc ogr2ogr / ogrinfo (GDAL) qua child_process.spawn.
+ *
+ * An toàn:
+ *  - Mọi đối số truyền dạng mảng (KHÔNG nội suy vào shell string).
+ *  - Credential DB qua biến môi trường PGPASSWORD (không xuất hiện trong log).
+ *  - filePath và table_name được whitelist trước khi truyền.
+ *
+ * Yêu cầu môi trường: `gdal-bin` (ogr2ogr, ogrinfo) phải được cài sẵn.
+ *   Docker: RUN apt-get install -y gdal-bin
+ */
+
+const { spawn } = require('child_process');
+const path       = require('path');
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const IDENTIFIER_RE     = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const SAFE_PATH_RE      = /^[\w\-. /\\:()[\]{}]+$/;   // cho phép đường dẫn hệ thống thông thường
+const GEOM_TYPE_MAP     = {
+    point:           'POINT',
+    multipoint:      'MULTIPOINT',
+    linestring:      'LINESTRING',
+    multilinestring: 'MULTILINESTRING',
+    polygon:         'MULTIPOLYGON',      // PROMOTE_TO_MULTI nên polygon → multi
+    multipolygon:    'MULTIPOLYGON',
+    line:            'LINESTRING',
+    multiline:       'MULTILINESTRING',
+    geometrycollection: 'GEOMETRY',
+    geometry:        'GEOMETRY',
+    unknown:         'GEOMETRY',
+    none:            'GEOMETRY',
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const assertSafePath = (filePath) => {
+    const resolved = path.resolve(filePath);
+    if (!SAFE_PATH_RE.test(resolved)) {
+        throw new Error(`ogr.util: unsafe file path: ${filePath}`);
+    }
+    return resolved;
+};
+
+const assertIdentifier = (value, label = 'identifier') => {
+    if (!IDENTIFIER_RE.test(String(value || ''))) {
+        throw new Error(`ogr.util: invalid ${label}: ${value}`);
+    }
+    return value;
+};
+
+const normalizeGeomType = (ogrType) => {
+    if (!ogrType) { return 'GEOMETRY'; }
+    const key = ogrType.toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/^multi/, 'multi')
+        .replace(/curve/, 'linestring')
+        .replace(/surface/, 'polygon')
+        .replace(/solid/, 'geometry')
+        .replace(/25d$/, '')
+        .replace(/z$/, '');
+    return GEOM_TYPE_MAP[key] || 'GEOMETRY';
+};
+
+/**
+ * Chạy một child process và collect stdout/stderr.
+ * @returns {Promise<{stdout: string, stderr: string, code: number}>}
+ */
+const runProcess = (cmd, args, env = {}) =>
+    new Promise((resolve, reject) => {
+        const child = spawn(cmd, args, {
+            env: { ...process.env, ...env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (d) => { stdout += d.toString(); });
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+
+        child.on('error', (err) => {
+            if (err.code === 'ENOENT') {
+                reject(new Error(`ogr.util: '${cmd}' không tìm thấy. Cài GDAL: apt-get install -y gdal-bin`));
+            } else {
+                reject(err);
+            }
+        });
+
+        child.on('close', (code) => resolve({ stdout, stderr, code }));
+    });
+
+// ── Build connection string ───────────────────────────────────────────────────
+
+const buildPgConn = () => {
+    const { DB_HOST, DB_PORT, DB_NAME, DB_USER } = process.env;
+    if (!DB_HOST || !DB_NAME || !DB_USER) {
+        throw new Error('ogr.util: DB_HOST, DB_NAME, DB_USER là bắt buộc trong .env');
+    }
+    return `PG:host=${DB_HOST} port=${DB_PORT || 5432} dbname=${DB_NAME} user=${DB_USER}`;
+};
+
+// ── Inspect (ogrinfo) ─────────────────────────────────────────────────────────
+
+/**
+ * Lấy thông tin lớp đầu tiên (hoặc `layerName` cụ thể) trong file geo.
+ *
+ * @param {string} filePath    - Đường dẫn tuyệt đối đến file (.zip/.geojson/.kml/.tif...)
+ * @param {string} [layerName] - Tên layer con trong FileGDB/KML nhiều layer (không bắt buộc)
+ * @returns {Promise<{
+ *   layerName: string,
+ *   geometryType: string,   // enum registry: POINT/MULTIPOLYGON/...
+ *   epsgCode: number,
+ *   featureCount: number,
+ *   layers: string[],       // danh sách layer trong file
+ * }>}
+ */
+const inspect = async (filePath, layerName = null) => {
+    const safePath = assertSafePath(filePath);
+
+    // Lấy danh sách layers trước
+    const listResult = await runProcess('ogrinfo', ['-al', '-so', safePath]);
+    if (listResult.code !== 0 && !listResult.stdout) {
+        throw new Error(`ogrinfo thất bại: ${listResult.stderr.slice(0, 500)}`);
+    }
+
+    const layers = [];
+    const layerLineRe = /^Layer name:\s*(.+)/im;
+    for (const line of listResult.stdout.split('\n')) {
+        const m = line.match(/^(\S.+)\s+\((\w+)\)$/);
+        if (m) { layers.push(m[1].trim()); }
+        const m2 = line.match(layerLineRe);
+        if (m2 && !layers.includes(m2[1].trim())) { layers.push(m2[1].trim()); }
+    }
+
+    // Chọn layer cần inspect
+    const targetLayer = layerName || layers[0] || null;
+
+    const args = ['-so', safePath];
+    if (targetLayer) { args.push(targetLayer); }
+
+    const result = await runProcess('ogrinfo', args);
+    const out = result.stdout + result.stderr;
+
+    // Parse geometry type
+    const geomMatch = out.match(/Geometry:\s*(.+)/i);
+    const rawGeomType = geomMatch ? geomMatch[1].trim() : 'Unknown';
+    const geometryType = normalizeGeomType(rawGeomType);
+
+    // Parse EPSG
+    let epsgCode = 4326;
+    const epsgMatch = out.match(/AUTHORITY\["EPSG","(\d+)"\]/i)
+        || out.match(/EPSG:(\d+)/i)
+        || out.match(/ID\["EPSG",\s*(\d+)\]/i);
+    if (epsgMatch) { epsgCode = parseInt(epsgMatch[1], 10); }
+
+    // Parse feature count
+    let featureCount = 0;
+    const countMatch = out.match(/Feature Count:\s*(\d+)/i);
+    if (countMatch) { featureCount = parseInt(countMatch[1], 10); }
+
+    return {
+        layerName: targetLayer,
+        geometryType,
+        epsgCode,
+        featureCount,
+        layers: [...new Set(layers)],
+    };
+};
+
+// ── Load to PostGIS (ogr2ogr) ─────────────────────────────────────────────────
+
+/**
+ * Nạp dữ liệu vector từ file vào bảng PostGIS.
+ * Tự tạo bảng nếu chưa có (chế độ overwrite/-overwrite).
+ *
+ * @param {object} opts
+ * @param {string}  opts.filePath        - Đường dẫn tuyệt đối đến file nguồn
+ * @param {string}  opts.schema          - Schema đích (vd 'gis')
+ * @param {string}  opts.table           - Tên bảng đích (vd 'ranh_gioi_rung')
+ * @param {number}  [opts.sridInput]     - SRID nguồn nếu file không khai báo CRS (mặc định 4326)
+ * @param {string}  [opts.mode]          - 'overwrite' | 'append' (mặc định 'overwrite')
+ * @param {string}  [opts.sourceLayerName] - Layer con trong FileGDB/KML
+ * @param {function} [opts.onProgress]   - callback(percent: number, message: string)
+ * @returns {Promise<void>}
+ */
+const loadToPostgis = async ({
+    filePath,
+    schema,
+    table,
+    sridInput = 4326,
+    mode = 'overwrite',
+    sourceLayerName = null,
+    onProgress = null,
+} = {}) => {
+    const safePath   = assertSafePath(filePath);
+    const safeSchema = assertIdentifier(schema, 'schema');
+    const safeTable  = assertIdentifier(table, 'table');
+    const connStr    = buildPgConn();
+
+    if (onProgress) { onProgress(5, 'Chuẩn bị ogr2ogr...'); }
+
+    // Xác định input dùng VSI nếu cần
+    let inputPath = safePath;
+    const lowerPath = safePath.toLowerCase();
+    if ((lowerPath.endsWith('.zip') || lowerPath.endsWith('.kmz')) && !lowerPath.startsWith('/vsizip/')) {
+        inputPath = `/vsizip/${safePath}`;
+    }
+
+    const args = [
+        '-f', 'PostgreSQL',
+        connStr,
+        inputPath,
+        '-nln', `${safeSchema}.${safeTable}`,
+        '-t_srs', 'EPSG:4326',
+        '-lco', 'GEOMETRY_NAME=geom',
+        '-lco', `FID=id`,
+        '-lco', `SCHEMA=${safeSchema}`,
+        '-lco', 'SPATIAL_INDEX=GIST',
+        '-nlt', 'PROMOTE_TO_MULTI',
+        '-preserve_fid',
+    ];
+
+    // Chỉ định a_srs nếu file không có CRS
+    if (sridInput && sridInput !== 4326) {
+        args.push('-a_srs', `EPSG:${sridInput}`);
+    }
+
+    // Layer con (FileGDB / KML nhiều layer)
+    if (sourceLayerName) { args.push(sourceLayerName); }
+
+    // Import mode
+    if (mode === 'append') {
+        args.push('-append');
+    } else {
+        args.push('-overwrite');
+    }
+
+    if (onProgress) { onProgress(10, 'Đang nạp dữ liệu vào PostGIS...'); }
+
+    const result = await runProcess('ogr2ogr', args, {
+        PGPASSWORD: process.env.DB_PASSWORD || '',
+    });
+
+    if (result.code !== 0) {
+        const msg = (result.stderr || result.stdout).slice(0, 1000);
+        throw new Error(`ogr2ogr thất bại (exit ${result.code}): ${msg}`);
+    }
+
+    if (onProgress) { onProgress(80, 'Nạp dữ liệu hoàn thành.'); }
+};
+
+// ── Availability check ────────────────────────────────────────────────────────
+
+/**
+ * Kiểm tra ogr2ogr có sẵn trong PATH không.
+ * @returns {Promise<{available: boolean, version?: string}>}
+ */
+const checkAvailability = async () => {
+    try {
+        const result = await runProcess('ogr2ogr', ['--version']);
+        if (result.code === 0 || result.stdout) {
+            return { available: true, version: (result.stdout || result.stderr).split('\n')[0].trim() };
+        }
+        return { available: false };
+    } catch {
+        return { available: false };
+    }
+};
+
+module.exports = {
+    inspect,
+    loadToPostgis,
+    checkAvailability,
+    normalizeGeomType,
+};

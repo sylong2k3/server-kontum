@@ -225,7 +225,8 @@ const updateMeta = async (id, payload, options = {}) => {
     let versionCondition = '';
     if (payload.expectedUpdatedAt) {
         params.push(payload.expectedUpdatedAt);
-        versionCondition = ` AND updated_at = $${params.length}::timestamptz`;
+        // date_trunc('milliseconds') để tránh lệch do JS Date truncate microseconds → milliseconds
+        versionCondition = ` AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $${params.length}::timestamptz)`;
     }
 
     const result = await queryExecutor.query(

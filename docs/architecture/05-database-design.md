@@ -125,87 +125,335 @@ Role seed hiện tại:
 - `ubnd_tinh`: quyền đọc/giám sát, đọc feedback và xem bản đồ feedback.
 - `citizen`: đọc nội dung public, tạo/xóa bình luận của mình, tạo/xem feedback của mình, cập nhật profile/thiết bị/thông báo của mình.
 
-## 4. Schema `gis` (đề xuất migration mới)
+## 4. Schema `gis` (Quản lý lớp GIS ở Admin — "Layer Registry" Pattern)
 
-### 4.1 `gis.map_layers` — metadata lớp dữ liệu
+Với dự án có nhiều lớp dữ liệu GIS (ao hồ, đường bộ, ranh giới hành chính, rừng…), thay vì xây UI riêng cho từng bảng, hệ thống áp dụng **bảng registry trung tâm** để admin quản lý thống nhất.
+
+### Kiến trúc tổng thể
+
+```
+gis.layer_registry          ← "danh bạ" toàn bộ lớp — admin quản lý ở đây
+gis.ao_ho                   ← bảng vật lý, spatial data thực sự
+gis.duong_bo                ← bảng vật lý
+gis.rung                    ← bảng vật lý
+gis.layer_import_jobs       ← hàng đợi import shapefile/GeoJSON
+gis.layer_edit_history      ← audit trail chỉnh sửa feature
+```
+
+### 4-B.1 `gis.layer_registry` — bảng đăng ký lớp trung tâm
+
 ```sql
-CREATE TABLE IF NOT EXISTS gis.map_layers (
-    id           SERIAL PRIMARY KEY,
-    code         VARCHAR(60) UNIQUE NOT NULL,
-    name_vi      VARCHAR(150) NOT NULL,
-    name_en      VARCHAR(150),
-    description  TEXT,
-    geom_type    VARCHAR(20) NOT NULL,          -- POINT/LINESTRING/POLYGON/RASTER
-    category     VARCHAR(50),                    -- rung, hanh_chinh, tram_kiem_lam...
-    is_public    BOOLEAN NOT NULL DEFAULT false,
-    min_zoom     INT DEFAULT 0,
-    max_zoom     INT DEFAULT 22,
-    style        JSONB NOT NULL DEFAULT '{}',    -- style hiển thị (màu, opacity)
-    source_type  VARCHAR(20) DEFAULT 'postgis',  -- postgis | geoserver | external
-    geoserver_layer VARCHAR(120),
-    created_by   BIGINT REFERENCES auth.users(id),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS gis.layer_registry (
+    id              SERIAL PRIMARY KEY,
+    code            VARCHAR(60) UNIQUE NOT NULL,       -- 'ao_ho', 'duong_bo', 'ranh_gioi'
+    name_vi         VARCHAR(200) NOT NULL,
+    name_en         VARCHAR(200),
+    description_vi  TEXT,
+
+    -- Kỹ thuật — trỏ tới bảng vật lý
+    schema_name     VARCHAR(60) NOT NULL DEFAULT 'gis',
+    table_name      VARCHAR(120) NOT NULL,
+    geometry_type   VARCHAR(30) NOT NULL
+                    CHECK (geometry_type IN (
+                        'POINT','MULTIPOINT',
+                        'LINESTRING','MULTILINESTRING',
+                        'POLYGON','MULTIPOLYGON',
+                        'GEOMETRY'
+                    )),
+    epsg_code       INT NOT NULL DEFAULT 4326,
+
+    -- Hiển thị bản đồ
+    default_style   JSONB NOT NULL DEFAULT '{}',        -- màu, stroke, fill, icon
+    min_zoom        INT NOT NULL DEFAULT 1,
+    max_zoom        INT NOT NULL DEFAULT 22,
+    label_field     VARCHAR(60),                        -- field dùng làm nhãn
+
+    -- Quản lý
+    category        VARCHAR(60),                        -- 'thuy_van','giao_thong','hanh_chinh'
+    sort_order      INT NOT NULL DEFAULT 0,
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    is_public       BOOLEAN NOT NULL DEFAULT false,     -- hiển thị cho citizen?
+    is_editable     BOOLEAN NOT NULL DEFAULT true,
+
+    -- Phân quyền per-layer (override global RBAC)
+    layer_permissions JSONB NOT NULL DEFAULT '{}',
+    -- VD: { "so_nnmt":  { "read":true,"create":true,"update":true,"delete":true },
+    --       "ubnd_tinh": { "read":true },
+    --       "citizen":   { "read_public":true } }
+
+    -- Thống kê cache
+    feature_count   BIGINT DEFAULT 0,
+    last_updated_at TIMESTAMPTZ,
+    bbox            GEOMETRY(POLYGON, 4326),             -- extent tổng thể lớp
+
+    created_by      BIGINT REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
-### 4.2 `gis.map_features` — đối tượng không gian generic
-```sql
-CREATE TABLE IF NOT EXISTS gis.map_features (
-    id         BIGSERIAL PRIMARY KEY,
-    layer_id   INT NOT NULL REFERENCES gis.map_layers(id) ON DELETE CASCADE,
-    properties JSONB NOT NULL DEFAULT '{}',
-    geom       GEOMETRY(Geometry, 4326) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_map_features_geom ON gis.map_features USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_map_features_layer ON gis.map_features (layer_id);
-CREATE INDEX IF NOT EXISTS idx_map_features_props ON gis.map_features USING GIN (properties);
-```
-> Lưu ý: với lớp lớn/chuyên biệt (ranh giới rừng, tiểu khu) nên tạo **bảng riêng** thay vì generic để query tối ưu. `map_features` phù hợp lớp nhỏ/linh hoạt.
+### 4-B.2 `gis.layer_import_jobs` — lịch sử & trạng thái import
 
-### 4.3 `gis.map_apis` — API bản đồ chia sẻ
 ```sql
-CREATE TABLE IF NOT EXISTS gis.map_apis (
-    id         SERIAL PRIMARY KEY,
-    name       VARCHAR(120) NOT NULL,
-    layer_id   INT REFERENCES gis.map_layers(id),
-    api_key    VARCHAR(64) UNIQUE NOT NULL,
-    scope      JSONB NOT NULL DEFAULT '{}',      -- quyền: read/bbox-limit/rate
-    is_active  BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
+CREATE TABLE IF NOT EXISTS gis.layer_import_jobs (
+    id              BIGSERIAL PRIMARY KEY,
+    layer_id        INT NOT NULL REFERENCES gis.layer_registry(id) ON DELETE CASCADE,
 
-### 4.4 `gis.weather_cache` — cache thời tiết
-```sql
-CREATE TABLE IF NOT EXISTS gis.weather_cache (
-    id          BIGSERIAL PRIMARY KEY,
-    source      VARCHAR(30),                     -- openweather/open-meteo/era5
-    variable    VARCHAR(30),                     -- temp/rain/wind/cloud
-    observed_at TIMESTAMPTZ NOT NULL,
-    payload     JSONB NOT NULL,                  -- lưới/giá trị
-    geom        GEOMETRY(Point, 4326),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    source_format   VARCHAR(30) NOT NULL
+                    CHECK (source_format IN ('shapefile','geojson','csv','kml','wfs','postgis_dump')),
+    source_info     JSONB NOT NULL DEFAULT '{}',        -- tên file, URL, options
+
+    import_mode     VARCHAR(20) NOT NULL DEFAULT 'append'
+                    CHECK (import_mode IN ('append','overwrite','upsert')),
+    srid_input      INT DEFAULT 4326,
+    encoding        VARCHAR(20) DEFAULT 'UTF-8',
+
+    -- Strategy khi import gặp lỗi bản ghi lẻ
+    strategy        VARCHAR(20) NOT NULL DEFAULT 'best_effort'
+                    CHECK (strategy IN ('best_effort', 'all_or_nothing')),
+
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','processing','completed','failed','cancelled')),
+    progress        NUMERIC(5,2) DEFAULT 0,
+    total_features  INT,
+    imported_count  INT,
+    failed_count    INT,
+    error_log       TEXT,                               -- lưu lỗi chi tiết (nếu best_effort)
+    result_summary  JSONB DEFAULT '{}',
+
+    created_by      BIGINT REFERENCES auth.users(id) ON DELETE SET NULL,
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_weather_geom ON gis.weather_cache USING GIST (geom);
 ```
 
-### 4.5 `gis.satellite_image` — metadata ảnh đã xử lý
+### 4-B.3 `gis.layer_edit_history` — audit trail chỉnh sửa feature
+
+> **Chiến lược tối ưu dung lượng (2 tầng)**:
+> 1. **Import/Thao tác bulk**: Chỉ ghi **1 dòng summary** vào đây, link qua `import_job_id` hoặc gom qua `operation_id` (UUID), `feature_id` để `NULL`. Không log từng feature đơn lẻ tránh phình DB.
+> 2. **Sửa tay đơn lẻ qua UI**: Log 1 dòng kèm snapshot `old_data`/`new_data`.
+> 3. **Loại bỏ Geometry khỏi snapshot**: Chỉ snapshot các thuộc tính phi không gian (`attributes`), thuộc tính geometry (`geom`) chỉ lưu lại dạng `geometry_changed: true` và bounding box (`old_bbox`/`new_bbox`) để tránh phình dung lượng.
+
 ```sql
-CREATE TABLE IF NOT EXISTS gis.satellite_image (
-    id           SERIAL PRIMARY KEY,
-    name         VARCHAR(150),
-    source       VARCHAR(30) DEFAULT 'sentinel-2',
-    index_type   VARCHAR(20),                    -- NDVI/NDMI/NBR
-    captured_from DATE,
-    captured_to   DATE,
-    cloud_pct    NUMERIC,
-    tile_url     TEXT,                            -- URL tile GEE
-    is_public    BOOLEAN NOT NULL DEFAULT false,
-    bbox         GEOMETRY(Polygon, 4326),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS gis.layer_edit_history (
+    id              BIGSERIAL PRIMARY KEY,
+    layer_id        INT NOT NULL REFERENCES gis.layer_registry(id) ON DELETE CASCADE,
+    
+    -- Gom nhóm các thay đổi trong cùng 1 transaction/batch API
+    operation_id    UUID NOT NULL DEFAULT gen_random_uuid(),
+
+    -- Nguồn thay đổi
+    source          VARCHAR(20) NOT NULL DEFAULT 'manual'
+                    CHECK (source IN (
+                        'manual',   -- admin sửa tay từng feature qua UI
+                        'import',   -- import bulk (QGIS / shapefile / GeoJSON)
+                        'api',      -- API bên ngoài push dữ liệu
+                        'system'    -- hệ thống tự cập nhật (cron/job)
+                    )),
+
+    -- Link về import job (chỉ khi source = 'import')
+    import_job_id   BIGINT REFERENCES gis.layer_import_jobs(id) ON DELETE SET NULL,
+
+    -- Feature cụ thể (NULL khi thao tác bulk / import)
+    feature_id      BIGINT,
+
+    -- Loại thao tác
+    action          VARCHAR(20) NOT NULL
+                    CHECK (action IN (
+                        'insert',        -- thêm 1 feature thủ công
+                        'update',        -- sửa 1 feature thủ công
+                        'delete',        -- xóa 1 feature thủ công
+                        'bulk_insert',   -- import thêm mới (append)
+                        'bulk_update',   -- cập nhật hàng loạt qua tool/API
+                        'bulk_delete',   -- xóa hàng loạt feature
+                        'overwrite'      -- import chế độ ghi đè (xóa cũ + thêm mới)
+                    )),
+
+    -- Snapshot thuộc tính (chỉ dùng cho manual/single update, loại bỏ cột hình học geom)
+    old_data        JSONB,   -- { "attributes": { "name": "QL14" }, "geometry_changed": false }
+    new_data        JSONB,   -- { "attributes": { "name": "QL14B" }, "geometry_changed": true, "new_bbox": [...] }
+
+    -- Tóm tắt khi thao tác bulk
+    summary         JSONB NOT NULL DEFAULT '{}',
+    -- VD: { "total": 1523, "inserted": 1520, "failed": 3, "source_file": "duong_bo_2024.geojson" }
+
+    changed_by      BIGINT REFERENCES auth.users(id) ON DELETE SET NULL,
+    changed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Index theo layer + thời gian (query lịch sử theo lớp)
+CREATE INDEX IF NOT EXISTS idx_leh_layer_changed
+    ON gis.layer_edit_history (layer_id, changed_at DESC);
+
+-- Index theo feature (xem lịch sử 1 feature cụ thể)
+CREATE INDEX IF NOT EXISTS idx_leh_feature
+    ON gis.layer_edit_history (layer_id, feature_id)
+    WHERE feature_id IS NOT NULL;
+
+-- Index theo import_job (trace từ job → edit history)
+CREATE INDEX IF NOT EXISTS idx_leh_import_job
+    ON gis.layer_edit_history (import_job_id)
+    WHERE import_job_id IS NOT NULL;
+
+-- Index theo operation_id
+CREATE INDEX IF NOT EXISTS idx_leh_operation
+    ON gis.layer_edit_history (operation_id);
+```
+
+#### Ví dụ — Import lớp đường bộ từ QGIS (10.000 features)
+
+```
+1 dòng trong layer_import_jobs  →  chi tiết job: file, mode, count, errors
+1 dòng trong layer_edit_history →  action='overwrite', source='import',
+                                    import_job_id=42, feature_id=NULL,
+                                    summary={ total:10000, inserted:9997, failed:3, ... }
+```
+
+#### Ví dụ — Admin sửa tay tên 1 đoạn đường
+
+```
+1 dòng trong layer_edit_history →  action='update', source='manual',
+                                    feature_id=8821,
+                                    old_data={ "attributes": { "name": "QL14 cũ" }, "geometry_changed": false },
+                                    new_data={ "attributes": { "name": "QL14B" }, "geometry_changed": false }
+```
+
+### 4-B.4 Bảng vật lý — import từ QGIS + bổ sung cột quản lý
+
+> **Nguyên tắc:** Các bảng dữ liệu GIS (ao hồ, đường bộ, rừng…) được **import trực tiếp từ QGIS** vào schema `gis`. Migration **KHÔNG** tạo các bảng này. Hệ thống chỉ bổ sung thêm các cột quản lý vào bảng đã có.
+
+#### Quy trình thêm lớp mới:
+
+```
+1. Người dùng import bảng từ QGIS vào schema gis (vd: gis."AoHo")
+2. Admin gọi API đăng ký bảng mới vào layer_registry
+3. Hệ thống tự phát hiện cấu trúc cột qua information_schema
+4. Migration bổ sung cột quản lý (nếu chưa có)
+```
+
+#### Bổ sung cột quản lý cho bảng QGIS đã có
+
+Sau khi import từ QGIS, chạy ALTER TABLE để thêm các cột tích hợp:
+
+```sql
+-- Ví dụ: Bảng "AoHo" đã import từ QGIS
+-- (tên bảng giữ nguyên từ QGIS, có thể viết hoa/camelCase → cần dùng dấu ngoặc kép)
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS source_job_id BIGINT
+    REFERENCES gis.layer_import_jobs(id) ON DELETE SET NULL;
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS external_id VARCHAR(120);
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS created_by BIGINT
+    REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+ALTER TABLE gis."AoHo" ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- Index cho truy vấn nhanh
+CREATE INDEX IF NOT EXISTS idx_aoho_external
+    ON gis."AoHo" (external_id) WHERE external_id IS NOT NULL;
+```
+
+> **Ý nghĩa các cột bổ sung:**
+> - `source_job_id`: Liên kết đến Import Job gần nhất cập nhật bản ghi này.
+> - `external_id`: Khóa ID gốc từ QGIS / Shapefile / API ngoài (phục vụ upsert khi import lại).
+> - `version`: Optimistic Locking — tránh xung đột khi nhiều admin sửa cùng lúc.
+> - `is_active`: Bật/tắt hiển thị feature đơn lẻ (phân biệt với `layer_registry.is_active` là bật/tắt cả lớp).
+
+#### Auto-detect cấu trúc bảng QGIS (dùng trong API đăng ký layer)
+
+```sql
+-- Lấy danh sách cột + kiểu dữ liệu của bảng QGIS
+SELECT column_name, data_type, udt_name
+FROM information_schema.columns
+WHERE table_schema = 'gis' AND table_name = 'AoHo'
+ORDER BY ordinal_position;
+
+-- Lấy kiểu geometry + SRID
+SELECT f_geometry_column, type, srid
+FROM geometry_columns
+WHERE f_table_schema = 'gis' AND f_table_name = 'AoHo';
+
+-- Đếm features + bounding box
+SELECT COUNT(*) AS feature_count,
+       ST_AsGeoJSON(ST_Extent(geom))::jsonb AS bbox
+FROM gis."AoHo";
+```
+
+### 4-B.5 Chính sách dọn dẹp và lưu trữ lịch sử (Retention Policy)
+
+Để đảm bảo hiệu năng Postgres khi vận hành lâu năm:
+1. **Lịch sử sửa tay (`layer_edit_history` với `source = 'manual'`)**: Lưu trữ vĩnh viễn phục vụ kiểm toán.
+2. **Chi tiết lỗi và log của Job (`layer_import_jobs.error_log`)**: Tự động clear hoặc archive sau **180 ngày**.
+3. **Các file GIS gốc tải lên**: Sau khi import thành công, file file Shapefile/GeoJSON gốc trên server phải bị xóa (chỉ giữ file archive trên S3/MinIO nếu cấu hình lưu trữ ngoài, không lưu byte dữ liệu file trong Postgres).
+
+
+### 4-B.5 Seed layer_registry
+
+```sql
+INSERT INTO gis.layer_registry
+    (code, name_vi, table_name, geometry_type, category, sort_order,
+     is_public, default_style, layer_permissions)
+VALUES
+    ('ranh_gioi_tinh','Ranh giới tỉnh','ranh_gioi_tinh','MULTIPOLYGON','hanh_chinh',1,true,
+     '{"fillColor":"#f0f0f0","fillOpacity":0.1,"strokeColor":"#333","strokeWidth":2}',
+     '{"so_nnmt":{"read":true},"ubnd_tinh":{"read":true},"citizen":{"read_public":true}}'
+    ),
+    ('ao_ho','Ao, Hồ','ao_ho','MULTIPOLYGON','thuy_van',4,true,
+     '{"fillColor":"#4fc3f7","fillOpacity":0.6,"strokeColor":"#0277bd","strokeWidth":1}',
+     '{"so_nnmt":{"read":true,"create":true,"update":true,"delete":true},"ubnd_tinh":{"read":true},"citizen":{"read_public":true}}'
+    ),
+    ('duong_bo','Đường bộ','duong_bo','MULTILINESTRING','giao_thong',5,true,
+     '{"strokeColor":"#f57c00","strokeWidth":2}',
+     '{"so_nnmt":{"read":true,"update":true},"ubnd_tinh":{"read":true},"citizen":{"read_public":true}}'
+    ),
+    ('rung','Lớp rừng','rung','MULTIPOLYGON','thuc_vat',3,true,
+     '{"fillColor":"#228B22","fillOpacity":0.5,"strokeColor":"#145a14","strokeWidth":1}',
+     '{"so_nnmt":{"read":true,"create":true,"update":true,"delete":true},"ubnd_tinh":{"read":true}}'
+    ),
+    ('tram_quan_trac','Trạm quan trắc','tram_quan_trac','POINT','giam_sat',6,true,
+     '{"iconUrl":"/icons/station.svg","iconSize":[24,24]}',
+     '{"so_nnmt":{"read":true,"create":true,"update":true,"delete":true},"ubnd_tinh":{"read":true},"citizen":{"read_public":true}}'
+    )
+ON CONFLICT (code) DO NOTHING;
+```
+
+### 4-B.6 Phân quyền per-layer (Middleware)
+
+Middleware kiểm tra quyền kết hợp global RBAC (`auth.roles.permissions`) và `layer_registry.layer_permissions`:
+
+```
+Kiểm tra quyền truy cập lớp GIS
+├── system_admin → bypass, qua luôn
+├── Lấy layer_permissions từ gis.layer_registry WHERE code = :layerCode
+├── Tìm quyền của role hiện tại trong JSONB
+└── Nếu không có action → 403 Forbidden
+```
+
+> **Bảo mật truy vấn động**: `schema_name` và `table_name` **phải** được lấy từ DB (`layer_registry`), không bao giờ nhận trực tiếp từ request để tránh SQL injection.
+
+### 4-B.7 API Endpoints admin GIS
+
+```
+GET    /api/admin/gis/layers                     — Danh sách layer registry
+GET    /api/admin/gis/layers/:id                 — Chi tiết 1 layer
+PATCH  /api/admin/gis/layers/:id                 — Cập nhật metadata/style/trạng thái
+GET    /api/admin/gis/layers/:id/features        — Danh sách features
+POST   /api/admin/gis/layers/:id/features        — Thêm feature mới
+PATCH  /api/admin/gis/layers/:id/features/:fid   — Sửa feature
+DELETE /api/admin/gis/layers/:id/features/:fid   — Xóa feature
+POST   /api/admin/gis/layers/:id/import          — Upload shapefile/GeoJSON
+GET    /api/admin/gis/layers/:id/import/jobs     — Xem tiến trình import
+GET    /api/admin/gis/layers/:id/export          — Export GeoJSON
+GET    /api/admin/gis/layers/:id/history         — Lịch sử chỉnh sửa
+PATCH  /api/admin/gis/layers/:id/permissions     — Cập nhật per-layer permissions
 ```
 
 ## 5. Schema `fire` (theo tài liệu nghiệp vụ)

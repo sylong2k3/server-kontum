@@ -4,7 +4,9 @@
 > - **Vector** từ **PostGIS** (ranh giới rừng, tiểu khu, điểm cháy…).
 > - **Raster GeoTIFF** từ pipeline GEE (NDVI/NDMI/NBR, LST, bản đồ nguy cơ cháy).
 >
-> Tất cả phục vụ ra **Mapbox GL JS** qua Node proxy (`/api/v1/map/...`).
+> Frontend gọi **trực tiếp GeoServer** cho WMS/WFS/WMTS/MVT công khai; Node.js chỉ quản lý metadata layer và gọi GeoServer REST API khi publish/unpublish/bật/tắt/harvest.
+>
+> **Liên kết:** Hướng dẫn này sử dụng **Layer Registry Pattern** (`gis.layer_registry`) — xem thiết kế tại [05-database-design.md §4](../architecture/05-database-design.md) và luồng tích hợp tại [doc 12](../modules/12-geoserver-integration-design.md).
 
 ## 0. Nguyên tắc lưu trữ (rất quan trọng)
 
@@ -57,7 +59,7 @@ curl -u $USER:$PASS -XPOST -H "Content-Type: text/xml" \
 
 ---
 
-## 3. VECTOR — PostGIS DataStore + publish layer
+## 3. VECTOR — PostGIS DataStore + publish layer (theo Layer Registry)
 
 ### 3.1 Tạo PostGIS DataStore
 **UI:** Stores → Add new store → **PostGIS** → workspace `kontum`, name `kontum_postgis`:
@@ -81,20 +83,60 @@ curl -u $USER:$PASS -XPOST -H "Content-Type: text/xml" \
 ```
 
 ### 3.2 Publish 1 bảng PostGIS thành layer
+
+> **Quan trọng:** Tên bảng PostGIS lấy từ `gis.layer_registry.table_name`, **không** nhập từ user input.
+
+**Thủ công (REST):**
 ```bash
+# Ví dụ: publish bảng gis.ao_ho (lấy từ layer_registry WHERE code='ao_ho')
 curl -u $USER:$PASS -XPOST -H "Content-Type: text/xml" \
   "$GEOSERVER_URL/rest/workspaces/kontum/datastores/kontum_postgis/featuretypes" -d '
 <featureType>
-  <name>ranh_gioi_rung</name>
+  <name>ao_ho</name>
   <srs>EPSG:4326</srs>
   <enabled>true</enabled>
 </featureType>'
 ```
-→ Layer khả dụng: `kontum:ranh_gioi_rung` (WMS/WFS, và MVT nếu bật vectortiles).
+→ Layer khả dụng: `kontum:ao_ho` (WMS/WFS, và MVT nếu bật vectortiles).
 
-### 3.3 Bật MVT cho layer (Mapbox vector source)
+**Tự động qua API Node (khuyến nghị):**
+```bash
+# Admin gọi publish qua API → Node lấy table_name từ registry rồi gọi GeoServer REST
+curl -X POST http://localhost:3000/api/v1/map/layers/ao_ho/publish \
+  -H "Authorization: Bearer <admin_token>"
+# → Node: SELECT table_name FROM gis.layer_registry WHERE code='ao_ho'
+# → Node: POST GeoServer REST featuretype name='ao_ho'
+# → Node: UPDATE layer_registry SET geoserver_layer='kontum:ao_ho'
+```
+
+### 3.3 Bật/tắt layer trên GeoServer (is_active)
+
+Khi admin thay đổi `is_active` trong `gis.layer_registry`, API Node cũng đồng bộ trạng thái `enabled` trên GeoServer:
+
+```bash
+# Tắt layer (is_active = false)
+curl -u $USER:$PASS -XPUT -H "Content-Type: application/json" \
+  "$GEOSERVER_URL/rest/layers/kontum:ao_ho" \
+  -d '{"layer":{"enabled":false}}'
+
+# Bật layer (is_active = true)
+curl -u $USER:$PASS -XPUT -H "Content-Type: application/json" \
+  "$GEOSERVER_URL/rest/layers/kontum:ao_ho" \
+  -d '{"layer":{"enabled":true}}'
+```
+
+> **Lưu ý:** Khi GeoServer disable layer, mọi request WMS/WFS/WMTS đến layer đó sẽ trả **404**. Dữ liệu vật lý trong PostGIS vẫn tồn tại, chỉ là GeoServer không phục vụ nữa.
+
+**Kiểm tra trạng thái layer:**
+```bash
+curl -u $USER:$PASS \
+  "$GEOSERVER_URL/rest/layers/kontum:ao_ho.json" | jq '.layer.enabled'
+# true → đang hiển thị, false → đã tắt
+```
+
+### 3.4 Bật MVT cho layer (Mapbox vector source)
 **UI:** Layers → chọn layer → tab **Tile Caching** → thêm format `application/vnd.mapbox-vector-tile`.
-Mapbox tiêu thụ: `/api/v1/map/wmts/kontum:ranh_gioi_rung/{z}/{x}/{y}.pbf` (xem doc 12 §7.2).
+Mapbox tiêu thụ trực tiếp GeoServer/GWC, ví dụ TMS/MVT: `https://geoserver.humgsoftware.pro.vn/geoserver/gwc/service/tms/1.0.0/kontum:ao_ho@EPSG:900913@pbf/{z}/{x}/{y}.pbf` (xem doc 12 §7.2).
 
 ---
 
@@ -191,7 +233,7 @@ curl -u $USER:$PASS -XPUT -H "Content-Type: application/json" \
 map.addSource('fire-risk-wms', {
   type: 'raster',
   tiles: [
-    '/api/v1/map/wms?service=WMS&version=1.3.0&request=GetMap' +
+    'https://geoserver.humgsoftware.pro.vn/geoserver/kontum/wms?service=WMS&version=1.3.0&request=GetMap' +
     '&layers=kontum:fire_risk&styles=kontum:fire_risk_style' +
     '&bbox={bbox-epsg-3857}&width=256&height=256' +
     '&crs=EPSG:3857&format=image/png&transparent=true'
@@ -201,7 +243,7 @@ map.addSource('fire-risk-wms', {
 });
 map.addLayer({ id: 'fire-risk-raster', type: 'raster', source: 'fire-risk-wms', paint: { 'raster-opacity': 0.6 } });
 ```
-Popup giá trị tại điểm (WMS GetFeatureInfo) qua proxy: `/api/v1/map/wms?...&request=GetFeatureInfo&query_layers=kontum:fire_risk&i=..&j=..&info_format=application/json`.
+Popup giá trị tại điểm (WMS GetFeatureInfo) gọi trực tiếp GeoServer: `https://geoserver.humgsoftware.pro.vn/geoserver/kontum/wms?...&request=GetFeatureInfo&query_layers=kontum:fire_risk&i=..&j=..&info_format=application/json`.
 
 ---
 
@@ -233,6 +275,8 @@ GEE export fire-risk/2026-05-25.tif → /data/geotiff/fire-risk/
    → Mapbox WMS tự lấy ảnh ngày mới nhất
 ```
 
+> **Lưu ý với Layer Registry:** Sau khi harvest thành công, worker cũng nên cập nhật `gis.layer_registry.last_updated_at = NOW()` và `feature_count` (nếu applicable) cho layer raster tương ứng.
+
 ---
 
 ## 6. GeoWebCache cho raster/vector
@@ -248,13 +292,16 @@ curl -u $USER:$PASS -XPOST -H "Content-Type: application/json" \
 
 ## 7. Checklist triển khai
 - [ ] Workspace `kontum` + PostGIS store `kontum_postgis` (user read-only).
-- [ ] Publish vector layer + bật MVT (gs-vectortiles).
+- [ ] `gis.layer_registry` đã seed với các lớp cần publish.
+- [ ] Publish vector layer từ `layer_registry.table_name` + bật MVT (gs-vectortiles).
+- [ ] Kiểm tra `is_active` đồng bộ giữa `layer_registry` và GeoServer (`enabled`).
 - [ ] Thư mục `/data/geotiff/...` mount vào container GeoServer.
 - [ ] ImageMosaic `fire_risk` + bật Time dimension (default = nearest now).
 - [ ] SLD raster (fire-risk 5 cấp, NDVI ramp) + gán default style.
-- [ ] Cron Node harvest GeoTIFF mới + truncate GWC.
-- [ ] Proxy `/api/v1/map/wms|wfs|wmts` allowlist + RBAC (doc 12 §5).
-- [ ] GeoServer chỉ bind nội bộ.
+- [ ] Cron Node harvest GeoTIFF mới + truncate GWC + cập nhật `layer_registry.last_updated_at`.
+- [ ] Node API chỉ quản lý metadata/publish: `/api/v1/map/layers`, `/publish`, `/active`, `/rasters/:coverageStore/harvest`.
+- [ ] GeoServer public URL cấu hình anonymous/read-only cho layer công khai, REST admin chỉ backend dùng.
+- [ ] Auto-publish sau import thành công (doc 12 §4.2).
 
 ## 8. Troubleshooting nhanh
 | Triệu chứng | Nguyên nhân thường gặp |
@@ -265,3 +312,6 @@ curl -u $USER:$PASS -XPOST -H "Content-Type: application/json" \
 | GeoTIFF không nạp | Sai đường dẫn `file://`, GeoServer không có quyền đọc thư mục mount |
 | ImageMosaic không nhận ngày | `timeregex` không khớp tên file (phải có `YYYY-MM-DD`) |
 | Màu raster sai | SLD ColorMap `type` sai (values vs ramp) hoặc band/giá trị lệch |
+| Layer đã import nhưng không hiện | Kiểm tra `layer_registry.is_active` và GeoServer `enabled` đồng bộ chưa |
+| Admin tắt lớp rồi nhưng client vẫn thấy | GeoServer chưa được set `enabled=false` / cache trình duyệt hoặc GWC còn tile cũ |
+| Import xong không tự publish | Kiểm tra `is_active=true` và `geoserver_layer IS NULL` (xem doc 12 §4.2) |

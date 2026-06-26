@@ -86,6 +86,41 @@
       "key": "expectedUpdatedAt",
       "value": "2026-06-19T10:00:00.000Z",
       "type": "string"
+    },
+    {
+      "key": "mapLayerCode",
+      "value": "ranh_gioi_rung",
+      "type": "string"
+    },
+    {
+      "key": "mapLayerName",
+      "value": "kontum:ranh_gioi_rung",
+      "type": "string"
+    },
+    {
+      "key": "coverageStore",
+      "value": "remote_sensing_mosaic",
+      "type": "string"
+    },
+    {
+      "key": "remoteImageId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "remoteFileId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "remoteFileName",
+      "value": "sentinel2-demo.tif",
+      "type": "string"
+    },
+    {
+      "key": "pdfMapId",
+      "value": "1",
+      "type": "string"
     }
   ],
   "item": [
@@ -1974,6 +2009,1108 @@
                 {
                   "key": "lang",
                   "value": "{{lang}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bản đồ PDF",
+      "item": [
+        {
+          "name": "[Public] Danh sách bản đồ PDF",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pdf-maps?page=1&limit=20&lang={{cmsLang}}&theme=lop_phu_rung&yearFrom=1991&yearTo=2026",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdf-maps"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                },
+                {
+                  "key": "theme",
+                  "value": "lop_phu_rung",
+                  "description": "lop_phu_nhiet | chay_rung | lop_phu_rung | khac"
+                },
+                {
+                  "key": "yearFrom",
+                  "value": "1991"
+                },
+                {
+                  "key": "yearTo",
+                  "value": "2026"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "year",
+                  "disabled": true
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "DESC",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Tim kiem trong tieu de/mo ta"
+                }
+              ]
+            },
+            "description": "Lay danh sach ban do PDF cong khai. Loc theo chu de (theme) va nam (yearFrom/yearTo). Khach khong dang nhap chi thay is_public=true."
+          }
+        },
+        {
+          "name": "[Public] Chi tiet ban do PDF",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pdf-maps/{{pdfMapId}}?lang={{cmsLang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdf-maps",
+                "{{pdfMapId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                }
+              ]
+            },
+            "description": "Chi tiet ban do PDF (title, fileUrl, theme, year, thumbnailUrl). fileUrl la duong dan tuong doi, client ghep voi static server URL."
+          }
+        },
+        {
+          "name": "[Admin] Danh sach ban do PDF (toan bo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/pdf-maps?page=1&limit=20&lang={{cmsLang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "pdf-maps"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{cmsLang}}"
+                },
+                {
+                  "key": "theme",
+                  "value": "chay_rung",
+                  "disabled": true
+                },
+                {
+                  "key": "isPublic",
+                  "value": "false",
+                  "disabled": true
+                },
+                {
+                  "key": "yearFrom",
+                  "value": "1991",
+                  "disabled": true
+                },
+                {
+                  "key": "yearTo",
+                  "value": "2026",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Admin: lay toan bo ban do PDF (ke ca is_public=false). Ho tro cung bo loc nhu public endpoint."
+          }
+        },
+        {
+          "name": "[Admin] Chi tiet ban do PDF (day du vi+en)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "pdf-maps",
+                "{{pdfMapId}}"
+              ]
+            },
+            "description": "Admin detail: tra ve metadata + object translations { vi: { title, description }, en: { title, description } }."
+          }
+        },
+        {
+          "name": "[Admin] Upload ban do PDF (+ thumbnail)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/pdf-maps?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "pdf-maps"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "description": "(bat buoc) File PDF ban do - application/pdf, max 100MB"
+                },
+                {
+                  "key": "thumbnail",
+                  "type": "file",
+                  "description": "(tuy chon) Anh preview - jpg/png/webp, max 5MB"
+                },
+                {
+                  "key": "themeCode",
+                  "value": "lop_phu_rung",
+                  "type": "text",
+                  "description": "lop_phu_nhiet | chay_rung | lop_phu_rung | khac"
+                },
+                {
+                  "key": "year",
+                  "value": "2023",
+                  "type": "text",
+                  "description": "Nam ban do (1900-2100)"
+                },
+                {
+                  "key": "scale",
+                  "value": "1:50000",
+                  "type": "text",
+                  "description": "Ti le ban do (tuy chon)"
+                },
+                {
+                  "key": "region",
+                  "value": "Tinh Kon Tum",
+                  "type": "text",
+                  "description": "Vung dia ly (tuy chon)"
+                },
+                {
+                  "key": "lang",
+                  "value": "vi",
+                  "type": "text",
+                  "description": "Ngon ngu ban dich dau tien (vi|en)"
+                },
+                {
+                  "key": "title",
+                  "value": "Ban do lop phu rung Kon Tum nam 2023",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Ban do lop phu rung toan tinh Kon Tum nam 2023, ti le 1:50.000",
+                  "type": "text"
+                },
+                {
+                  "key": "isPublic",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "thumbnailUrl",
+                  "value": "",
+                  "type": "text",
+                  "description": "URL thumbnail fallback neu khong upload file thumbnail",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Upload ban do PDF moi. multipart/form-data voi 2 file field: \"file\" (PDF, bat buoc) va \"thumbnail\" (anh preview, tuy chon). Neu khong dinh kem thumbnail file co the truyen thumbnailUrl string."
+          }
+        },
+        {
+          "name": "[Admin] Cap nhat ban do PDF (PUT gop)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "pdf-maps",
+                "{{pdfMapId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"themeCode\": \"lop_phu_rung\",\n  \"year\": 2023,\n  \"scale\": \"1:50000\",\n  \"region\": \"Tinh Kon Tum\",\n  \"thumbnailUrl\": null,\n  \"isPublic\": true,\n  \"expectedUpdatedAt\": \"{{expectedUpdatedAt}}\",\n  \"translations\": {\n    \"vi\": {\n      \"title\": \"Ban do lop phu rung Kon Tum nam 2023\",\n      \"description\": \"Ban do lop phu rung toan tinh Kon Tum nam 2023, ti le 1:50.000\"\n    },\n    \"en\": {\n      \"title\": \"Kon Tum Forest Cover Map 2023\",\n      \"description\": \"Forest cover map of Kon Tum province, year 2023, scale 1:50,000\"\n    }\n  }\n}"
+            },
+            "description": "Cap nhat gop metadata + translations trong 1 request. expectedUpdatedAt lay tu GET chi tiet truoc do (optimistic lock). translations la object tuy chon - chi truyen ngon ngu muon upsert."
+          }
+        },
+        {
+          "name": "[Admin] Upsert ban dich ban do PDF",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}/translations/en",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "pdf-maps",
+                "{{pdfMapId}}",
+                "translations",
+                "en"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Kon Tum Forest Cover Map 2023\",\n  \"description\": \"Forest cover map of Kon Tum province, year 2023, scale 1:50,000\"\n}"
+            },
+            "description": "Upsert ban dich don le (vi hoac en). Thay \"en\" cuoi URL thanh \"vi\" de upsert tieng Viet."
+          }
+        },
+        {
+          "name": "[Admin] Xoa ban do PDF",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "pdf-maps",
+                "{{pdfMapId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Soft delete ban do PDF. Ban ghi van con trong DB (deleted_at duoc set), file vat ly tren disk khong bi xoa."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bản đồ / GeoServer",
+      "description": "Các API proxy OGC qua NodeJS. Frontend không gửi trực tiếp GeoServer; token/credential GeoServer được giữ server-side.",
+      "item": [
+        {
+          "name": "Danh sách layer bản đồ",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers"
+              ],
+              "query": []
+            },
+            "description": "Trả layer active và user hiện tại được quyền đọc."
+          }
+        },
+        {
+          "name": "Chi tiết layer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}"
+              ]
+            },
+            "description": "Lấy metadata 1 layer. Public layer không cần token."
+          }
+        },
+        {
+          "name": "Tạo layer mới",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ranh_gioi_rung\",\n  \"name_vi\": \"Ranh giới rừng Kon Tum\",\n  \"table_name\": \"ranh_gioi_rung\",\n  \"schema_name\": \"gis\",\n  \"geometry_type\": \"MULTIPOLYGON\",\n  \"epsg_code\": 4326,\n  \"category\": \"rung\",\n  \"layer_kind\": \"overlay\",\n  \"is_active\": true,\n  \"is_public\": false,\n  \"is_editable\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/map/layers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers"
+              ]
+            },
+            "description": "Tạo layer trong layer_registry. Bảng PostGIS phải tồn tại sẵn (hoặc dùng /import-file để tạo từ file)."
+          }
+        },
+        {
+          "name": "Cập nhật layer",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name_vi\": \"Tên mới\",\n  \"is_public\": true,\n  \"category\": \"rung\",\n  \"sort_order\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}"
+              ]
+            },
+            "description": "Sửa metadata layer (không thay đổi dữ liệu vật lý hay GeoServer)."
+          }
+        },
+        {
+          "name": "Xóa layer",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}"
+              ]
+            },
+            "description": "Xóa layer khỏi registry. Phải unpublish trước (geoserver_layer = null)."
+          }
+        },
+        {
+          "name": "Publish layer lên GeoServer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}",
+                "publish"
+              ],
+              "query": []
+            },
+            "description": "Cần token và quyền map_layers:publish."
+          }
+        },
+        {
+          "name": "Unpublish layer khỏi GeoServer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}",
+                "publish"
+              ],
+              "query": []
+            },
+            "description": "Cần token và quyền map_layers:unpublish."
+          }
+        },
+        {
+          "name": "Bật/tắt layer active",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}",
+                "active"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true\n}"
+            },
+            "description": "Đồng bộ gis.layer_registry.is_active và enabled của GeoServer layer."
+          }
+        },
+        {
+          "name": "Import file GIS (Shapefile/GeoJSON/KML/GeoTIFF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/your/file.zip",
+                  "description": "File GIS: .zip (shapefile), .geojson, .kml, .kmz, .tif/.tiff, .gdb.zip"
+                },
+                {
+                  "key": "code",
+                  "value": "ranh_gioi_rung",
+                  "type": "text",
+                  "description": "Mã layer (bắt buộc)"
+                },
+                {
+                  "key": "name_vi",
+                  "value": "Ranh giới rừng Kon Tum",
+                  "type": "text",
+                  "description": "Tên tiếng Việt"
+                },
+                {
+                  "key": "source_format",
+                  "value": "shapefile",
+                  "type": "text",
+                  "description": "shapefile | geojson | kml | geotiff | filegdb"
+                },
+                {
+                  "key": "import_mode",
+                  "value": "overwrite",
+                  "type": "text",
+                  "description": "overwrite | append"
+                },
+                {
+                  "key": "srid_input",
+                  "value": "4326",
+                  "type": "text",
+                  "description": "SRID nguồn nếu file không có CRS (mặc định 4326)"
+                },
+                {
+                  "key": "source_layer_name",
+                  "value": "",
+                  "type": "text",
+                  "description": "Tên layer con trong FileGDB/KML (không bắt buộc)"
+                },
+                {
+                  "key": "category",
+                  "value": "rung",
+                  "type": "text",
+                  "description": "Phân loại layer"
+                },
+                {
+                  "key": "layer_kind",
+                  "value": "overlay",
+                  "type": "text",
+                  "description": "basemap | overlay"
+                },
+                {
+                  "key": "is_public",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "auto_publish",
+                  "value": "true",
+                  "type": "text",
+                  "description": "Tự publish lên GeoServer sau khi import xong"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/import-file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "import-file"
+              ]
+            },
+            "description": "Upload file GIS vào PostGIS + auto-publish GeoServer. Trả 202 ngay với job_id. Poll GET /map/import-jobs/:jobId để theo dõi tiến độ. Cần quyền map_layers:import."
+          }
+        },
+        {
+          "name": "Import inline GeoJSON vào layer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_format\": \"geojson\",\n  \"import_mode\": \"overwrite\",\n  \"auto_publish\": true,\n  \"geojson\": {\n    \"type\": \"FeatureCollection\",\n    \"features\": [\n      {\n        \"type\": \"Feature\",\n        \"geometry\": {\n          \"type\": \"Point\",\n          \"coordinates\": [\n            108,\n            14.35\n          ]\n        },\n        \"properties\": {\n          \"ten\": \"Điểm A\"\n        }\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}",
+                "import"
+              ]
+            },
+            "description": "Import GeoJSON/CSV JSON body vào bảng PostGIS đã có. Đồng bộ. Khác /import-file (upload file + ogr2ogr)."
+          }
+        },
+        {
+          "name": "Lịch sử import jobs của layer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/import-jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "layers",
+                "{{mapLayerCode}}",
+                "import-jobs"
+              ]
+            },
+            "description": "Xem tất cả import job của 1 layer."
+          }
+        },
+        {
+          "name": "Kiểm tra tiến độ import job",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map/import-jobs/{{importJobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "import-jobs",
+                "{{importJobId}}"
+              ],
+              "variable": [
+                {
+                  "key": "importJobId",
+                  "value": "1",
+                  "description": "ID của import job"
+                }
+              ]
+            },
+            "description": "Poll tiến độ import job. status: pending | processing | completed | failed. Khi completed, layer có thể xem tại GET /map/layers/:code."
+          }
+        },
+        {
+          "name": "Harvest raster GeoTIFF",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/map/rasters/{{coverageStore}}/harvest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map",
+                "rasters",
+                "{{coverageStore}}",
+                "harvest"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tif_path\": \"/data/remote-sensing/demo.tif\",\n  \"geoserver_layer\": \"{{mapLayerName}}\",\n  \"truncate_cache\": true\n}"
+            },
+            "description": "Cần quyền map_layers:harvest. Dùng khi GeoTIFF đã có trên đường dẫn GeoServer đọc được."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Viễn thám",
+      "description": "Quản lý ảnh viễn thám/GeoTIFF, presigned URL, COG URL và layers phục vụ WebGIS.",
+      "item": [
+        {
+          "name": "Danh sách ảnh viễn thám",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Chi tiết ảnh",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Thống kê ảnh",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/statistics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "statistics"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "COG URL cho WebGIS",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/cog-url",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "cog-url"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Danh sách remote sensing layers",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/layers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "layers"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Presigned upload URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/upload-url?file_name={{remoteFileName}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "upload-url"
+              ],
+              "query": [
+                {
+                  "key": "file_name",
+                  "value": "{{remoteFileName}}"
+                }
+              ]
+            },
+            "description": "Cần quyền remote_sensing:create. Client upload trực tiếp file lớn lên MinIO."
+          }
+        },
+        {
+          "name": "Upload ảnh GeoTIFF multipart",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "raster_file",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "thumbnail",
+                  "type": "file",
+                  "src": "",
+                  "disabled": true
+                },
+                {
+                  "key": "name",
+                  "value": "Ảnh Sentinel-2 demo",
+                  "type": "text"
+                },
+                {
+                  "key": "satellite",
+                  "value": "sentinel_2",
+                  "type": "text"
+                },
+                {
+                  "key": "image_type",
+                  "value": "geotiff_raw",
+                  "type": "text"
+                },
+                {
+                  "key": "acquisition_date",
+                  "value": "2026-06-24",
+                  "type": "text"
+                },
+                {
+                  "key": "is_public",
+                  "value": "true",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Cần quyền remote_sensing:create. Chọn file local trước khi gửi."
+          }
+        },
+        {
+          "name": "Cập nhật metadata ảnh",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ảnh Sentinel-2 đã cập nhật\",\n  \"is_public\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Download URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/download?file_id={{remoteFileId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "download"
+              ],
+              "query": [
+                {
+                  "key": "file_id",
+                  "value": "{{remoteFileId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Trigger process ảnh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/process",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "process"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Xóa ảnh viễn thám",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?hard_delete=false",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": [
+                {
+                  "key": "hard_delete",
+                  "value": "false"
                 }
               ]
             }

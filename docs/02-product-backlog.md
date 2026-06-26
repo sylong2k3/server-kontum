@@ -67,7 +67,7 @@ Scenario: Sai mật khẩu vượt ngưỡng
 | US-021 | Là `system_admin`, tôi muốn import shapefile/GeoJSON/Excel. | Upload → validate SRID 4326 → ghi PostGIS; báo lỗi từng dòng. | P0 | 13 | ⬜ |
 | US-022 | Là người dân, tôi muốn xem các lớp công khai trên bản đồ. | API trả GeoJSON/MVT theo bbox+zoom; chỉ lớp `is_public`. | P0 | 8 | ⬜ |
 | US-023 | Là người dùng, tôi muốn click đối tượng để xem thuộc tính (popup). | API feature-info theo tọa độ/id; trả thuộc tính. | P1 | 5 | ⬜ |
-| US-024 | Là hệ thống, tôi muốn proxy WMS/WFS qua GeoServer an toàn. | Proxy ẩn credential; GeoServer chỉ bind nội bộ; cache tile. | P0 | 8 | ⬜ |
+| US-024 | Là `system_admin`, tôi muốn publish/unpublish và bật/tắt layer qua GeoServer REST. | Node cập nhật metadata `gis.layer_registry`, gọi GeoServer REST để đồng bộ trạng thái; frontend dùng GeoServer public OGC cho dữ liệu đọc. | P0 | 8 | ⬜ |
 | US-025 | Là `system_admin`, tôi muốn tạo & phân quyền API bản đồ. | Bảng `gis.map_apis` + api-key/scope; rate-limit riêng. | P2 | 8 | ⬜ |
 | US-026 | Là người dùng WebGIS, tôi muốn chọn lớp nền & bật/tắt layer, xem 3D. | Layer switcher, lớp nền (vệ tinh/đường phố), terrain 3D. | P1 | 5 | ⬜ |
 

@@ -61,7 +61,7 @@ gantt
 - **Tổng: ~19–24 SP**
 
 ### Sprint 2 — WebGIS core
-**Goal:** Người dân xem lớp công khai + popup; proxy GeoServer.
+**Goal:** Người dân xem lớp công khai + popup; frontend gọi trực tiếp GeoServer cho tile/geodata công khai.
 - US-021 Import shapefile/GeoJSON (13)
 - US-022 API features theo bbox (8)
 - **Tổng: ~21 SP**
@@ -69,7 +69,7 @@ gantt
 ### Sprint 3 — WebGIS tương tác + Thời tiết → chốt R1
 **Goal:** Layer switcher/3D, feature-info, thời tiết.
 - US-023 Feature-info popup (5)
-- US-024 Proxy WMS/WFS GeoServer (8)
+- US-024 Quản lý publish/active layer qua GeoServer REST (8)
 - US-026 Layer switcher + 3D (5)
 - US-040 Lớp thời tiết (8) *(stretch)*
 - **Tổng: ~18–26 SP** → **Release R1**

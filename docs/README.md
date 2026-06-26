@@ -18,7 +18,7 @@
 | 09 | [MobileGIS Module](./modules/09-mobilegis-design.md) | Ứng dụng di động, phản ánh hiện trường |
 | 10 | [Traceability Matrix](./10-traceability-matrix.md) | Ánh xạ đặc tả gốc → Epic/Story, câu hỏi mở |
 | 11 | [Test & QA Strategy](./11-test-qa-strategy.md) | Chiến lược kiểm thử, môi trường, CI |
-| 12 | [GeoServer Integration](./modules/12-geoserver-integration-design.md) | Publish layer, proxy WMS/WFS, cache, bảo mật |
+| 12 | [GeoServer Integration](./modules/12-geoserver-integration-design.md) | Metadata layer, publish/unpublish, GeoServer REST, public OGC endpoints |
 | 13 | [GeoServer + PostGIS & GeoTIFF Guide](./guides/13-geoserver-postgis-setup-guide.md) | Hướng dẫn thực hành: vector PostGIS + raster GeoTIFF/ImageMosaic → Mapbox |
 | 14 | [Functional Spec chi tiết](./14-functional-spec-detailed.md) | Đặc tả field-level từng chức năng (input/validate/nghiệp vụ/lỗi) |
 | 15 | [Dev Workflow: Debug & Review](./15-dev-workflow-debug-review.md) | Vòng đời Story, bước debug, checklist code review, branch protection |
@@ -33,7 +33,7 @@
 - WebSocket server, i18n song ngữ, upload middleware.
 
 **Chưa làm (đã chừa chỗ trong `routes/index.js` + `.env.example`):**
-- Module bản đồ/lớp dữ liệu, GeoServer proxy, ảnh vệ tinh (GEE), thời tiết, fire-risk, thống kê, phân tích không gian, tin tức, văn bản, phản ánh, MobileGIS.
+- Module bản đồ/lớp dữ liệu, metadata GIS, ảnh vệ tinh (GEE), thời tiết, fire-risk, thống kê, phân tích không gian, tin tức, văn bản, phản ánh, MobileGIS.
 
 ## Quy ước tài liệu
 - Ngôn ngữ chính: Tiếng Việt. Thuật ngữ kỹ thuật giữ nguyên tiếng Anh.
