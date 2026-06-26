@@ -3250,7 +3250,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Key demo bên thứ ba\",\n  \"layer_id\": 1,\n  \"scope\": {\n    \"read\": true,\n    \"rate_per_min\": 30,\n    \"bbox_limit\": [107.0, 13.8, 108.6, 15.5]\n  },\n  \"is_active\": true,\n  \"expires_at\": null\n}"
+              "raw": "{\n  \"name\": \"Key demo bên thứ ba\",\n  \"layer_id\": 1,\n  \"scope\": {\n    \"read\": true,\n    \"rate_per_min\": 30,\n    \"bbox_limit\": 2.56\n  },\n  \"is_active\": true,\n  \"expires_at\": null\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/map-apis?lang={{lang}}",
@@ -3260,7 +3260,7 @@
                 { "key": "lang", "value": "{{lang}}" }
               ]
             },
-            "description": "Cấp API key cho đối tác/đơn vị muốn lấy dữ liệu lớp GIS.\n\nBody:\n• name: tên gợi nhớ (ví dụ 'Sở TNMT - ranh giới hành chính')\n• layer_id: ID lớp GIS được cấp quyền đọc (xem bảng gis.layer_registry)\n• scope.read: phải là true (hiện chỉ hỗ trợ read)\n• scope.rate_per_min: số request tối đa mỗi phút (mặc định 60)\n• scope.bbox_limit: [minLng,minLat,maxLng,maxLat] giới hạn vùng được truy vấn (bỏ qua nếu không cần)\n• expires_at: ngày hết hạn ISO 8601, null = không hết hạn\n\nRAW KEY chỉ trả về 1 lần duy nhất trong response → script test tự lưu vào {{mapApiKey}}.\nSau khi đóng tab/response, không thể xem lại — muốn key mới phải dùng 'Xoay Key'.\n\nCần quyền: system_admin (map_apis:create)."
+            "description": "Cấp API key cho đối tác/đơn vị muốn lấy dữ liệu lớp GIS.\n\nBody:\n• name: tên gợi nhớ (ví dụ 'Sở TNMT - ranh giới hành chính')\n• layer_id: ID lớp GIS được cấp quyền đọc (xem bảng gis.layer_registry)\n• scope.read: phải là true (hiện chỉ hỗ trợ read)\n• scope.rate_per_min: số request tối đa mỗi phút (mặc định 60)\n• scope.bbox_limit: diện tích tối đa cho phép (đơn vị độ vuông). Ví dụ: 2.56 ≈ vùng 1.6°×1.6° (~180km×180km). Tính bằng |(maxLng-minLng)*(maxLat-minLat)|. Bỏ qua nếu không cần giới hạn.\n• expires_at: ngày hết hạn ISO 8601, null = không hết hạn\n\nRAW KEY chỉ trả về 1 lần duy nhất trong response → script test tự lưu vào {{mapApiKey}}.\nSau khi đóng tab/response, không thể xem lại — muốn key mới phải dùng 'Xoay Key'.\n\nCần quyền: system_admin (map_apis:create)."
           }
         },
         {

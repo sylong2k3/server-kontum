@@ -75,8 +75,12 @@ const updateKey = async (id, fields, user, lang) => {
     const existing = await repo.findById(id);
     if (!existing) { throw new Api404Error(t('map_api_not_found', lang), ['MAP_API_NOT_FOUND']); }
     const patch = { ...fields };
-    if (patch.scope) { patch.scope = normalizeScope(patch.scope); }
+    if (patch.scope) {
+        // Merge với scope đang lưu trong DB để PATCH riêng lẻ không vô tình reset các field khác.
+        patch.scope = normalizeScope({ ...existing.scope, ...patch.scope });
+    }
     const updated = await repo.update(id, patch);
+    if (!updated) { throw new Api404Error(t('map_api_not_found', lang), ['MAP_API_NOT_FOUND']); }
     return updated;
 };
 

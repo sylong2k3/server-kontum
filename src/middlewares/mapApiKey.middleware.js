@@ -34,7 +34,7 @@ if (typeof cleanup.unref === 'function') { cleanup.unref(); }
 const extractKey = (req) =>
     req.headers[HEADER] ||
     req.headers['x-api-key'] ||
-    (typeof req.query.api_key === 'string' ? req.query.api_key : null);
+    null;
 
 const buildRateError = (req, retryAfter) =>
     new BaseError(
@@ -52,10 +52,6 @@ const authenticateMapApiKey = async (req, res, next) => {
         }
         const api = await mapApiService.authenticate(rawKey, req.lang);
         req.mapApi = api;
-
-        // Ghi nhận sử dụng — best-effort, không chặn response.
-        mapApiRepo.touchUsage(api.id).catch(() => { /* ignore */ });
-
         next();
     } catch (err) {
         next(err);
@@ -85,6 +81,10 @@ const mapApiRateLimit = (req, res, next) => {
         res.set('Retry-After', String(retryAfter));
         return next(buildRateError(req, retryAfter));
     }
+
+    // Ghi nhận sử dụng chỉ sau khi rate-limit pass — request bị chặn không được tính.
+    mapApiRepo.touchUsage(api.id).catch(() => { /* ignore */ });
+
     next();
 };
 
