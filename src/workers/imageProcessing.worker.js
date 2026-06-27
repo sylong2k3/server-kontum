@@ -15,11 +15,12 @@
  *   → upsert statistics → update job completed → update image completed
  */
 
-const sharp   = require('sharp');
-const cron    = require('node-cron');
-const os      = require('os');
-const path    = require('path');
-const fs      = require('fs');
+const sharp          = require('sharp');
+const cron           = require('node-cron');
+const os             = require('os');
+const path           = require('path');
+const fs             = require('fs');
+const { Worker }     = require('worker_threads');
 
 const repo    = require('../repositories/remote-sensing.repository');
 const minio   = require('../services/minio.service');
@@ -69,66 +70,23 @@ const generateThumbnail = async (inputBuffer) => {
  * @param {Buffer} inputBuffer
  * @returns {Promise<Array<{band_index, min, max, mean, std, valid_pixels, total_pixels}>>}
  */
-const calcStatistics = async (inputBuffer) => {
-    // geotiff.js là ESM module — dùng dynamic import
-    const { fromArrayBuffer } = await import('geotiff');
-
+// Chạy calcStatistics trong worker_threads để không block event loop
+const calcStatistics = (inputBuffer) => new Promise((resolve, reject) => {
     const arrayBuffer = inputBuffer.buffer.slice(
         inputBuffer.byteOffset,
         inputBuffer.byteOffset + inputBuffer.byteLength,
     );
 
-    const tiff  = await fromArrayBuffer(arrayBuffer);
-    const image = await tiff.getImage();
+    const worker = new Worker(path.join(__dirname, 'calcStats.thread.js'), {
+        workerData: { bufferData: arrayBuffer },
+        transferList: [arrayBuffer], // zero-copy transfer
+    });
 
-    const bandCount = image.getSamplesPerPixel();
-    const stats     = [];
-
-    for (let b = 1; b <= bandCount; b++) {
-        try {
-            // Đọc từng band (0-indexed trong geotiff.js)
-            const rasters    = await image.readRasters({ samples: [b - 1] });
-            const data       = rasters[0];
-
-            let min = Infinity, max = -Infinity, sum = 0, sumSq = 0;
-            let validCount = 0;
-            const total = data.length;
-
-            for (let i = 0; i < total; i++) {
-                const v = data[i];
-                // Loại bỏ NaN và các giá trị nodata phổ biến
-                if (v === null || v === undefined || isNaN(v) || !isFinite(v)) { continue; }
-                if (min > v) { min = v; }
-                if (max < v) { max = v; }
-                sum   += v;
-                sumSq += v * v;
-                validCount++;
-            }
-
-            if (validCount === 0) {
-                stats.push({ band_index: b, min: null, max: null, mean: null, std: null, valid_pixels: 0, total_pixels: total });
-                continue;
-            }
-
-            const mean = sum / validCount;
-            const std  = Math.sqrt(sumSq / validCount - mean * mean);
-
-            stats.push({
-                band_index:   b,
-                min:          Math.round(min * 10000) / 10000,
-                max:          Math.round(max * 10000) / 10000,
-                mean:         Math.round(mean * 10000) / 10000,
-                std:          Math.round(Math.abs(std) * 10000) / 10000,
-                valid_pixels: validCount,
-                total_pixels: total,
-            });
-        } catch (bandErr) {
-            console.warn(t('worker_band_read_failed', WORKER_LANG, { band: b }), bandErr.message);
-        }
-    }
-
-    return stats;
-};
+    worker.once('message', ({ stats, error }) => {
+        if (error) { reject(new Error(error)); } else { resolve(stats); }
+    });
+    worker.once('error', reject);
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  PROCESS 1 JOB
