@@ -25,6 +25,7 @@ const { Worker }     = require('worker_threads');
 const repo    = require('../repositories/remote-sensing.repository');
 const minio   = require('../services/minio.service');
 const { t }   = require('../utils/i18n.util');
+const ws      = require('../realtime/websocket.server');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const WORKER_ID         = `worker-${os.hostname()}-${process.pid}`;
@@ -184,6 +185,20 @@ const processJob = async (job) => {
         });
         await repo.updateImage(job.image_id, { status: 'completed' }, null);
 
+        // Thông báo realtime cho user đang chờ
+        if (job.created_by) {
+            ws.notifyUser(job.created_by, 'remote_sensing:job_completed', {
+                jobId:   job.id,
+                imageId: job.image_id,
+                status:  'completed',
+            });
+        }
+        ws.notifyChannel(`remote_sensing:${job.image_id}`, 'remote_sensing:job_completed', {
+            jobId:   job.id,
+            imageId: job.image_id,
+            status:  'completed',
+        });
+
         console.info(t('worker_job_completed', WORKER_LANG, { id: job.id }));
 
     } catch (err) {
@@ -199,6 +214,12 @@ const processJob = async (job) => {
         // Nếu hết lần retry → đánh dấu image failed
         if (job.attempt_count + 1 >= job.max_attempts) {
             await repo.updateImage(job.image_id, { status: 'failed' }, null);
+            ws.notifyChannel(`remote_sensing:${job.image_id}`, 'remote_sensing:job_failed', {
+                jobId:        job.id,
+                imageId:      job.image_id,
+                status:       'failed',
+                errorMessage: err.message,
+            });
             console.error(`[Worker] Image #${job.image_id} marked as failed.`);
         } else {
             // Reset về pending để retry
