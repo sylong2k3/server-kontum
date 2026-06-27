@@ -2919,7 +2919,12 @@
               "type": "noauth"
             },
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/weather/layers?type=temp&lang={{lang}}",
               "host": [
@@ -2942,7 +2947,18 @@
               ]
             },
             "description": "Trả về URL template tile của loại lớp được chọn (proxy qua /weather/tiles). Không lộ API key ra client."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Thời tiết tại điểm (Current Weather)",
@@ -2951,7 +2967,12 @@
               "type": "noauth"
             },
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/weather/point?lng=107.9&lat=14.35&lang={{lang}}",
               "host": [
@@ -2977,7 +2998,18 @@
               ]
             },
             "description": "Nhiệt độ, độ ẩm, gió, trời tại tọa độ. Cần OPENWEATHER_API_KEY. Cache 1 giờ, fallback stale khi upstream lỗi."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Lưới gió (Wind Grid — Open-Meteo)",
@@ -2986,7 +3018,12 @@
               "type": "noauth"
             },
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/weather/wind-grid?bbox=107.0,13.8,108.6,15.5&grid=8&lang={{lang}}",
               "host": [
@@ -3014,7 +3051,18 @@
               ]
             },
             "description": "Lưới NxN điểm gió với u/v component (m/s). Dùng Open-Meteo, không cần API key. Frontend dùng để vẽ streamlines."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Proxy Tile (PNG)",
@@ -3023,7 +3071,12 @@
               "type": "noauth"
             },
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/weather/tiles/temp/8/200/115?lang={{lang}}",
               "host": [
@@ -3045,13 +3098,33 @@
               ]
             },
             "description": "Proxy tile PNG từ OpenWeather (không lộ appid). z=8, x=200, y=115 là tile Kon Tum vùng zoom 8."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Làm mới cache (Admin)",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/weather/refresh?lang={{lang}}",
               "host": [
@@ -3068,8 +3141,29 @@
                 }
               ]
             },
-            "description": "Warm cache: lưới gió Kon Tum + điểm trung tâm. Cần quyền weather:manage (system_admin / so_nnmt)."
-          }
+            "description": "Warm cache: lưới gió Kon Tum + điểm trung tâm. Cần quyền weather:manage (system_admin / so_nnmt).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -3085,6 +3179,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "const json = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
                   "if (json && json.data) {",
                   "  if (json.data.id) {",
@@ -3106,6 +3201,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
               }
             ],
             "body": {
@@ -3127,14 +3226,29 @@
                 }
               ]
             },
-            "description": "Cấp API key cho đối tác/đơn vị muốn lấy dữ liệu lớp GIS.\n\nBody:\n• name: tên gợi nhớ (ví dụ 'Sở TNMT - ranh giới hành chính')\n• layer_id: ID lớp GIS được cấp quyền đọc (xem bảng gis.layer_registry)\n• scope.read: phải là true (hiện chỉ hỗ trợ read)\n• scope.rate_per_min: số request tối đa mỗi phút (mặc định 60)\n• scope.bbox_limit: diện tích tối đa cho phép (đơn vị độ vuông). Ví dụ: 2.56 ≈ vùng 1.6°×1.6° (~180km×180km). Tính bằng |(maxLng-minLng)*(maxLat-minLat)|. Bỏ qua nếu không cần giới hạn.\n• expires_at: ngày hết hạn ISO 8601, null = không hết hạn\n\nRAW KEY chỉ trả về 1 lần duy nhất trong response → script test tự lưu vào {{mapApiKey}}.\nSau khi đóng tab/response, không thể xem lại — muốn key mới phải dùng 'Xoay Key'.\n\nCần quyền: system_admin (map_apis:create)."
+            "description": "Cấp API key cho đối tác/đơn vị muốn lấy dữ liệu lớp GIS.\n\nBody:\n• name: tên gợi nhớ (ví dụ 'Sở TNMT - ranh giới hành chính')\n• layer_id: ID lớp GIS được cấp quyền đọc (xem bảng gis.layer_registry)\n• scope.read: phải là true (hiện chỉ hỗ trợ read)\n• scope.rate_per_min: số request tối đa mỗi phút (mặc định 60)\n• scope.bbox_limit: diện tích tối đa cho phép (đơn vị độ vuông). Ví dụ: 2.56 ≈ vùng 1.6°×1.6° (~180km×180km). Tính bằng |(maxLng-minLng)*(maxLat-minLat)|. Bỏ qua nếu không cần giới hạn.\n• expires_at: ngày hết hạn ISO 8601, null = không hết hạn\n\nRAW KEY chỉ trả về 1 lần duy nhất trong response → script test tự lưu vào {{mapApiKey}}.\nSau khi đóng tab/response, không thể xem lại — muốn key mới phải dùng 'Xoay Key'.\n\nCần quyền: system_admin (map_apis:create).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
           }
         },
         {
           "name": "Admin — Danh sách API Key",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/map-apis?page=1&limit=20&lang={{lang}}",
               "host": [
@@ -3168,14 +3282,40 @@
                 }
               ]
             },
-            "description": "Xem tất cả API key đã cấp cho đối tác.\n\nQuery filter (bỏ disabled để dùng):\n• is_active=true → chỉ key đang hoạt động\n• layer_id=1 → key thuộc lớp cụ thể\n\nResponse KHÔNG bao giờ trả raw key — chỉ thấy key_prefix (12 ký tự đầu) và key_last4 (4 ký tự cuối) để nhận dạng.\n\nCần quyền: system_admin (map_apis:read)."
-          }
+            "description": "Xem tất cả API key đã cấp cho đối tác.\n\nQuery filter (bỏ disabled để dùng):\n• is_active=true → chỉ key đang hoạt động\n• layer_id=1 → key thuộc lớp cụ thể\n\nResponse KHÔNG bao giờ trả raw key — chỉ thấy key_prefix (12 ký tự đầu) và key_last4 (4 ký tự cuối) để nhận dạng.\n\nCần quyền: system_admin (map_apis:read).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Admin — Xem API Key",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
               "host": [
@@ -3192,8 +3332,29 @@
                 }
               ]
             },
-            "description": "Chi tiết một API key theo ID.\n\nResponse bao gồm: tên, scope, trạng thái, ngày tạo, lần dùng cuối, tổng số request, lớp GIS gắn kèm.\n\nLưu ý: KHÔNG bao giờ trả raw key hay key_hash — chỉ thấy key_prefix + key_last4 để đối chiếu với đối tác.\n\nCần quyền: system_admin (map_apis:read)."
-          }
+            "description": "Chi tiết một API key theo ID.\n\nResponse bao gồm: tên, scope, trạng thái, ngày tạo, lần dùng cuối, tổng số request, lớp GIS gắn kèm.\n\nLưu ý: KHÔNG bao giờ trả raw key hay key_hash — chỉ thấy key_prefix + key_last4 để đối chiếu với đối tác.\n\nCần quyền: system_admin (map_apis:read).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Admin — Cập nhật API Key",
@@ -3203,6 +3364,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
               }
             ],
             "body": {
@@ -3225,8 +3390,29 @@
                 }
               ]
             },
-            "description": "Chỉnh sửa thông tin key đã cấp — KHÔNG tạo key mới.\n\nCó thể sửa:\n• name: đổi tên gợi nhớ\n• scope: thay đổi rate_per_min hoặc bbox_limit\n• is_active: false = tắt key ngay lập tức (đối tác gọi sẽ nhận 401)\n• expires_at: thay đổi ngày hết hạn\n\nKHÔNG thể sửa layer_id — muốn đổi lớp phải xóa rồi tạo key mới.\n\nCần quyền: system_admin (map_apis:update)."
-          }
+            "description": "Chỉnh sửa thông tin key đã cấp — KHÔNG tạo key mới.\n\nCó thể sửa:\n• name: đổi tên gợi nhớ\n• scope: thay đổi rate_per_min hoặc bbox_limit\n• is_active: false = tắt key ngay lập tức (đối tác gọi sẽ nhận 401)\n• expires_at: thay đổi ngày hết hạn\n\nKHÔNG thể sửa layer_id — muốn đổi lớp phải xóa rồi tạo key mới.\n\nCần quyền: system_admin (map_apis:update).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Admin — Xoay Key (Regenerate)",
@@ -3236,6 +3422,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "const json = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
                   "if (json && json.data && json.data.apiKey) {",
                   "  if (typeof pm !== 'undefined') pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
@@ -3247,7 +3434,16 @@
           ],
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}/regenerate?lang={{lang}}",
               "host": [
@@ -3265,14 +3461,29 @@
                 }
               ]
             },
-            "description": "Tạo key mới thay thế key cũ — dùng khi nghi ngờ key bị lộ.\n\nHành vi:\n• Key cũ bị vô hiệu NGAY LẬP TỨC (đối tác gọi ngay sau sẽ nhận 401)\n• Sinh key hoàn toàn mới cho cùng layer_id và scope\n• Raw key mới chỉ hiện 1 lần — script test tự lưu vào {{mapApiKey}}\n• ID record KHÔNG đổi\n\nCần quyền: system_admin (map_apis:update)."
+            "description": "Tạo key mới thay thế key cũ — dùng khi nghi ngờ key bị lộ.\n\nHành vi:\n• Key cũ bị vô hiệu NGAY LẬP TỨC (đối tác gọi ngay sau sẽ nhận 401)\n• Sinh key hoàn toàn mới cho cùng layer_id và scope\n• Raw key mới chỉ hiện 1 lần — script test tự lưu vào {{mapApiKey}}\n• ID record KHÔNG đổi\n\nCần quyền: system_admin (map_apis:update).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
           }
         },
         {
           "name": "Admin — Xóa API Key",
           "request": {
             "method": "DELETE",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
               "host": [
@@ -3289,8 +3500,29 @@
                 }
               ]
             },
-            "description": "Xóa vĩnh viễn API key khỏi hệ thống.\n\nSau khi xóa:\n• Đối tác gọi với key cũ → 401 MAP_API_INVALID_KEY\n• Không thể khôi phục — phải tạo key mới nếu cần\n\nNếu chỉ muốn tạm dừng (không xóa hẳn) → dùng 'Cập nhật' với is_active=false.\n\nCần quyền: system_admin (map_apis:delete)."
-          }
+            "description": "Xóa vĩnh viễn API key khỏi hệ thống.\n\nSau khi xóa:\n• Đối tác gọi với key cũ → 401 MAP_API_INVALID_KEY\n• Không thể khôi phục — phải tạo key mới nếu cần\n\nNếu chỉ muốn tạm dừng (không xóa hẳn) → dùng 'Cập nhật' với is_active=false.\n\nCần quyền: system_admin (map_apis:delete).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Consumer — Metadata Lớp",
@@ -3304,6 +3536,10 @@
                 "key": "X-Map-Api-Key",
                 "value": "{{mapApiKey}}",
                 "description": "Raw key nhận từ admin (mapk_xxx...)"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
               }
             ],
             "url": {
@@ -3323,7 +3559,18 @@
               ]
             },
             "description": "=== DÀNH CHO ĐỐI TÁC / BÊN THỨ BA ===\n\nXem thông tin lớp GIS mà key này được cấp quyền truy cập.\n\nCách dùng:\n• KHÔNG cần đăng nhập, KHÔNG cần JWT\n• Truyền raw key qua header X-Map-Api-Key (đã điền sẵn {{mapApiKey}})\n• Key có dạng: mapk_AbCd... (~69 ký tự)\n\nResponse trả về:\n• Tên lớp, loại geometry (Point/LineString/Polygon/...)\n• EPSG code (hệ tọa độ)\n• Scope: rate_per_min, bbox_limit (vùng được phép truy vấn)\n\nLỗi có thể gặp:\n• 401 MAP_API_INVALID_KEY → key sai hoặc không tồn tại\n• 401 MAP_API_KEY_DISABLED → admin đã tắt key\n• 401 MAP_API_KEY_EXPIRED → key hết hạn"
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Consumer — Lấy Features (GeoJSON)",
@@ -3336,6 +3583,10 @@
               {
                 "key": "X-Map-Api-Key",
                 "value": "{{mapApiKey}}"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
               }
             ],
             "url": {
@@ -3370,7 +3621,18 @@
               ]
             },
             "description": "=== DÀNH CHO ĐỐI TÁC / BÊN THỨ BA — API CHÍNH LẤY DỮ LIỆU ===\n\nTrả về GeoJSON FeatureCollection từ lớp GIS đã được cấp quyền.\n\nCách dùng:\n• Header X-Map-Api-Key: raw key từ admin\n• bbox bắt buộc — khu vực cần lấy dữ liệu (WGS84)\n• Phân trang: tăng offset theo từng trang (limit=50, offset=0→50→100...)\n\nResponse:\n  {\n    type: 'FeatureCollection',\n    features: [...],  // GeoJSON Feature objects\n    total: 150,       // tổng feature trong bbox\n    returned: 50,     // số feature trả về lần này\n    hasMore: true     // còn trang tiếp → tăng offset\n  }\n\nRate limit (xem response headers):\n• X-RateLimit-Limit: giới hạn/phút theo scope\n• X-RateLimit-Remaining: còn lại trong cửa sổ hiện tại\n• X-RateLimit-Reset: timestamp (giây) khi cửa sổ reset\n• Vượt giới hạn → 429 + header Retry-After\n\nLỗi có thể gặp:\n• 400 MAP_API_BBOX_TOO_LARGE → bbox vượt quá bbox_limit trong scope\n• 403 MAP_API_SCOPE_DENIED → scope.read = false\n• 429 MAP_API_RATE_LIMIT_EXCEEDED → quá rate_per_min"
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Consumer — Test Key sai (expect 401)",
@@ -3383,6 +3645,10 @@
               {
                 "key": "X-Map-Api-Key",
                 "value": "mapk_wrong_key_test_0000000000000000000000000000000"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
               }
             ],
             "url": {
@@ -3402,7 +3668,18 @@
               ]
             },
             "description": "Request kiểm thử bảo mật — truyền key giả để xác nhận server từ chối đúng.\n\nKỳ vọng: 401 MAP_API_INVALID_KEY\n\nCơ chế xác thực:\n1. Server đọc 12 ký tự đầu của key (prefix) để tra cứu nhanh trong DB\n2. Nếu tìm thấy prefix → so sánh sha256(key_gửi) với key_hash lưu trong DB\n   (dùng crypto.timingSafeEqual để chống timing attack)\n3. Không khớp → 401\n4. Khớp hash → kiểm tra is_active, expires_at, layer_is_active\n\nKhông bao giờ trả thông tin gợi ý key đúng hay sai từng phần."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -3418,6 +3695,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "const json = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
                   "if (json && json.data && json.data.image) {",
                   "  const id = String(json.data.image.id);",
@@ -3439,6 +3717,10 @@
               {
                 "key": "Accept-Language",
                 "value": "{{lang}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "body": {
@@ -3537,7 +3819,17 @@
                 }
               ]
             },
-            "description": "Upload ảnh vệ tinh GeoTIFF lên MinIO.\n\nQuyền cần: `remote_sensing.create`\n\nField bắt buộc:\n- `raster_file`: file GeoTIFF\n- `name`, `satellite`, `image_type`, `acquisition_date`, `bbox`\n\nSau khi upload thành công:\n- File lưu vào MinIO bucket `remote-sensing-images`\n- Tạo DB record với status = `pending`\n- Tạo processing job `full_pipeline` để xử lý COG\n\nScript test tự lưu `remoteImageId` và `remoteFileId` vào biến collection."
+            "description": "Upload ảnh vệ tinh GeoTIFF lên MinIO.\n\nQuyền cần: `remote_sensing.create`\n\nField bắt buộc:\n- `raster_file`: file GeoTIFF\n- `name`, `satellite`, `image_type`, `acquisition_date`, `bbox`\n\nSau khi upload thành công:\n- File lưu vào MinIO bucket `remote-sensing-images`\n- Tạo DB record với status = `pending`\n- Tạo processing job `full_pipeline` để xử lý COG\n\nScript test tự lưu `remoteImageId` và `remoteFileId` vào biến collection.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
           }
         },
         {
@@ -3571,8 +3863,29 @@
                 }
               ]
             },
-            "description": "Tạo presigned PUT URL để client upload file GeoTIFF lớn (>500MB) trực tiếp lên MinIO — tránh qua Node.js server.\n\nQuy trình:\n1. Gọi API này → nhận `uploadUrl` + `objectKey` + `uuid`\n2. Client PUT file thẳng lên `uploadUrl` (không cần header auth)\n3. Sau khi PUT thành công → gọi `POST /remote-sensing/images` với metadata + `objectKey`\n\nURL hết hạn sau 60 phút (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS)."
-          }
+            "description": "Tạo presigned PUT URL để client upload file GeoTIFF lớn (>500MB) trực tiếp lên MinIO — tránh qua Node.js server.\n\nQuy trình:\n1. Gọi API này → nhận `uploadUrl` + `objectKey` + `uuid`\n2. Client PUT file thẳng lên `uploadUrl` (không cần header auth)\n3. Sau khi PUT thành công → gọi `POST /remote-sensing/images` với metadata + `objectKey`\n\nURL hết hạn sau 60 phút (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "3. Danh sách ảnh (có phân trang)",
@@ -3680,8 +3993,29 @@
                 }
               ]
             },
-            "description": "Lấy danh sách ảnh vệ tinh có phân trang và bộ lọc.\n\nKhách (citizen/anonymous) chỉ thấy ảnh `is_public = true`.\nAdmin/cán bộ thấy tất cả.\n\nResponse trả về `thumbnail_object_key` trong list (không attach presigned URL để tránh N+1).\nGọi API detail để lấy presigned thumbnail URL."
-          }
+            "description": "Lấy danh sách ảnh vệ tinh có phân trang và bộ lọc.\n\nKhách (citizen/anonymous) chỉ thấy ảnh `is_public = true`.\nAdmin/cán bộ thấy tất cả.\n\nResponse trả về `thumbnail_object_key` trong list (không attach presigned URL để tránh N+1).\nGọi API detail để lấy presigned thumbnail URL.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "4. Chi tiết ảnh",
@@ -3710,8 +4044,29 @@
                 }
               ]
             },
-            "description": "Lấy thông tin đầy đủ của 1 ảnh: metadata + danh sách files + statistics + presigned thumbnail URL.\n\nChấp nhận cả `id` (số) lẫn `uuid` (chuỗi 36 ký tự) ở path.\n\nNếu ảnh `is_public = false` → phải đăng nhập và có quyền phù hợp."
-          }
+            "description": "Lấy thông tin đầy đủ của 1 ảnh: metadata + danh sách files + statistics + presigned thumbnail URL.\n\nChấp nhận cả `id` (số) lẫn `uuid` (chuỗi 36 ký tự) ở path.\n\nNếu ảnh `is_public = false` → phải đăng nhập và có quyền phù hợp.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "5. Cập nhật metadata ảnh",
@@ -3748,8 +4103,29 @@
                 }
               ]
             },
-            "description": "Cập nhật metadata ảnh vệ tinh (không upload lại file).\n\nQuyền cần: `remote_sensing.update`\nChỉ owner hoặc admin mới được sửa.\n\nCó thể truyền thêm `expectedUpdatedAt` (lấy từ `updated_at` của response detail) để bật optimistic locking — tránh ghi đè đồng thời.\n\nField `status` dùng để đánh dấu thủ công khi không dùng processing pipeline."
-          }
+            "description": "Cập nhật metadata ảnh vệ tinh (không upload lại file).\n\nQuyền cần: `remote_sensing.update`\nChỉ owner hoặc admin mới được sửa.\n\nCó thể truyền thêm `expectedUpdatedAt` (lấy từ `updated_at` của response detail) để bật optimistic locking — tránh ghi đè đồng thời.\n\nField `status` dùng để đánh dấu thủ công khi không dùng processing pipeline.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "6. Lấy COG URL cho WebGIS",
@@ -3779,8 +4155,29 @@
                 }
               ]
             },
-            "description": "Lấy presigned URL trỏ đến file COG (Cloud Optimized GeoTIFF) để load lên bản đồ WebGIS.\n\nƯu tiên file có `file_role = cog`, fallback về `primary`.\nURL hết hạn sau 15 phút (MINIO_PRESIGNED_EXPIRE_SECONDS).\n\nResponse kèm `webgisHint` — code mẫu cho OpenLayers, Mapbox GL, Leaflet:\n```js\n// OpenLayers\nnew GeoTIFF({ sources: [{ url: cogUrl }] })\n// Mapbox GL\n{ type: 'raster', tiles: [cogUrl] }\n```"
-          }
+            "description": "Lấy presigned URL trỏ đến file COG (Cloud Optimized GeoTIFF) để load lên bản đồ WebGIS.\n\nƯu tiên file có `file_role = cog`, fallback về `primary`.\nURL hết hạn sau 15 phút (MINIO_PRESIGNED_EXPIRE_SECONDS).\n\nResponse kèm `webgisHint` — code mẫu cho OpenLayers, Mapbox GL, Leaflet:\n```js\n// OpenLayers\nnew GeoTIFF({ sources: [{ url: cogUrl }] })\n// Mapbox GL\n{ type: 'raster', tiles: [cogUrl] }\n```",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "7. Lấy URL download",
@@ -3816,8 +4213,29 @@
                 }
               ]
             },
-            "description": "Tạo presigned download URL để tải file GeoTIFF về máy.\n\nQuyền cần: `remote_sensing.download`\nVới ảnh public: người dùng đã đăng nhập đều tải được.\nVới ảnh private: cần permission `remote_sensing.download` trong role.\n\nGhi log download (image_id, file_id, user_id, ip, user_agent, expires_at).\nURL hết hạn sau 15 phút."
-          }
+            "description": "Tạo presigned download URL để tải file GeoTIFF về máy.\n\nQuyền cần: `remote_sensing.download`\nVới ảnh public: người dùng đã đăng nhập đều tải được.\nVới ảnh private: cần permission `remote_sensing.download` trong role.\n\nGhi log download (image_id, file_id, user_id, ip, user_agent, expires_at).\nURL hết hạn sau 15 phút.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "8. Thống kê band ảnh",
@@ -3847,8 +4265,29 @@
                 }
               ]
             },
-            "description": "Lấy thống kê pixel từng band của ảnh GeoTIFF (min, max, mean, std, histogram).\n\nDữ liệu được tính bởi processing pipeline sau khi upload.\nNếu ảnh chưa qua xử lý (status = pending/processing) → trả mảng rỗng."
-          }
+            "description": "Lấy thống kê pixel từng band của ảnh GeoTIFF (min, max, mean, std, histogram).\n\nDữ liệu được tính bởi processing pipeline sau khi upload.\nNếu ảnh chưa qua xử lý (status = pending/processing) → trả mảng rỗng.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "9. Trigger xử lý (pipeline)",
@@ -3886,8 +4325,29 @@
                 }
               ]
             },
-            "description": "Trigger thủ công processing job cho ảnh.\n\nQuyền cần: role `system_admin` hoặc `so_nnmt`\n\nJob types:\n- `full_pipeline`: convert COG + tính statistics + tạo thumbnail (mặc định)\n- `cog_only`: chỉ convert sang COG\n- `stats_only`: chỉ tính statistics\n- `thumbnail_only`: chỉ tạo thumbnail\n\nDùng khi ảnh bị stuck ở status `pending` hoặc cần re-process."
-          }
+            "description": "Trigger thủ công processing job cho ảnh.\n\nQuyền cần: role `system_admin` hoặc `so_nnmt`\n\nJob types:\n- `full_pipeline`: convert COG + tính statistics + tạo thumbnail (mặc định)\n- `cog_only`: chỉ convert sang COG\n- `stats_only`: chỉ tính statistics\n- `thumbnail_only`: chỉ tạo thumbnail\n\nDùng khi ảnh bị stuck ở status `pending` hoặc cần re-process.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "10. Layers WebGIS (public)",
@@ -3946,7 +4406,18 @@
               ]
             },
             "description": "Lấy danh sách layers ảnh vệ tinh đã hoàn thành (status=completed, is_public=true) kèm presigned COG URL và thumbnail URL để hiển thị trên bản đồ WebGIS.\n\nKhông cần đăng nhập.\n\nResponse gồm:\n- `cogUrl`: presigned URL trỏ COG file (hết hạn 15 phút)\n- `thumbnailUrl`: presigned URL thumbnail\n- `bbox`: bounding box GeoJSON\n- `expiresAt`: thời điểm URL hết hạn\n\nFrontend dùng `cogUrl` với GeoTIFF.js (OpenLayers) hoặc raster source (Mapbox GL)."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "11. Xóa ảnh (soft delete)",
@@ -3975,8 +4446,29 @@
                 }
               ]
             },
-            "description": "Soft delete ảnh vệ tinh — đánh dấu `deleted_at`, không xóa file MinIO.\n\nQuyền cần: `remote_sensing.delete`\nChỉ owner hoặc `system_admin` mới được xóa.\n\nĐể xóa cả file trên MinIO (hard delete), thêm query param:\n`?hardDelete=true` — chỉ dùng khi chắc chắn không cần phục hồi."
-          }
+            "description": "Soft delete ảnh vệ tinh — đánh dấu `deleted_at`, không xóa file MinIO.\n\nQuyền cần: `remote_sensing.delete`\nChỉ owner hoặc `system_admin` mới được xóa.\n\nĐể xóa cả file trên MinIO (hard delete), thêm query param:\n`?hardDelete=true` — chỉ dùng khi chắc chắn không cần phục hồi.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -4016,7 +4508,8 @@
               ]
             },
             "description": "Kết nối WebSocket đến server.\n\nServer gửi ngay event `connected` sau khi kết nối:\n```json\n{\n  \"event\": \"connected\",\n  \"data\": { \"userId\": \"1\", \"message\": \"WebSocket connected\" },\n  \"timestamp\": \"2026-06-27T10:00:00.000Z\"\n}\n```\n\nNếu token hết hạn hoặc sai → server trả HTTP 401 và đóng kết nối.\nNếu không truyền token → kết nối vẫn thành công nhưng userId = null (anonymous)."
-          }
+          },
+          "event": []
         },
         {
           "name": "2. Subscribe channel ảnh viễn thám",
@@ -4040,13 +4533,19 @@
               ]
             },
             "description": "Sau khi kết nối, gửi message subscribe để nhận event theo imageId.\n\nMessage gửi lên:\n```json\n{\n  \"action\": \"subscribe\",\n  \"channels\": [\"remote_sensing:{{remoteImageId}}\"]\n}\n```\n\nServer xác nhận:\n```json\n{\n  \"event\": \"subscribed\",\n  \"data\": { \"channels\": [\"remote_sensing:1\"] }\n}\n```\n\nSau đó chờ các event:\n- `remote_sensing:statistics_ready` — band stats đã tính xong\n- `remote_sensing:job_completed` — pipeline hoàn tất\n- `remote_sensing:job_failed` — thất bại\n\nCó thể subscribe nhiều channel cùng lúc:\n```json\n{\n  \"action\": \"subscribe\",\n  \"channels\": [\"remote_sensing:1\", \"remote_sensing:2\"]\n}\n```\n\n──────────────────────────────────────────\nTEST BẰNG WSCAT:\n```bash\nnpm i -g wscat\nwscat -c \"wss://apikontum.tourismpj.pro.vn/ws?token=<accessToken>\"\n# Sau khi kết nối, paste:\n{\"action\":\"subscribe\",\"channels\":[\"remote_sensing:1\"]}\n```"
-          }
+          },
+          "event": []
         },
         {
           "name": "3. [Mẫu] Event statistics_ready nhận được",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "https://apikontum.tourismpj.pro.vn/api/v1/remote-sensing/images/{{remoteImageId}}/statistics?lang={{lang}}",
               "host": [
@@ -4067,14 +4566,40 @@
                 }
               ]
             },
-            "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy thống kê khi không dùng WS.\n\nKhi WebSocket gửi event `remote_sensing:statistics_ready`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:statistics_ready\",\n  \"data\": {\n    \"imageId\": 1,\n    \"bandCount\": 4,\n    \"statistics\": [\n      { \"bandIndex\": 1, \"min\": 0, \"max\": 5228, \"mean\": 634.25, \"std\": 607.63 },\n      { \"bandIndex\": 2, \"min\": 0, \"max\": 4368, \"mean\": 609.86, \"std\": 491.71 },\n      { \"bandIndex\": 3, \"min\": 0, \"max\": 4248, \"mean\": 455.06, \"std\": 371.44 },\n      { \"bandIndex\": 4, \"min\": 0, \"max\": 7665, \"mean\": 2120.44, \"std\": 1549.66 }\n    ]\n  },\n  \"timestamp\": \"2026-06-27T10:40:06.000Z\"\n}\n```\n\nBand mapping Sentinel-2 (B4+B3+B2+B8 export từ GEE):\n- Band 1 → B4 (Red)\n- Band 2 → B3 (Green)\n- Band 3 → B2 (Blue)\n- Band 4 → B8 (NIR — Near Infrared)\n\nNDVI = (NIR - Red) / (NIR + Red) ≈ (2120 - 634) / (2120 + 634) ≈ 0.54\n→ Mật độ thực vật trung bình đến dày — đúng với địa hình rừng Kon Tum."
-          }
+            "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy thống kê khi không dùng WS.\n\nKhi WebSocket gửi event `remote_sensing:statistics_ready`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:statistics_ready\",\n  \"data\": {\n    \"imageId\": 1,\n    \"bandCount\": 4,\n    \"statistics\": [\n      { \"bandIndex\": 1, \"min\": 0, \"max\": 5228, \"mean\": 634.25, \"std\": 607.63 },\n      { \"bandIndex\": 2, \"min\": 0, \"max\": 4368, \"mean\": 609.86, \"std\": 491.71 },\n      { \"bandIndex\": 3, \"min\": 0, \"max\": 4248, \"mean\": 455.06, \"std\": 371.44 },\n      { \"bandIndex\": 4, \"min\": 0, \"max\": 7665, \"mean\": 2120.44, \"std\": 1549.66 }\n    ]\n  },\n  \"timestamp\": \"2026-06-27T10:40:06.000Z\"\n}\n```\n\nBand mapping Sentinel-2 (B4+B3+B2+B8 export từ GEE):\n- Band 1 → B4 (Red)\n- Band 2 → B3 (Green)\n- Band 3 → B2 (Blue)\n- Band 4 → B8 (NIR — Near Infrared)\n\nNDVI = (NIR - Red) / (NIR + Red) ≈ (2120 - 634) / (2120 + 634) ≈ 0.54\n→ Mật độ thực vật trung bình đến dày — đúng với địa hình rừng Kon Tum.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "4. [Mẫu] Event job_completed nhận được",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
             "url": {
               "raw": "https://apikontum.tourismpj.pro.vn/api/v1/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
               "host": [
@@ -4094,8 +4619,29 @@
                 }
               ]
             },
-            "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy chi tiết ảnh sau khi nhận event job_completed.\n\nKhi WebSocket gửi event `remote_sensing:job_completed`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:job_completed\",\n  \"data\": {\n    \"jobId\": 1,\n    \"imageId\": 1,\n    \"imageName\": \"Sentinel-2 Kon Tum 2024\",\n    \"status\": \"completed\",\n    \"bandCount\": 4,\n    \"processedAt\": \"2026-06-27T10:40:07.000Z\"\n  },\n  \"timestamp\": \"2026-06-27T10:40:07.000Z\"\n}\n```\n\nSau khi nhận event này, frontend nên:\n1. Gọi `GET /remote-sensing/images/:id` để lấy thumbnailUrl mới\n2. Gọi `GET /remote-sensing/images/:id/cog-url` để lấy COG URL hiển thị bản đồ\n3. Enable nút \"Xem trên bản đồ\""
-          }
+            "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy chi tiết ảnh sau khi nhận event job_completed.\n\nKhi WebSocket gửi event `remote_sensing:job_completed`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:job_completed\",\n  \"data\": {\n    \"jobId\": 1,\n    \"imageId\": 1,\n    \"imageName\": \"Sentinel-2 Kon Tum 2024\",\n    \"status\": \"completed\",\n    \"bandCount\": 4,\n    \"processedAt\": \"2026-06-27T10:40:07.000Z\"\n  },\n  \"timestamp\": \"2026-06-27T10:40:07.000Z\"\n}\n```\n\nSau khi nhận event này, frontend nên:\n1. Gọi `GET /remote-sensing/images/:id` để lấy thumbnailUrl mới\n2. Gọi `GET /remote-sensing/images/:id/cog-url` để lấy COG URL hiển thị bản đồ\n3. Enable nút \"Xem trên bản đồ\"",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
