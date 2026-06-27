@@ -20,6 +20,8 @@ const HEADER = 'x-map-api-key';
 const WINDOW_MS = 60 * 1000;
 
 // Bộ đếm cửa sổ cố định 1 phút trong bộ nhớ: apiId → { count, resetAt }.
+// Lưu ý: đây là per-process — nếu chạy nhiều worker (PM2 cluster), mỗi worker
+// có bucket riêng và giới hạn sẽ nhân lên theo số worker. Cần Redis khi scale.
 const buckets = new Map();
 
 // Dọn định kỳ các bucket đã hết hạn để tránh rò rỉ bộ nhớ.

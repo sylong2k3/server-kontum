@@ -170,11 +170,10 @@ const refreshCache = async ({ lang = 'vi' } = {}) => {
     const [minLng, minLat, maxLng, maxLat] = cfg.KONTUM_BBOX;
     const centerLng = round((minLng + maxLng) / 2);
     const centerLat = round((minLat + maxLat) / 2);
+    const keyBox    = cfg.KONTUM_BBOX.map((n) => round(n, 3)).join(',');
 
-    // 1) Warm wind grid (Open-Meteo, không cần key) cho toàn bbox Kon Tum.
-    try {
-        const data    = await owm.getWindGrid(cfg.KONTUM_BBOX, cfg.WIND_GRID_SIZE);
-        const keyBox   = cfg.KONTUM_BBOX.map((n) => round(n, 3)).join(',');
+    const windTask = async () => {
+        const data = await owm.getWindGrid(cfg.KONTUM_BBOX, cfg.WIND_GRID_SIZE);
         await repo.upsert({
             cache_key:   `wind_grid:${keyBox}:${cfg.WIND_GRID_SIZE}`,
             data_type:   'wind_grid',
@@ -185,31 +184,31 @@ const refreshCache = async ({ lang = 'vi' } = {}) => {
             expires_at:  new Date(Date.now() + cfg.WIND_TTL_SECONDS * 1000),
         });
         result.windGrid = true;
-    } catch (err) {
-        result.errors.push(`wind_grid: ${err.message}`);
-    }
+    };
 
-    // 2) Warm point tại trung tâm tỉnh (chỉ khi có OpenWeather key).
-    if (cfg.isOpenWeatherConfigured()) {
-        try {
-            const data = await owm.getCurrentWeather(centerLng, centerLat);
-            await repo.upsert({
-                cache_key:   `point:${centerLng},${centerLat}`,
-                data_type:   'point',
-                lng:         centerLng,
-                lat:         centerLat,
-                payload:     data,
-                source:      'openweather',
-                observed_at: data.observedAt,
-                expires_at:  new Date(Date.now() + cfg.POINT_TTL_SECONDS * 1000),
-            });
-            result.point = true;
-        } catch (err) {
-            result.errors.push(`point: ${err.message}`);
+    const pointTask = async () => {
+        if (!cfg.isOpenWeatherConfigured()) {
+            result.errors.push('point: OPENWEATHER_API_KEY not configured');
+            return;
         }
-    } else {
-        result.errors.push('point: OPENWEATHER_API_KEY not configured');
-    }
+        const data = await owm.getCurrentWeather(centerLng, centerLat);
+        await repo.upsert({
+            cache_key:   `point:${centerLng},${centerLat}`,
+            data_type:   'point',
+            lng:         centerLng,
+            lat:         centerLat,
+            payload:     data,
+            source:      'openweather',
+            observed_at: data.observedAt,
+            expires_at:  new Date(Date.now() + cfg.POINT_TTL_SECONDS * 1000),
+        });
+        result.point = true;
+    };
+
+    // Chạy song song — wind-grid (Open-Meteo) và point (OpenWeather) độc lập nhau.
+    const [windResult, pointResult] = await Promise.allSettled([windTask(), pointTask()]);
+    if (windResult.status === 'rejected') { result.errors.push(`wind_grid: ${windResult.reason?.message}`); }
+    if (pointResult.status === 'rejected') { result.errors.push(`point: ${pointResult.reason?.message}`); }
 
     return result;
 };

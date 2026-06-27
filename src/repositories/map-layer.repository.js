@@ -89,6 +89,11 @@ const countAll = async ({ isAdmin = false, filter = {} } = {}) => {
     return rows[0].total;
 };
 
+const findById = async (id) => {
+    const { rows } = await db.query(`SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE id = $1`, [id]);
+    return rows[0] || null;
+};
+
 const findByCode = async (code, client = null) => {
     const { rows } = await exec(client)(`SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE code = $1`, [code]);
     return rows[0] || null;
@@ -370,7 +375,7 @@ const findFeaturesAsGeoJSON = async (layer, { bbox = null, limit = 500, offset =
         SELECT jsonb_build_object(
             'type', 'Feature',
             'geometry', ST_AsGeoJSON(${geom4326}, 6)::jsonb,
-            'properties', to_jsonb(t.*) - '${rawGeom}'
+            'properties', to_jsonb(t.*) - '${rawGeom.toLowerCase()}'
         ) AS feature
         FROM ${ref} t
         WHERE ${where.join(' AND ')}
@@ -381,7 +386,7 @@ const findFeaturesAsGeoJSON = async (layer, { bbox = null, limit = 500, offset =
 };
 
 module.exports = {
-    countAll, createImportJob, createLayer, deleteLayer, findAll, findByCode,
+    countAll, createImportJob, createLayer, deleteLayer, findAll, findById, findByCode,
     findByTableName, findFeaturesAsGeoJSON, findImportJobById, geometryColumnExists,
     insertEditHistory, listImportJobs, markPublished, markUnpublished,
     physicalTableExists, refreshStats, setActive, updateImportJob,

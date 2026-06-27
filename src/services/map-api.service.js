@@ -101,15 +101,9 @@ const deleteKey = async (id, user, lang) => {
 };
 
 const findLayerById = async (layerId, lang) => {
-    // layerRepo không có findById nên dùng truy vấn nhẹ qua findByCode không phù hợp;
-    // tận dụng list/registry: tạo helper inline.
-    const db = require('../configs/database');
-    const { rows } = await db.query(
-        `SELECT id, code, name_vi, is_active FROM gis.layer_registry WHERE id = $1`,
-        [layerId],
-    );
-    if (!rows[0]) { throw new Api400Error(t('map_api_layer_not_found', lang), ['LAYER_NOT_FOUND']); }
-    return rows[0];
+    const layer = await layerRepo.findById(layerId);
+    if (!layer) { throw new Api400Error(t('map_api_layer_not_found', lang), ['LAYER_NOT_FOUND']); }
+    return layer;
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
