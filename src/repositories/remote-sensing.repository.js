@@ -361,7 +361,7 @@ const deactivateFile = async (fileId) => {
  */
 const getObjectKeysByImageId = async (imageId) => {
     const { rows } = await db.query(
-        'SELECT id, bucket_name, object_key FROM raster.remote_sensing_files WHERE image_id = $1',
+        'SELECT id, bucket_name, object_key FROM raster.remote_sensing_files WHERE image_id = $1 AND is_active = true',
         [imageId],
     );
     return rows;
@@ -447,7 +447,7 @@ const upsertStatistics = async (imageId, fileId, stats) => {
     `;
     const { rows } = await db.query(sql, [
         imageId, fileId || null,
-        stats.band_index || 1, stats.band_name || null,
+        stats.band_index ?? 1, stats.band_name || null,
         stats.min ?? null, stats.max ?? null,
         stats.mean ?? null, stats.std ?? null,
         stats.valid_pixels ?? null, stats.total_pixels ?? null,
