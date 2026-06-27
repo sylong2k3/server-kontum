@@ -2178,7 +2178,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}",
+              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2186,6 +2186,12 @@
                 "admin",
                 "pdf-maps",
                 "{{pdfMapId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Admin detail: tra ve metadata + object translations { vi: { title, description }, en: { title, description } }."
@@ -2327,7 +2333,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}/translations/en",
+              "raw": "{{baseUrl}}/admin/pdf-maps/{{pdfMapId}}/translations/en?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2337,6 +2343,12 @@
                 "{{pdfMapId}}",
                 "translations",
                 "en"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "body": {
@@ -2386,7 +2398,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/map/layers",
+              "raw": "{{baseUrl}}/map/layers?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2394,7 +2406,12 @@
                 "map",
                 "layers"
               ],
-              "query": []
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Trả layer active và user hiện tại được quyền đọc."
           }
@@ -2411,7 +2428,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2419,6 +2436,12 @@
                 "map",
                 "layers",
                 "{{mapLayerCode}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Lấy metadata 1 layer. Public layer không cần token."
@@ -2450,13 +2473,19 @@
               }
             },
             "url": {
-              "raw": "{{baseUrl}}/map/layers",
+              "raw": "{{baseUrl}}/map/layers?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "map",
                 "layers"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Tạo layer trong layer_registry. Bảng PostGIS phải tồn tại sẵn (hoặc dùng /import-file để tạo từ file)."
@@ -2488,7 +2517,7 @@
               }
             },
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2496,6 +2525,12 @@
                 "map",
                 "layers",
                 "{{mapLayerCode}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Sửa metadata layer (không thay đổi dữ liệu vật lý hay GeoServer)."
@@ -2513,7 +2548,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2521,6 +2556,12 @@
                 "map",
                 "layers",
                 "{{mapLayerCode}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Xóa layer khỏi registry. Phải unpublish trước (geoserver_layer = null)."
@@ -2532,7 +2573,7 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/publish",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/publish?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2542,7 +2583,12 @@
                 "{{mapLayerCode}}",
                 "publish"
               ],
-              "query": []
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Cần token và quyền map_layers:publish."
           }
@@ -2553,7 +2599,7 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/publish",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/publish?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2563,7 +2609,12 @@
                 "{{mapLayerCode}}",
                 "publish"
               ],
-              "query": []
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Cần token và quyền map_layers:unpublish."
           }
@@ -2579,7 +2630,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/active",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/active?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2589,7 +2640,12 @@
                 "{{mapLayerCode}}",
                 "active"
               ],
-              "query": []
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
@@ -2680,7 +2736,7 @@
               ]
             },
             "url": {
-              "raw": "{{baseUrl}}/map/layers/import-file",
+              "raw": "{{baseUrl}}/map/layers/import-file?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2688,6 +2744,12 @@
                 "map",
                 "layers",
                 "import-file"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Upload file GIS vào PostGIS + auto-publish GeoServer. Trả 202 ngay với job_id. Poll GET /map/import-jobs/:jobId để theo dõi tiến độ. Cần quyền map_layers:import."
@@ -2719,7 +2781,7 @@
               }
             },
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/import",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/import?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2728,6 +2790,12 @@
                 "layers",
                 "{{mapLayerCode}}",
                 "import"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Import GeoJSON/CSV JSON body vào bảng PostGIS đã có. Đồng bộ. Khác /import-file (upload file + ogr2ogr)."
@@ -2745,7 +2813,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/import-jobs",
+              "raw": "{{baseUrl}}/map/layers/{{mapLayerCode}}/import-jobs?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2754,6 +2822,12 @@
                 "layers",
                 "{{mapLayerCode}}",
                 "import-jobs"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Xem tất cả import job của 1 layer."
@@ -2771,7 +2845,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map/import-jobs/{{importJobId}}",
+              "raw": "{{baseUrl}}/map/import-jobs/{{importJobId}}?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2785,6 +2859,12 @@
                   "key": "importJobId",
                   "value": "1",
                   "description": "ID của import job"
+                }
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
                 }
               ]
             },
@@ -2802,7 +2882,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map/rasters/{{coverageStore}}/harvest",
+              "raw": "{{baseUrl}}/map/rasters/{{coverageStore}}/harvest?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2812,7 +2892,12 @@
                 "{{coverageStore}}",
                 "harvest"
               ],
-              "query": []
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
@@ -2824,328 +2909,36 @@
       ]
     },
     {
-      "name": "Viễn thám",
-      "description": "Quản lý ảnh viễn thám/GeoTIFF, presigned URL, COG URL và layers phục vụ WebGIS.",
-      "item": [
-        {
-          "name": "Danh sách ảnh viễn thám",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images?page=1&limit=10",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Chi tiết ảnh",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "Thống kê ảnh",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/statistics",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}",
-                "statistics"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "COG URL cho WebGIS",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/cog-url",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}",
-                "cog-url"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "Danh sách remote sensing layers",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/layers",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "layers"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "Presigned upload URL",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/upload-url?file_name={{remoteFileName}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "upload-url"
-              ],
-              "query": [
-                {
-                  "key": "file_name",
-                  "value": "{{remoteFileName}}"
-                }
-              ]
-            },
-            "description": "Cần quyền remote_sensing:create. Client upload trực tiếp file lớn lên MinIO."
-          }
-        },
-        {
-          "name": "Upload ảnh GeoTIFF multipart",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "raster_file",
-                  "type": "file",
-                  "src": ""
-                },
-                {
-                  "key": "thumbnail",
-                  "type": "file",
-                  "src": "",
-                  "disabled": true
-                },
-                {
-                  "key": "name",
-                  "value": "Ảnh Sentinel-2 demo",
-                  "type": "text"
-                },
-                {
-                  "key": "satellite",
-                  "value": "sentinel_2",
-                  "type": "text"
-                },
-                {
-                  "key": "image_type",
-                  "value": "geotiff_raw",
-                  "type": "text"
-                },
-                {
-                  "key": "acquisition_date",
-                  "value": "2026-06-24",
-                  "type": "text"
-                },
-                {
-                  "key": "is_public",
-                  "value": "true",
-                  "type": "text"
-                }
-              ]
-            },
-            "description": "Cần quyền remote_sensing:create. Chọn file local trước khi gửi."
-          }
-        },
-        {
-          "name": "Cập nhật metadata ảnh",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}"
-              ],
-              "query": []
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Ảnh Sentinel-2 đã cập nhật\",\n  \"is_public\": true\n}"
-            }
-          }
-        },
-        {
-          "name": "Download URL",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/download?file_id={{remoteFileId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}",
-                "download"
-              ],
-              "query": [
-                {
-                  "key": "file_id",
-                  "value": "{{remoteFileId}}"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Trigger process ảnh",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/process",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}",
-                "process"
-              ],
-              "query": []
-            }
-          }
-        },
-        {
-          "name": "Xóa ảnh viễn thám",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?hard_delete=false",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "remote-sensing",
-                "images",
-                "{{remoteImageId}}"
-              ],
-              "query": [
-                {
-                  "key": "hard_delete",
-                  "value": "false"
-                }
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
       "name": "🌤 Thời tiết (EP-05)",
       "description": "Thời tiết thời gian thực & dự báo. Tile proxy qua backend (không lộ API key). Wind-grid dùng Open-Meteo (miễn phí, không cần key). Point & tile cần OPENWEATHER_API_KEY trong .env.",
       "item": [
         {
           "name": "Danh sách layer tile",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/weather/layers?type=temp&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["weather", "layers"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weather",
+                "layers"
+              ],
               "query": [
-                { "key": "type", "value": "temp", "description": "temp | rain | cloud | wind | pressure" },
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "type",
+                  "value": "temp",
+                  "description": "temp | rain | cloud | wind | pressure"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Trả về URL template tile của loại lớp được chọn (proxy qua /weather/tiles). Không lộ API key ra client."
@@ -3154,17 +2947,33 @@
         {
           "name": "Thời tiết tại điểm (Current Weather)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/weather/point?lng=107.9&lat=14.35&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["weather", "point"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weather",
+                "point"
+              ],
               "query": [
-                { "key": "lng", "value": "107.9" },
-                { "key": "lat", "value": "14.35" },
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lng",
+                  "value": "107.9"
+                },
+                {
+                  "key": "lat",
+                  "value": "14.35"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Nhiệt độ, độ ẩm, gió, trời tại tọa độ. Cần OPENWEATHER_API_KEY. Cache 1 giờ, fallback stale khi upstream lỗi."
@@ -3173,17 +2982,35 @@
         {
           "name": "Lưới gió (Wind Grid — Open-Meteo)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/weather/wind-grid?bbox=107.0,13.8,108.6,15.5&grid=8&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["weather", "wind-grid"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weather",
+                "wind-grid"
+              ],
               "query": [
-                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "description": "minLng,minLat,maxLng,maxLat" },
-                { "key": "grid", "value": "8", "description": "Số điểm mỗi chiều (1-16, mặc định 8)" },
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "bbox",
+                  "value": "107.0,13.8,108.6,15.5",
+                  "description": "minLng,minLat,maxLng,maxLat"
+                },
+                {
+                  "key": "grid",
+                  "value": "8",
+                  "description": "Số điểm mỗi chiều (1-16, mặc định 8)"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Lưới NxN điểm gió với u/v component (m/s). Dùng Open-Meteo, không cần API key. Frontend dùng để vẽ streamlines."
@@ -3192,14 +3019,30 @@
         {
           "name": "Proxy Tile (PNG)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/weather/tiles/temp/8/200/115",
-              "host": ["{{baseUrl}}"],
-              "path": ["weather", "tiles", "temp", "8", "200", "115"],
-              "query": []
+              "raw": "{{baseUrl}}/weather/tiles/temp/8/200/115?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weather",
+                "tiles",
+                "temp",
+                "8",
+                "200",
+                "115"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Proxy tile PNG từ OpenWeather (không lộ appid). z=8, x=200, y=115 là tile Kon Tum vùng zoom 8."
           }
@@ -3211,10 +3054,18 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/weather/refresh?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["weather", "refresh"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weather",
+                "refresh"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Warm cache: lưới gió Kon Tum + điểm trung tâm. Cần quyền weather:manage (system_admin / so_nnmt)."
@@ -3252,7 +3103,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -3260,10 +3114,17 @@
             },
             "url": {
               "raw": "{{baseUrl}}/map-apis?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-apis"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-apis"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Cấp API key cho đối tác/đơn vị muốn lấy dữ liệu lớp GIS.\n\nBody:\n• name: tên gợi nhớ (ví dụ 'Sở TNMT - ranh giới hành chính')\n• layer_id: ID lớp GIS được cấp quyền đọc (xem bảng gis.layer_registry)\n• scope.read: phải là true (hiện chỉ hỗ trợ read)\n• scope.rate_per_min: số request tối đa mỗi phút (mặc định 60)\n• scope.bbox_limit: diện tích tối đa cho phép (đơn vị độ vuông). Ví dụ: 2.56 ≈ vùng 1.6°×1.6° (~180km×180km). Tính bằng |(maxLng-minLng)*(maxLat-minLat)|. Bỏ qua nếu không cần giới hạn.\n• expires_at: ngày hết hạn ISO 8601, null = không hết hạn\n\nRAW KEY chỉ trả về 1 lần duy nhất trong response → script test tự lưu vào {{mapApiKey}}.\nSau khi đóng tab/response, không thể xem lại — muốn key mới phải dùng 'Xoay Key'.\n\nCần quyền: system_admin (map_apis:create)."
@@ -3276,14 +3137,35 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/map-apis?page=1&limit=20&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-apis"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-apis"
+              ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" },
-                { "key": "lang", "value": "{{lang}}" },
-                { "key": "is_active", "value": "true", "disabled": true },
-                { "key": "layer_id", "value": "1", "disabled": true }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "is_active",
+                  "value": "true",
+                  "disabled": true
+                },
+                {
+                  "key": "layer_id",
+                  "value": "1",
+                  "disabled": true
+                }
               ]
             },
             "description": "Xem tất cả API key đã cấp cho đối tác.\n\nQuery filter (bỏ disabled để dùng):\n• is_active=true → chỉ key đang hoạt động\n• layer_id=1 → key thuộc lớp cụ thể\n\nResponse KHÔNG bao giờ trả raw key — chỉ thấy key_prefix (12 ký tự đầu) và key_last4 (4 ký tự cuối) để nhận dạng.\n\nCần quyền: system_admin (map_apis:read)."
@@ -3296,10 +3178,18 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-apis", "{{mapApiId}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-apis",
+                "{{mapApiId}}"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Chi tiết một API key theo ID.\n\nResponse bao gồm: tên, scope, trạng thái, ngày tạo, lần dùng cuối, tổng số request, lớp GIS gắn kèm.\n\nLưu ý: KHÔNG bao giờ trả raw key hay key_hash — chỉ thấy key_prefix + key_last4 để đối chiếu với đối tác.\n\nCần quyền: system_admin (map_apis:read)."
@@ -3310,7 +3200,10 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -3318,10 +3211,18 @@
             },
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-apis", "{{mapApiId}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-apis",
+                "{{mapApiId}}"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Chỉnh sửa thông tin key đã cấp — KHÔNG tạo key mới.\n\nCó thể sửa:\n• name: đổi tên gợi nhớ\n• scope: thay đổi rate_per_min hoặc bbox_limit\n• is_active: false = tắt key ngay lập tức (đối tác gọi sẽ nhận 401)\n• expires_at: thay đổi ngày hết hạn\n\nKHÔNG thể sửa layer_id — muốn đổi lớp phải xóa rồi tạo key mới.\n\nCần quyền: system_admin (map_apis:update)."
@@ -3349,10 +3250,19 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}/regenerate?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-apis", "{{mapApiId}}", "regenerate"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-apis",
+                "{{mapApiId}}",
+                "regenerate"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Tạo key mới thay thế key cũ — dùng khi nghi ngờ key bị lộ.\n\nHành vi:\n• Key cũ bị vô hiệu NGAY LẬP TỨC (đối tác gọi ngay sau sẽ nhận 401)\n• Sinh key hoàn toàn mới cho cùng layer_id và scope\n• Raw key mới chỉ hiện 1 lần — script test tự lưu vào {{mapApiKey}}\n• ID record KHÔNG đổi\n\nCần quyền: system_admin (map_apis:update)."
@@ -3365,10 +3275,18 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/map-apis/{{mapApiId}}?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-apis", "{{mapApiId}}"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-apis",
+                "{{mapApiId}}"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Xóa vĩnh viễn API key khỏi hệ thống.\n\nSau khi xóa:\n• Đối tác gọi với key cũ → 401 MAP_API_INVALID_KEY\n• Không thể khôi phục — phải tạo key mới nếu cần\n\nNếu chỉ muốn tạm dừng (không xóa hẳn) → dùng 'Cập nhật' với is_active=false.\n\nCần quyền: system_admin (map_apis:delete)."
@@ -3377,17 +3295,31 @@
         {
           "name": "Consumer — Metadata Lớp",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [
-              { "key": "X-Map-Api-Key", "value": "{{mapApiKey}}", "description": "Raw key nhận từ admin (mapk_xxx...)" }
+              {
+                "key": "X-Map-Api-Key",
+                "value": "{{mapApiKey}}",
+                "description": "Raw key nhận từ admin (mapk_xxx...)"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/map-data/layer?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-data", "layer"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-data",
+                "layer"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "=== DÀNH CHO ĐỐI TÁC / BÊN THỨ BA ===\n\nXem thông tin lớp GIS mà key này được cấp quyền truy cập.\n\nCách dùng:\n• KHÔNG cần đăng nhập, KHÔNG cần JWT\n• Truyền raw key qua header X-Map-Api-Key (đã điền sẵn {{mapApiKey}})\n• Key có dạng: mapk_AbCd... (~69 ký tự)\n\nResponse trả về:\n• Tên lớp, loại geometry (Point/LineString/Polygon/...)\n• EPSG code (hệ tọa độ)\n• Scope: rate_per_min, bbox_limit (vùng được phép truy vấn)\n\nLỗi có thể gặp:\n• 401 MAP_API_INVALID_KEY → key sai hoặc không tồn tại\n• 401 MAP_API_KEY_DISABLED → admin đã tắt key\n• 401 MAP_API_KEY_EXPIRED → key hết hạn"
@@ -3396,20 +3328,45 @@
         {
           "name": "Consumer — Lấy Features (GeoJSON)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [
-              { "key": "X-Map-Api-Key", "value": "{{mapApiKey}}" }
+              {
+                "key": "X-Map-Api-Key",
+                "value": "{{mapApiKey}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/map-data/features?bbox=107.5,14.0,108.2,14.8&limit=50&offset=0&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-data", "features"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-data",
+                "features"
+              ],
               "query": [
-                { "key": "bbox", "value": "107.5,14.0,108.2,14.8", "description": "minLng,minLat,maxLng,maxLat — tọa độ WGS84 (EPSG:4326)" },
-                { "key": "limit", "value": "50", "description": "Số feature tối đa trả về, max 500" },
-                { "key": "offset", "value": "0", "description": "Bỏ qua N feature đầu (phân trang)" },
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "bbox",
+                  "value": "107.5,14.0,108.2,14.8",
+                  "description": "minLng,minLat,maxLng,maxLat — tọa độ WGS84 (EPSG:4326)"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Số feature tối đa trả về, max 500"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Bỏ qua N feature đầu (phân trang)"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "=== DÀNH CHO ĐỐI TÁC / BÊN THỨ BA — API CHÍNH LẤY DỮ LIỆU ===\n\nTrả về GeoJSON FeatureCollection từ lớp GIS đã được cấp quyền.\n\nCách dùng:\n• Header X-Map-Api-Key: raw key từ admin\n• bbox bắt buộc — khu vực cần lấy dữ liệu (WGS84)\n• Phân trang: tăng offset theo từng trang (limit=50, offset=0→50→100...)\n\nResponse:\n  {\n    type: 'FeatureCollection',\n    features: [...],  // GeoJSON Feature objects\n    total: 150,       // tổng feature trong bbox\n    returned: 50,     // số feature trả về lần này\n    hasMore: true     // còn trang tiếp → tăng offset\n  }\n\nRate limit (xem response headers):\n• X-RateLimit-Limit: giới hạn/phút theo scope\n• X-RateLimit-Remaining: còn lại trong cửa sổ hiện tại\n• X-RateLimit-Reset: timestamp (giây) khi cửa sổ reset\n• Vượt giới hạn → 429 + header Retry-After\n\nLỗi có thể gặp:\n• 400 MAP_API_BBOX_TOO_LARGE → bbox vượt quá bbox_limit trong scope\n• 403 MAP_API_SCOPE_DENIED → scope.read = false\n• 429 MAP_API_RATE_LIMIT_EXCEEDED → quá rate_per_min"
@@ -3418,15 +3375,31 @@
         {
           "name": "Consumer — Test Key sai (expect 401)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [
-              { "key": "X-Map-Api-Key", "value": "mapk_wrong_key_test_0000000000000000000000000000000" }
+              {
+                "key": "X-Map-Api-Key",
+                "value": "mapk_wrong_key_test_0000000000000000000000000000000"
+              }
             ],
             "url": {
-              "raw": "{{baseUrl}}/map-data/layer",
-              "host": ["{{baseUrl}}"],
-              "path": ["map-data", "layer"]
+              "raw": "{{baseUrl}}/map-data/layer?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "map-data",
+                "layer"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Request kiểm thử bảo mật — truyền key giả để xác nhận server từ chối đúng.\n\nKỳ vọng: 401 MAP_API_INVALID_KEY\n\nCơ chế xác thực:\n1. Server đọc 12 ký tự đầu của key (prefix) để tra cứu nhanh trong DB\n2. Nếu tìm thấy prefix → so sánh sha256(key_gửi) với key_hash lưu trong DB\n   (dùng crypto.timingSafeEqual để chống timing attack)\n3. Không khớp → 401\n4. Khớp hash → kiểm tra is_active, expires_at, layer_is_active\n\nKhông bao giờ trả thông tin gợi ý key đúng hay sai từng phần."
           }
@@ -3463,31 +3436,106 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "raster_file", "type": "file", "src": [], "description": "File GeoTIFF (.tif/.tiff) — bắt buộc" },
-                { "key": "thumbnail_file", "type": "file", "src": [], "description": "Ảnh thumbnail PNG/JPG (tuỳ chọn)" },
-                { "key": "name", "value": "Sentinel-2 Kon Tum 2024", "type": "text" },
-                { "key": "description", "value": "Ảnh vệ tinh Sentinel-2 tỉnh Kon Tum tháng 1/2024", "type": "text" },
-                { "key": "satellite", "value": "sentinel2", "type": "text", "description": "Enum: sentinel1 | sentinel2 | landsat8 | landsat9 | modis | vnredsat | other" },
-                { "key": "image_type", "value": "multispectral", "type": "text", "description": "Enum: rgb | multispectral | sar | thermal | ndvi | other" },
-                { "key": "acquisition_date", "value": "2024-01-15", "type": "text" },
-                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "type": "text", "description": "minLng,minLat,maxLng,maxLat (WGS84)" },
-                { "key": "province_code", "value": "62", "type": "text" },
-                { "key": "cloud_percent", "value": "5.2", "type": "text" },
-                { "key": "resolution_m", "value": "10", "type": "text" },
-                { "key": "epsg_code", "value": "4326", "type": "text" },
-                { "key": "band_count", "value": "4", "type": "text" },
-                { "key": "is_public", "value": "true", "type": "text" }
+                {
+                  "key": "raster_file",
+                  "type": "file",
+                  "src": [],
+                  "description": "File GeoTIFF (.tif/.tiff) — bắt buộc"
+                },
+                {
+                  "key": "thumbnail_file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Ảnh thumbnail PNG/JPG (tuỳ chọn)"
+                },
+                {
+                  "key": "name",
+                  "value": "Sentinel-2 Kon Tum 2024",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Ảnh vệ tinh Sentinel-2 tỉnh Kon Tum tháng 1/2024",
+                  "type": "text"
+                },
+                {
+                  "key": "satellite",
+                  "value": "sentinel2",
+                  "type": "text",
+                  "description": "Enum: sentinel1 | sentinel2 | landsat8 | landsat9 | modis | vnredsat | other"
+                },
+                {
+                  "key": "image_type",
+                  "value": "multispectral",
+                  "type": "text",
+                  "description": "Enum: rgb | multispectral | sar | thermal | ndvi | other"
+                },
+                {
+                  "key": "acquisition_date",
+                  "value": "2024-01-15",
+                  "type": "text"
+                },
+                {
+                  "key": "bbox",
+                  "value": "107.0,13.8,108.6,15.5",
+                  "type": "text",
+                  "description": "minLng,minLat,maxLng,maxLat (WGS84)"
+                },
+                {
+                  "key": "province_code",
+                  "value": "62",
+                  "type": "text"
+                },
+                {
+                  "key": "cloud_percent",
+                  "value": "5.2",
+                  "type": "text"
+                },
+                {
+                  "key": "resolution_m",
+                  "value": "10",
+                  "type": "text"
+                },
+                {
+                  "key": "epsg_code",
+                  "value": "4326",
+                  "type": "text"
+                },
+                {
+                  "key": "band_count",
+                  "value": "4",
+                  "type": "text"
+                },
+                {
+                  "key": "is_public",
+                  "value": "true",
+                  "type": "text"
+                }
               ]
             },
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images"]
+              "raw": "{{baseUrl}}/remote-sensing/images?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Upload ảnh vệ tinh GeoTIFF lên MinIO.\n\nQuyền cần: `remote_sensing.create`\n\nField bắt buộc:\n- `raster_file`: file GeoTIFF\n- `name`, `satellite`, `image_type`, `acquisition_date`, `bbox`\n\nSau khi upload thành công:\n- File lưu vào MinIO bucket `remote-sensing-images`\n- Tạo DB record với status = `pending`\n- Tạo processing job `full_pipeline` để xử lý COG\n\nScript test tự lưu `remoteImageId` và `remoteFileId` vào biến collection."
           }
@@ -3497,15 +3545,30 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/upload-url?fileName=sentinel2-large.tif&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "upload-url"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "upload-url"
+              ],
               "query": [
-                { "key": "fileName", "value": "sentinel2-large.tif", "description": "Tên file sẽ upload" },
-                { "key": "lang", "value": "{{lang}}" }
+                {
+                  "key": "fileName",
+                  "value": "sentinel2-large.tif",
+                  "description": "Tên file sẽ upload"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
               ]
             },
             "description": "Tạo presigned PUT URL để client upload file GeoTIFF lớn (>500MB) trực tiếp lên MinIO — tránh qua Node.js server.\n\nQuy trình:\n1. Gọi API này → nhận `uploadUrl` + `objectKey` + `uuid`\n2. Client PUT file thẳng lên `uploadUrl` (không cần header auth)\n3. Sau khi PUT thành công → gọi `POST /remote-sensing/images` với metadata + `objectKey`\n\nURL hết hạn sau 60 phút (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS)."
@@ -3516,28 +3579,105 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images?page=1&limit=20&lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images"
+              ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" },
-                { "key": "lang", "value": "{{lang}}" },
-                { "key": "satellite", "value": "sentinel2", "description": "Lọc theo vệ tinh", "disabled": true },
-                { "key": "image_type", "value": "multispectral", "description": "Lọc theo loại ảnh", "disabled": true },
-                { "key": "status", "value": "completed", "description": "pending | processing | completed | failed", "disabled": true },
-                { "key": "is_public", "value": "true", "description": "true/false", "disabled": true },
-                { "key": "province_code", "value": "62", "description": "Mã tỉnh Kon Tum", "disabled": true },
-                { "key": "year", "value": "2024", "description": "Lọc theo năm chụp", "disabled": true },
-                { "key": "date_from", "value": "2024-01-01", "description": "Từ ngày", "disabled": true },
-                { "key": "date_to", "value": "2024-12-31", "description": "Đến ngày", "disabled": true },
-                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "description": "Spatial filter bbox", "disabled": true },
-                { "key": "keyword", "value": "sentinel", "description": "Tìm theo tên/mô tả", "disabled": true },
-                { "key": "sort_by", "value": "acquisition_date", "description": "acquisition_date | created_at | name | cloud_percent", "disabled": true },
-                { "key": "sort_order", "value": "desc", "description": "asc | desc", "disabled": true }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "satellite",
+                  "value": "sentinel2",
+                  "description": "Lọc theo vệ tinh",
+                  "disabled": true
+                },
+                {
+                  "key": "image_type",
+                  "value": "multispectral",
+                  "description": "Lọc theo loại ảnh",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "pending | processing | completed | failed",
+                  "disabled": true
+                },
+                {
+                  "key": "is_public",
+                  "value": "true",
+                  "description": "true/false",
+                  "disabled": true
+                },
+                {
+                  "key": "province_code",
+                  "value": "62",
+                  "description": "Mã tỉnh Kon Tum",
+                  "disabled": true
+                },
+                {
+                  "key": "year",
+                  "value": "2024",
+                  "description": "Lọc theo năm chụp",
+                  "disabled": true
+                },
+                {
+                  "key": "date_from",
+                  "value": "2024-01-01",
+                  "description": "Từ ngày",
+                  "disabled": true
+                },
+                {
+                  "key": "date_to",
+                  "value": "2024-12-31",
+                  "description": "Đến ngày",
+                  "disabled": true
+                },
+                {
+                  "key": "bbox",
+                  "value": "107.0,13.8,108.6,15.5",
+                  "description": "Spatial filter bbox",
+                  "disabled": true
+                },
+                {
+                  "key": "keyword",
+                  "value": "sentinel",
+                  "description": "Tìm theo tên/mô tả",
+                  "disabled": true
+                },
+                {
+                  "key": "sort_by",
+                  "value": "acquisition_date",
+                  "description": "acquisition_date | created_at | name | cloud_percent",
+                  "disabled": true
+                },
+                {
+                  "key": "sort_order",
+                  "value": "desc",
+                  "description": "asc | desc",
+                  "disabled": true
+                }
               ]
             },
             "description": "Lấy danh sách ảnh vệ tinh có phân trang và bộ lọc.\n\nKhách (citizen/anonymous) chỉ thấy ảnh `is_public = true`.\nAdmin/cán bộ thấy tất cả.\n\nResponse trả về `thumbnail_object_key` trong list (không attach presigned URL để tránh N+1).\nGọi API detail để lấy presigned thumbnail URL."
@@ -3548,13 +3688,27 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Lấy thông tin đầy đủ của 1 ảnh: metadata + danh sách files + statistics + presigned thumbnail URL.\n\nChấp nhận cả `id` (số) lẫn `uuid` (chuỗi 36 ký tự) ở path.\n\nNếu ảnh `is_public = false` → phải đăng nhập và có quyền phù hợp."
           }
@@ -3564,8 +3718,14 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -3573,9 +3733,20 @@
             },
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Cập nhật metadata ảnh vệ tinh (không upload lại file).\n\nQuyền cần: `remote_sensing.update`\nChỉ owner hoặc admin mới được sửa.\n\nCó thể truyền thêm `expectedUpdatedAt` (lấy từ `updated_at` của response detail) để bật optimistic locking — tránh ghi đè đồng thời.\n\nField `status` dùng để đánh dấu thủ công khi không dùng processing pipeline."
           }
@@ -3585,13 +3756,28 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/cog-url?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "cog-url"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "cog-url"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Lấy presigned URL trỏ đến file COG (Cloud Optimized GeoTIFF) để load lên bản đồ WebGIS.\n\nƯu tiên file có `file_role = cog`, fallback về `primary`.\nURL hết hạn sau 15 phút (MINIO_PRESIGNED_EXPIRE_SECONDS).\n\nResponse kèm `webgisHint` — code mẫu cho OpenLayers, Mapbox GL, Leaflet:\n```js\n// OpenLayers\nnew GeoTIFF({ sources: [{ url: cogUrl }] })\n// Mapbox GL\n{ type: 'raster', tiles: [cogUrl] }\n```"
           }
@@ -3601,15 +3787,33 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/download?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "download"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "download"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" },
-                { "key": "fileId", "value": "{{remoteFileId}}", "description": "ID file cụ thể (tuỳ chọn — mặc định lấy COG hoặc primary)", "disabled": true }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "fileId",
+                  "value": "{{remoteFileId}}",
+                  "description": "ID file cụ thể (tuỳ chọn — mặc định lấy COG hoặc primary)",
+                  "disabled": true
+                }
               ]
             },
             "description": "Tạo presigned download URL để tải file GeoTIFF về máy.\n\nQuyền cần: `remote_sensing.download`\nVới ảnh public: người dùng đã đăng nhập đều tải được.\nVới ảnh private: cần permission `remote_sensing.download` trong role.\n\nGhi log download (image_id, file_id, user_id, ip, user_agent, expires_at).\nURL hết hạn sau 15 phút."
@@ -3620,13 +3824,28 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/statistics?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "statistics"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "statistics"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Lấy thống kê pixel từng band của ảnh GeoTIFF (min, max, mean, std, histogram).\n\nDữ liệu được tính bởi processing pipeline sau khi upload.\nNếu ảnh chưa qua xử lý (status = pending/processing) → trả mảng rỗng."
           }
@@ -3636,8 +3855,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -3645,9 +3870,21 @@
             },
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/process?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "process"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "process"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Trigger thủ công processing job cho ảnh.\n\nQuyền cần: role `system_admin` hoặc `so_nnmt`\n\nJob types:\n- `full_pipeline`: convert COG + tính statistics + tạo thumbnail (mặc định)\n- `cog_only`: chỉ convert sang COG\n- `stats_only`: chỉ tính statistics\n- `thumbnail_only`: chỉ tạo thumbnail\n\nDùng khi ảnh bị stuck ở status `pending` hoặc cần re-process."
           }
@@ -3655,22 +3892,57 @@
         {
           "name": "10. Layers WebGIS (public)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/layers?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "layers"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "layers"
+              ],
               "query": [
-                { "key": "lang", "value": "{{lang}}" },
-                { "key": "satellite", "value": "sentinel2", "description": "Lọc theo vệ tinh", "disabled": true },
-                { "key": "image_type", "value": "multispectral", "disabled": true },
-                { "key": "province_code", "value": "62", "disabled": true },
-                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "description": "Spatial filter", "disabled": true },
-                { "key": "limit", "value": "50", "disabled": true }
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "satellite",
+                  "value": "sentinel2",
+                  "description": "Lọc theo vệ tinh",
+                  "disabled": true
+                },
+                {
+                  "key": "image_type",
+                  "value": "multispectral",
+                  "disabled": true
+                },
+                {
+                  "key": "province_code",
+                  "value": "62",
+                  "disabled": true
+                },
+                {
+                  "key": "bbox",
+                  "value": "107.0,13.8,108.6,15.5",
+                  "description": "Spatial filter",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "disabled": true
+                }
               ]
             },
             "description": "Lấy danh sách layers ảnh vệ tinh đã hoàn thành (status=completed, is_public=true) kèm presigned COG URL và thumbnail URL để hiển thị trên bản đồ WebGIS.\n\nKhông cần đăng nhập.\n\nResponse gồm:\n- `cogUrl`: presigned URL trỏ COG file (hết hạn 15 phút)\n- `thumbnailUrl`: presigned URL thumbnail\n- `bbox`: bounding box GeoJSON\n- `expiresAt`: thời điểm URL hết hạn\n\nFrontend dùng `cogUrl` với GeoTIFF.js (OpenLayers) hoặc raster source (Mapbox GL)."
@@ -3681,13 +3953,27 @@
           "request": {
             "method": "DELETE",
             "header": [
-              { "key": "Accept-Language", "value": "{{lang}}" }
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Soft delete ảnh vệ tinh — đánh dấu `deleted_at`, không xóa file MinIO.\n\nQuyền cần: `remote_sensing.delete`\nChỉ owner hoặc `system_admin` mới được xóa.\n\nĐể xóa cả file trên MinIO (hard delete), thêm query param:\n`?hardDelete=true` — chỉ dùng khi chắc chắn không cần phục hồi."
           }
@@ -3703,16 +3989,30 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Connection", "value": "Upgrade" },
-              { "key": "Upgrade", "value": "websocket" }
+              {
+                "key": "Connection",
+                "value": "Upgrade"
+              },
+              {
+                "key": "Upgrade",
+                "value": "websocket"
+              }
             ],
             "url": {
               "raw": "wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}",
               "protocol": "wss",
-              "host": ["apikontum.tourismpj.pro.vn"],
-              "path": ["ws"],
+              "host": [
+                "apikontum.tourismpj.pro.vn"
+              ],
+              "path": [
+                "ws"
+              ],
               "query": [
-                { "key": "token", "value": "{{accessToken}}", "description": "JWT access token — lấy từ Login response" }
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "description": "JWT access token — lấy từ Login response"
+                }
               ]
             },
             "description": "Kết nối WebSocket đến server.\n\nServer gửi ngay event `connected` sau khi kết nối:\n```json\n{\n  \"event\": \"connected\",\n  \"data\": { \"userId\": \"1\", \"message\": \"WebSocket connected\" },\n  \"timestamp\": \"2026-06-27T10:00:00.000Z\"\n}\n```\n\nNếu token hết hạn hoặc sai → server trả HTTP 401 và đóng kết nối.\nNếu không truyền token → kết nối vẫn thành công nhưng userId = null (anonymous)."
@@ -3726,10 +4026,17 @@
             "url": {
               "raw": "wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}",
               "protocol": "wss",
-              "host": ["apikontum.tourismpj.pro.vn"],
-              "path": ["ws"],
+              "host": [
+                "apikontum.tourismpj.pro.vn"
+              ],
+              "path": [
+                "ws"
+              ],
               "query": [
-                { "key": "token", "value": "{{accessToken}}" }
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
               ]
             },
             "description": "Sau khi kết nối, gửi message subscribe để nhận event theo imageId.\n\nMessage gửi lên:\n```json\n{\n  \"action\": \"subscribe\",\n  \"channels\": [\"remote_sensing:{{remoteImageId}}\"]\n}\n```\n\nServer xác nhận:\n```json\n{\n  \"event\": \"subscribed\",\n  \"data\": { \"channels\": [\"remote_sensing:1\"] }\n}\n```\n\nSau đó chờ các event:\n- `remote_sensing:statistics_ready` — band stats đã tính xong\n- `remote_sensing:job_completed` — pipeline hoàn tất\n- `remote_sensing:job_failed` — thất bại\n\nCó thể subscribe nhiều channel cùng lúc:\n```json\n{\n  \"action\": \"subscribe\",\n  \"channels\": [\"remote_sensing:1\", \"remote_sensing:2\"]\n}\n```\n\n──────────────────────────────────────────\nTEST BẰNG WSCAT:\n```bash\nnpm i -g wscat\nwscat -c \"wss://apikontum.tourismpj.pro.vn/ws?token=<accessToken>\"\n# Sau khi kết nối, paste:\n{\"action\":\"subscribe\",\"channels\":[\"remote_sensing:1\"]}\n```"
@@ -3742,9 +4049,23 @@
             "header": [],
             "url": {
               "raw": "https://apikontum.tourismpj.pro.vn/api/v1/remote-sensing/images/{{remoteImageId}}/statistics?lang={{lang}}",
-              "host": ["apikontum.tourismpj.pro.vn"],
-              "path": ["api", "v1", "remote-sensing", "images", "{{remoteImageId}}", "statistics"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "apikontum.tourismpj.pro.vn"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "statistics"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy thống kê khi không dùng WS.\n\nKhi WebSocket gửi event `remote_sensing:statistics_ready`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:statistics_ready\",\n  \"data\": {\n    \"imageId\": 1,\n    \"bandCount\": 4,\n    \"statistics\": [\n      { \"bandIndex\": 1, \"min\": 0, \"max\": 5228, \"mean\": 634.25, \"std\": 607.63 },\n      { \"bandIndex\": 2, \"min\": 0, \"max\": 4368, \"mean\": 609.86, \"std\": 491.71 },\n      { \"bandIndex\": 3, \"min\": 0, \"max\": 4248, \"mean\": 455.06, \"std\": 371.44 },\n      { \"bandIndex\": 4, \"min\": 0, \"max\": 7665, \"mean\": 2120.44, \"std\": 1549.66 }\n    ]\n  },\n  \"timestamp\": \"2026-06-27T10:40:06.000Z\"\n}\n```\n\nBand mapping Sentinel-2 (B4+B3+B2+B8 export từ GEE):\n- Band 1 → B4 (Red)\n- Band 2 → B3 (Green)\n- Band 3 → B2 (Blue)\n- Band 4 → B8 (NIR — Near Infrared)\n\nNDVI = (NIR - Red) / (NIR + Red) ≈ (2120 - 634) / (2120 + 634) ≈ 0.54\n→ Mật độ thực vật trung bình đến dày — đúng với địa hình rừng Kon Tum."
           }
@@ -3756,9 +4077,22 @@
             "header": [],
             "url": {
               "raw": "https://apikontum.tourismpj.pro.vn/api/v1/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
-              "host": ["apikontum.tourismpj.pro.vn"],
-              "path": ["api", "v1", "remote-sensing", "images", "{{remoteImageId}}"],
-              "query": [{ "key": "lang", "value": "{{lang}}" }]
+              "host": [
+                "apikontum.tourismpj.pro.vn"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
             },
             "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy chi tiết ảnh sau khi nhận event job_completed.\n\nKhi WebSocket gửi event `remote_sensing:job_completed`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:job_completed\",\n  \"data\": {\n    \"jobId\": 1,\n    \"imageId\": 1,\n    \"imageName\": \"Sentinel-2 Kon Tum 2024\",\n    \"status\": \"completed\",\n    \"bandCount\": 4,\n    \"processedAt\": \"2026-06-27T10:40:07.000Z\"\n  },\n  \"timestamp\": \"2026-06-27T10:40:07.000Z\"\n}\n```\n\nSau khi nhận event này, frontend nên:\n1. Gọi `GET /remote-sensing/images/:id` để lấy thumbnailUrl mới\n2. Gọi `GET /remote-sensing/images/:id/cog-url` để lấy COG URL hiển thị bản đồ\n3. Enable nút \"Xem trên bản đồ\""
           }
