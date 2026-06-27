@@ -162,15 +162,29 @@ const processJob = async (job) => {
         await repo.updateJobStatus(job.id, 'processing', { progress: 60 });
 
         // ── Bước 4: Tính thống kê band ────────────────────────────────────────
+        let statsArr = [];
         if (job.job_type === 'calc_statistics' || job.job_type === 'full_pipeline') {
             try {
                 console.info(t('worker_stats_calculating', WORKER_LANG));
-                const statsArr = await calcStatistics(inputBuffer);
+                statsArr = await calcStatistics(inputBuffer);
 
                 for (const s of statsArr) {
                     await repo.upsertStatistics(job.image_id, primaryFile.id, s);
                 }
                 console.info(t('worker_stats_calculated', WORKER_LANG, { count: statsArr.length }));
+
+                // Notify thống kê xong ngay (không chờ job hoàn tất)
+                ws.notifyChannel(`remote_sensing:${job.image_id}`, 'remote_sensing:statistics_ready', {
+                    imageId:    job.image_id,
+                    bandCount:  statsArr.length,
+                    statistics: statsArr.map((s) => ({
+                        bandIndex: s.band_index,
+                        min:       s.min,
+                        max:       s.max,
+                        mean:      s.mean,
+                        std:       s.std,
+                    })),
+                });
             } catch (statsErr) {
                 console.warn(t('worker_stats_failed', WORKER_LANG), statsErr.message);
             }
@@ -186,18 +200,18 @@ const processJob = async (job) => {
         await repo.updateImage(job.image_id, { status: 'completed' }, null);
 
         // Thông báo realtime cho user đang chờ
+        const completedPayload = {
+            jobId:       job.id,
+            imageId:     job.image_id,
+            imageName:   job.image_name,
+            status:      'completed',
+            bandCount:   statsArr.length,
+            processedAt: new Date().toISOString(),
+        };
         if (job.created_by) {
-            ws.notifyUser(job.created_by, 'remote_sensing:job_completed', {
-                jobId:   job.id,
-                imageId: job.image_id,
-                status:  'completed',
-            });
+            ws.notifyUser(job.created_by, 'remote_sensing:job_completed', completedPayload);
         }
-        ws.notifyChannel(`remote_sensing:${job.image_id}`, 'remote_sensing:job_completed', {
-            jobId:   job.id,
-            imageId: job.image_id,
-            status:  'completed',
-        });
+        ws.notifyChannel(`remote_sensing:${job.image_id}`, 'remote_sensing:job_completed', completedPayload);
 
         console.info(t('worker_job_completed', WORKER_LANG, { id: job.id }));
 
