@@ -3500,11 +3500,12 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/upload-url?fileName=sentinel2-large.tif",
+              "raw": "{{baseUrl}}/remote-sensing/upload-url?fileName=sentinel2-large.tif&lang={{lang}}",
               "host": ["{{baseUrl}}"],
               "path": ["remote-sensing", "upload-url"],
               "query": [
-                { "key": "fileName", "value": "sentinel2-large.tif", "description": "Tên file sẽ upload" }
+                { "key": "fileName", "value": "sentinel2-large.tif", "description": "Tên file sẽ upload" },
+                { "key": "lang", "value": "{{lang}}" }
               ]
             },
             "description": "Tạo presigned PUT URL để client upload file GeoTIFF lớn (>500MB) trực tiếp lên MinIO — tránh qua Node.js server.\n\nQuy trình:\n1. Gọi API này → nhận `uploadUrl` + `objectKey` + `uuid`\n2. Client PUT file thẳng lên `uploadUrl` (không cần header auth)\n3. Sau khi PUT thành công → gọi `POST /remote-sensing/images` với metadata + `objectKey`\n\nURL hết hạn sau 60 phút (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS)."
@@ -3518,12 +3519,13 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images?page=1&limit=20&satellite=sentinel2&is_public=true",
+              "raw": "{{baseUrl}}/remote-sensing/images?page=1&limit=20&lang={{lang}}",
               "host": ["{{baseUrl}}"],
               "path": ["remote-sensing", "images"],
               "query": [
                 { "key": "page", "value": "1" },
                 { "key": "limit", "value": "20" },
+                { "key": "lang", "value": "{{lang}}" },
                 { "key": "satellite", "value": "sentinel2", "description": "Lọc theo vệ tinh", "disabled": true },
                 { "key": "image_type", "value": "multispectral", "description": "Lọc theo loại ảnh", "disabled": true },
                 { "key": "status", "value": "completed", "description": "pending | processing | completed | failed", "disabled": true },
@@ -3549,9 +3551,10 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
               "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}"]
+              "path": ["remote-sensing", "images", "{{remoteImageId}}"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
             },
             "description": "Lấy thông tin đầy đủ của 1 ảnh: metadata + danh sách files + statistics + presigned thumbnail URL.\n\nChấp nhận cả `id` (số) lẫn `uuid` (chuỗi 36 ký tự) ở path.\n\nNếu ảnh `is_public = false` → phải đăng nhập và có quyền phù hợp."
           }
@@ -3569,9 +3572,10 @@
               "raw": "{\n  \"name\": \"Sentinel-2 Kon Tum 2024 (đã cập nhật)\",\n  \"description\": \"Cập nhật mô tả ảnh\",\n  \"cloud_percent\": 3.5,\n  \"is_public\": true,\n  \"is_featured\": false,\n  \"status\": \"completed\"\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
               "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}"]
+              "path": ["remote-sensing", "images", "{{remoteImageId}}"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
             },
             "description": "Cập nhật metadata ảnh vệ tinh (không upload lại file).\n\nQuyền cần: `remote_sensing.update`\nChỉ owner hoặc admin mới được sửa.\n\nCó thể truyền thêm `expectedUpdatedAt` (lấy từ `updated_at` của response detail) để bật optimistic locking — tránh ghi đè đồng thời.\n\nField `status` dùng để đánh dấu thủ công khi không dùng processing pipeline."
           }
@@ -3584,9 +3588,10 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/cog-url",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/cog-url?lang={{lang}}",
               "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "cog-url"]
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "cog-url"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
             },
             "description": "Lấy presigned URL trỏ đến file COG (Cloud Optimized GeoTIFF) để load lên bản đồ WebGIS.\n\nƯu tiên file có `file_role = cog`, fallback về `primary`.\nURL hết hạn sau 15 phút (MINIO_PRESIGNED_EXPIRE_SECONDS).\n\nResponse kèm `webgisHint` — code mẫu cho OpenLayers, Mapbox GL, Leaflet:\n```js\n// OpenLayers\nnew GeoTIFF({ sources: [{ url: cogUrl }] })\n// Mapbox GL\n{ type: 'raster', tiles: [cogUrl] }\n```"
           }
@@ -3599,10 +3604,11 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/download",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/download?lang={{lang}}",
               "host": ["{{baseUrl}}"],
               "path": ["remote-sensing", "images", "{{remoteImageId}}", "download"],
               "query": [
+                { "key": "lang", "value": "{{lang}}" },
                 { "key": "fileId", "value": "{{remoteFileId}}", "description": "ID file cụ thể (tuỳ chọn — mặc định lấy COG hoặc primary)", "disabled": true }
               ]
             },
@@ -3617,9 +3623,10 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/statistics",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/statistics?lang={{lang}}",
               "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "statistics"]
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "statistics"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
             },
             "description": "Lấy thống kê pixel từng band của ảnh GeoTIFF (min, max, mean, std, histogram).\n\nDữ liệu được tính bởi processing pipeline sau khi upload.\nNếu ảnh chưa qua xử lý (status = pending/processing) → trả mảng rỗng."
           }
@@ -3637,9 +3644,10 @@
               "raw": "{\n  \"job_type\": \"full_pipeline\",\n  \"priority\": 5\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/process",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/process?lang={{lang}}",
               "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}", "process"]
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "process"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
             },
             "description": "Trigger thủ công processing job cho ảnh.\n\nQuyền cần: role `system_admin` hoặc `so_nnmt`\n\nJob types:\n- `full_pipeline`: convert COG + tính statistics + tạo thumbnail (mặc định)\n- `cog_only`: chỉ convert sang COG\n- `stats_only`: chỉ tính statistics\n- `thumbnail_only`: chỉ tạo thumbnail\n\nDùng khi ảnh bị stuck ở status `pending` hoặc cần re-process."
           }
@@ -3653,10 +3661,11 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/layers",
+              "raw": "{{baseUrl}}/remote-sensing/layers?lang={{lang}}",
               "host": ["{{baseUrl}}"],
               "path": ["remote-sensing", "layers"],
               "query": [
+                { "key": "lang", "value": "{{lang}}" },
                 { "key": "satellite", "value": "sentinel2", "description": "Lọc theo vệ tinh", "disabled": true },
                 { "key": "image_type", "value": "multispectral", "disabled": true },
                 { "key": "province_code", "value": "62", "disabled": true },
@@ -3675,11 +3684,83 @@
               { "key": "Accept-Language", "value": "{{lang}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
               "host": ["{{baseUrl}}"],
-              "path": ["remote-sensing", "images", "{{remoteImageId}}"]
+              "path": ["remote-sensing", "images", "{{remoteImageId}}"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
             },
             "description": "Soft delete ảnh vệ tinh — đánh dấu `deleted_at`, không xóa file MinIO.\n\nQuyền cần: `remote_sensing.delete`\nChỉ owner hoặc `system_admin` mới được xóa.\n\nĐể xóa cả file trên MinIO (hard delete), thêm query param:\n`?hardDelete=true` — chỉ dùng khi chắc chắn không cần phục hồi."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔌 WebSocket (Realtime)",
+      "description": "Kết nối WebSocket để nhận thông báo realtime khi xử lý ảnh vệ tinh hoàn tất.\n\nEndpoint: wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}\n\n──────────────────────────────────────────\nLUỒNG SỬ DỤNG:\n1. Đăng nhập → lấy accessToken\n2. Kết nối WebSocket với token\n3. Subscribe channel theo imageId vừa upload\n4. Nhận event khi processing xong\n──────────────────────────────────────────\n\nCÁC EVENT SERVER GỬI XUỐNG:\n\n• connected\n  → Xác nhận kết nối thành công\n  data: { userId, message }\n\n• subscribed\n  → Xác nhận đã subscribe channel thành công\n  data: { channels: ['remote_sensing:1'] }\n\n• remote_sensing:statistics_ready  (~60s sau upload)\n  → Tính xong thống kê band, hiển thị bảng ngay\n  data: { imageId, bandCount, statistics: [{ bandIndex, min, max, mean, std }] }\n\n• remote_sensing:job_completed  (sau statistics_ready)\n  → Pipeline xong hoàn toàn, COG sẵn sàng cho WebGIS\n  data: { jobId, imageId, imageName, bandCount, processedAt }\n\n• remote_sensing:job_failed  (nếu lỗi)\n  → Job thất bại sau hết số lần retry\n  data: { jobId, imageId, status, errorMessage }\n\n──────────────────────────────────────────\nLƯU Ý POSTMAN:\nPostman hỗ trợ WebSocket qua tab \"New > WebSocket Request\".\nBruno hiện chưa hỗ trợ WebSocket — dùng Postman hoặc wscat để test.\n\nTest bằng wscat (npm i -g wscat):\n  wscat -c \"wss://apikontum.tourismpj.pro.vn/ws?token=<accessToken>\"",
+      "item": [
+        {
+          "name": "1. Kết nối WebSocket",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Connection", "value": "Upgrade" },
+              { "key": "Upgrade", "value": "websocket" }
+            ],
+            "url": {
+              "raw": "wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}",
+              "protocol": "wss",
+              "host": ["apikontum.tourismpj.pro.vn"],
+              "path": ["ws"],
+              "query": [
+                { "key": "token", "value": "{{accessToken}}", "description": "JWT access token — lấy từ Login response" }
+              ]
+            },
+            "description": "Kết nối WebSocket đến server.\n\nServer gửi ngay event `connected` sau khi kết nối:\n```json\n{\n  \"event\": \"connected\",\n  \"data\": { \"userId\": \"1\", \"message\": \"WebSocket connected\" },\n  \"timestamp\": \"2026-06-27T10:00:00.000Z\"\n}\n```\n\nNếu token hết hạn hoặc sai → server trả HTTP 401 và đóng kết nối.\nNếu không truyền token → kết nối vẫn thành công nhưng userId = null (anonymous)."
+          }
+        },
+        {
+          "name": "2. Subscribe channel ảnh viễn thám",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}",
+              "protocol": "wss",
+              "host": ["apikontum.tourismpj.pro.vn"],
+              "path": ["ws"],
+              "query": [
+                { "key": "token", "value": "{{accessToken}}" }
+              ]
+            },
+            "description": "Sau khi kết nối, gửi message subscribe để nhận event theo imageId.\n\nMessage gửi lên:\n```json\n{\n  \"action\": \"subscribe\",\n  \"channels\": [\"remote_sensing:{{remoteImageId}}\"]\n}\n```\n\nServer xác nhận:\n```json\n{\n  \"event\": \"subscribed\",\n  \"data\": { \"channels\": [\"remote_sensing:1\"] }\n}\n```\n\nSau đó chờ các event:\n- `remote_sensing:statistics_ready` — band stats đã tính xong\n- `remote_sensing:job_completed` — pipeline hoàn tất\n- `remote_sensing:job_failed` — thất bại\n\nCó thể subscribe nhiều channel cùng lúc:\n```json\n{\n  \"action\": \"subscribe\",\n  \"channels\": [\"remote_sensing:1\", \"remote_sensing:2\"]\n}\n```\n\n──────────────────────────────────────────\nTEST BẰNG WSCAT:\n```bash\nnpm i -g wscat\nwscat -c \"wss://apikontum.tourismpj.pro.vn/ws?token=<accessToken>\"\n# Sau khi kết nối, paste:\n{\"action\":\"subscribe\",\"channels\":[\"remote_sensing:1\"]}\n```"
+          }
+        },
+        {
+          "name": "3. [Mẫu] Event statistics_ready nhận được",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://apikontum.tourismpj.pro.vn/api/v1/remote-sensing/images/{{remoteImageId}}/statistics?lang={{lang}}",
+              "host": ["apikontum.tourismpj.pro.vn"],
+              "path": ["api", "v1", "remote-sensing", "images", "{{remoteImageId}}", "statistics"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
+            },
+            "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy thống kê khi không dùng WS.\n\nKhi WebSocket gửi event `remote_sensing:statistics_ready`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:statistics_ready\",\n  \"data\": {\n    \"imageId\": 1,\n    \"bandCount\": 4,\n    \"statistics\": [\n      { \"bandIndex\": 1, \"min\": 0, \"max\": 5228, \"mean\": 634.25, \"std\": 607.63 },\n      { \"bandIndex\": 2, \"min\": 0, \"max\": 4368, \"mean\": 609.86, \"std\": 491.71 },\n      { \"bandIndex\": 3, \"min\": 0, \"max\": 4248, \"mean\": 455.06, \"std\": 371.44 },\n      { \"bandIndex\": 4, \"min\": 0, \"max\": 7665, \"mean\": 2120.44, \"std\": 1549.66 }\n    ]\n  },\n  \"timestamp\": \"2026-06-27T10:40:06.000Z\"\n}\n```\n\nBand mapping Sentinel-2 (B4+B3+B2+B8 export từ GEE):\n- Band 1 → B4 (Red)\n- Band 2 → B3 (Green)\n- Band 3 → B2 (Blue)\n- Band 4 → B8 (NIR — Near Infrared)\n\nNDVI = (NIR - Red) / (NIR + Red) ≈ (2120 - 634) / (2120 + 634) ≈ 0.54\n→ Mật độ thực vật trung bình đến dày — đúng với địa hình rừng Kon Tum."
+          }
+        },
+        {
+          "name": "4. [Mẫu] Event job_completed nhận được",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://apikontum.tourismpj.pro.vn/api/v1/remote-sensing/images/{{remoteImageId}}?lang={{lang}}",
+              "host": ["apikontum.tourismpj.pro.vn"],
+              "path": ["api", "v1", "remote-sensing", "images", "{{remoteImageId}}"],
+              "query": [{ "key": "lang", "value": "{{lang}}" }]
+            },
+            "description": "Đây KHÔNG phải WebSocket request — đây là HTTP fallback để lấy chi tiết ảnh sau khi nhận event job_completed.\n\nKhi WebSocket gửi event `remote_sensing:job_completed`, payload có dạng:\n```json\n{\n  \"event\": \"remote_sensing:job_completed\",\n  \"data\": {\n    \"jobId\": 1,\n    \"imageId\": 1,\n    \"imageName\": \"Sentinel-2 Kon Tum 2024\",\n    \"status\": \"completed\",\n    \"bandCount\": 4,\n    \"processedAt\": \"2026-06-27T10:40:07.000Z\"\n  },\n  \"timestamp\": \"2026-06-27T10:40:07.000Z\"\n}\n```\n\nSau khi nhận event này, frontend nên:\n1. Gọi `GET /remote-sensing/images/:id` để lấy thumbnailUrl mới\n2. Gọi `GET /remote-sensing/images/:id/cog-url` để lấy COG URL hiển thị bản đồ\n3. Enable nút \"Xem trên bản đồ\""
           }
         }
       ]
