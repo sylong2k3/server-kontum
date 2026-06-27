@@ -224,22 +224,24 @@ const deleteImage = async (idOrUuid, { hardDelete = false, user, lang }) => {
         throw new Api403Error(t('remote_sensing_no_delete_permission', lang));
     }
 
-    // Hard delete: xóa objects trên MinIO
-    if (hardDelete) {
-        const fileRecords = await repo.getObjectKeysByImageId(existing.id);
-        const objectKeys  = fileRecords.map((f) => f.object_key);
-        if (objectKeys.length > 0) {
-            try {
-                await minio.removeObjects(objectKeys, minio.BUCKET_REMOTE_SENSING);
-                console.info(t('remote_sensing_minio_objects_deleted', lang, { count: objectKeys.length }));
-            } catch (err) {
-                console.error(t('remote_sensing_minio_delete_failed', lang), err.message);
-            }
+    // Lấy danh sách object keys trước khi soft delete (chỉ active files)
+    const fileRecords = hardDelete ? await repo.getObjectKeysByImageId(existing.id) : [];
+
+    // Soft delete DB record trước — đảm bảo DB nhất quán dù MinIO xóa lỗi
+    const deleted = await repo.softDeleteImage(existing.id, user.id);
+
+    // Hard delete: xóa objects trên MinIO sau khi DB đã commit
+    if (hardDelete && fileRecords.length > 0) {
+        const objectKeys = fileRecords.map((f) => f.object_key);
+        try {
+            await minio.removeObjects(objectKeys, minio.BUCKET_REMOTE_SENSING);
+            console.info(t('remote_sensing_minio_objects_deleted', lang, { count: objectKeys.length }));
+        } catch (err) {
+            console.error(t('remote_sensing_minio_delete_failed', lang), err.message);
         }
     }
 
-    // Soft delete DB record
-    return repo.softDeleteImage(existing.id, user.id);
+    return deleted;
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -354,22 +356,16 @@ const getLayersForWebGIS = async (filters, lang) => {
             let cogUrl       = null;
             let thumbnailUrl = null;
 
-            if (row.cog_object_key) {
-                try {
-                    const { url } = await minio.getPresignedDownloadUrl(
-                        row.cog_object_key, minio.BUCKET_REMOTE_SENSING, expireSeconds,
-                    );
-                    cogUrl = url;
-                } catch { /* ignore */ }
-            }
-            if (row.thumbnail_object_key) {
-                try {
-                    const { url } = await minio.getPresignedDownloadUrl(
-                        row.thumbnail_object_key, minio.BUCKET_REMOTE_SENSING, expireSeconds,
-                    );
-                    thumbnailUrl = url;
-                } catch { /* ignore */ }
-            }
+            const [cogResult, thumbResult] = await Promise.allSettled([
+                row.cog_object_key
+                    ? minio.getPresignedDownloadUrl(row.cog_object_key, minio.BUCKET_REMOTE_SENSING, expireSeconds)
+                    : Promise.resolve(null),
+                row.thumbnail_object_key
+                    ? minio.getPresignedDownloadUrl(row.thumbnail_object_key, minio.BUCKET_REMOTE_SENSING, expireSeconds)
+                    : Promise.resolve(null),
+            ]);
+            if (cogResult.status === 'fulfilled' && cogResult.value) { cogUrl = cogResult.value.url; }
+            if (thumbResult.status === 'fulfilled' && thumbResult.value) { thumbnailUrl = thumbResult.value.url; }
 
             return {
                 id:             row.id,
