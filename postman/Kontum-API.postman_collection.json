@@ -29,7 +29,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3005/api/v1",
+      "value": "https://apikontum.tourismpj.pro.vn/api/v1",
       "type": "string"
     },
     {
@@ -3429,6 +3429,257 @@
               "path": ["map-data", "layer"]
             },
             "description": "Request kiểm thử bảo mật — truyền key giả để xác nhận server từ chối đúng.\n\nKỳ vọng: 401 MAP_API_INVALID_KEY\n\nCơ chế xác thực:\n1. Server đọc 12 ký tự đầu của key (prefix) để tra cứu nhanh trong DB\n2. Nếu tìm thấy prefix → so sánh sha256(key_gửi) với key_hash lưu trong DB\n   (dùng crypto.timingSafeEqual để chống timing attack)\n3. Không khớp → 401\n4. Khớp hash → kiểm tra is_active, expires_at, layer_is_active\n\nKhông bao giờ trả thông tin gợi ý key đúng hay sai từng phần."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🛰 Viễn Thám / Ảnh Vệ Tinh (EP-06)",
+      "description": "Quản lý ảnh vệ tinh GeoTIFF: upload, xem, download, xử lý, WebGIS layers.\n\nLưu ý:\n- Upload file dùng multipart/form-data (field `raster_file` bắt buộc)\n- Script test tự lưu `remoteImageId` và `remoteFileId` sau khi upload\n- Endpoint download trả về presigned URL (hết hạn sau 15 phút)\n- Endpoint `/layers` không cần đăng nhập (public)\n\nBase URL test: https://apikontum.tourismpj.pro.vn/api/v1",
+      "item": [
+        {
+          "name": "1. Upload ảnh vệ tinh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
+                  "if (json && json.data && json.data.image) {",
+                  "  const id = String(json.data.image.id);",
+                  "  if (typeof pm !== 'undefined') pm.collectionVariables.set('remoteImageId', id);",
+                  "  if (typeof bru !== 'undefined') bru.setVar('remoteImageId', id);",
+                  "}",
+                  "if (json && json.data && json.data.file) {",
+                  "  const fid = String(json.data.file.id);",
+                  "  if (typeof pm !== 'undefined') pm.collectionVariables.set('remoteFileId', fid);",
+                  "  if (typeof bru !== 'undefined') bru.setVar('remoteFileId', fid);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "raster_file", "type": "file", "src": [], "description": "File GeoTIFF (.tif/.tiff) — bắt buộc" },
+                { "key": "thumbnail_file", "type": "file", "src": [], "description": "Ảnh thumbnail PNG/JPG (tuỳ chọn)" },
+                { "key": "name", "value": "Sentinel-2 Kon Tum 2024", "type": "text" },
+                { "key": "description", "value": "Ảnh vệ tinh Sentinel-2 tỉnh Kon Tum tháng 1/2024", "type": "text" },
+                { "key": "satellite", "value": "sentinel2", "type": "text", "description": "Enum: sentinel1 | sentinel2 | landsat8 | landsat9 | modis | vnredsat | other" },
+                { "key": "image_type", "value": "multispectral", "type": "text", "description": "Enum: rgb | multispectral | sar | thermal | ndvi | other" },
+                { "key": "acquisition_date", "value": "2024-01-15", "type": "text" },
+                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "type": "text", "description": "minLng,minLat,maxLng,maxLat (WGS84)" },
+                { "key": "province_code", "value": "62", "type": "text" },
+                { "key": "cloud_percent", "value": "5.2", "type": "text" },
+                { "key": "resolution_m", "value": "10", "type": "text" },
+                { "key": "epsg_code", "value": "4326", "type": "text" },
+                { "key": "band_count", "value": "4", "type": "text" },
+                { "key": "is_public", "value": "true", "type": "text" }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images"]
+            },
+            "description": "Upload ảnh vệ tinh GeoTIFF lên MinIO.\n\nQuyền cần: `remote_sensing.create`\n\nField bắt buộc:\n- `raster_file`: file GeoTIFF\n- `name`, `satellite`, `image_type`, `acquisition_date`, `bbox`\n\nSau khi upload thành công:\n- File lưu vào MinIO bucket `remote-sensing-images`\n- Tạo DB record với status = `pending`\n- Tạo processing job `full_pipeline` để xử lý COG\n\nScript test tự lưu `remoteImageId` và `remoteFileId` vào biến collection."
+          }
+        },
+        {
+          "name": "2. Lấy presigned upload URL (file lớn)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/upload-url?fileName=sentinel2-large.tif",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "upload-url"],
+              "query": [
+                { "key": "fileName", "value": "sentinel2-large.tif", "description": "Tên file sẽ upload" }
+              ]
+            },
+            "description": "Tạo presigned PUT URL để client upload file GeoTIFF lớn (>500MB) trực tiếp lên MinIO — tránh qua Node.js server.\n\nQuy trình:\n1. Gọi API này → nhận `uploadUrl` + `objectKey` + `uuid`\n2. Client PUT file thẳng lên `uploadUrl` (không cần header auth)\n3. Sau khi PUT thành công → gọi `POST /remote-sensing/images` với metadata + `objectKey`\n\nURL hết hạn sau 60 phút (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS)."
+          }
+        },
+        {
+          "name": "3. Danh sách ảnh (có phân trang)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images?page=1&limit=20&satellite=sentinel2&is_public=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "satellite", "value": "sentinel2", "description": "Lọc theo vệ tinh", "disabled": true },
+                { "key": "image_type", "value": "multispectral", "description": "Lọc theo loại ảnh", "disabled": true },
+                { "key": "status", "value": "completed", "description": "pending | processing | completed | failed", "disabled": true },
+                { "key": "is_public", "value": "true", "description": "true/false", "disabled": true },
+                { "key": "province_code", "value": "62", "description": "Mã tỉnh Kon Tum", "disabled": true },
+                { "key": "year", "value": "2024", "description": "Lọc theo năm chụp", "disabled": true },
+                { "key": "date_from", "value": "2024-01-01", "description": "Từ ngày", "disabled": true },
+                { "key": "date_to", "value": "2024-12-31", "description": "Đến ngày", "disabled": true },
+                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "description": "Spatial filter bbox", "disabled": true },
+                { "key": "keyword", "value": "sentinel", "description": "Tìm theo tên/mô tả", "disabled": true },
+                { "key": "sort_by", "value": "acquisition_date", "description": "acquisition_date | created_at | name | cloud_percent", "disabled": true },
+                { "key": "sort_order", "value": "desc", "description": "asc | desc", "disabled": true }
+              ]
+            },
+            "description": "Lấy danh sách ảnh vệ tinh có phân trang và bộ lọc.\n\nKhách (citizen/anonymous) chỉ thấy ảnh `is_public = true`.\nAdmin/cán bộ thấy tất cả.\n\nResponse trả về `thumbnail_object_key` trong list (không attach presigned URL để tránh N+1).\nGọi API detail để lấy presigned thumbnail URL."
+          }
+        },
+        {
+          "name": "4. Chi tiết ảnh",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}"]
+            },
+            "description": "Lấy thông tin đầy đủ của 1 ảnh: metadata + danh sách files + statistics + presigned thumbnail URL.\n\nChấp nhận cả `id` (số) lẫn `uuid` (chuỗi 36 ký tự) ở path.\n\nNếu ảnh `is_public = false` → phải đăng nhập và có quyền phù hợp."
+          }
+        },
+        {
+          "name": "5. Cập nhật metadata ảnh",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sentinel-2 Kon Tum 2024 (đã cập nhật)\",\n  \"description\": \"Cập nhật mô tả ảnh\",\n  \"cloud_percent\": 3.5,\n  \"is_public\": true,\n  \"is_featured\": false,\n  \"status\": \"completed\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}"]
+            },
+            "description": "Cập nhật metadata ảnh vệ tinh (không upload lại file).\n\nQuyền cần: `remote_sensing.update`\nChỉ owner hoặc admin mới được sửa.\n\nCó thể truyền thêm `expectedUpdatedAt` (lấy từ `updated_at` của response detail) để bật optimistic locking — tránh ghi đè đồng thời.\n\nField `status` dùng để đánh dấu thủ công khi không dùng processing pipeline."
+          }
+        },
+        {
+          "name": "6. Lấy COG URL cho WebGIS",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/cog-url",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "cog-url"]
+            },
+            "description": "Lấy presigned URL trỏ đến file COG (Cloud Optimized GeoTIFF) để load lên bản đồ WebGIS.\n\nƯu tiên file có `file_role = cog`, fallback về `primary`.\nURL hết hạn sau 15 phút (MINIO_PRESIGNED_EXPIRE_SECONDS).\n\nResponse kèm `webgisHint` — code mẫu cho OpenLayers, Mapbox GL, Leaflet:\n```js\n// OpenLayers\nnew GeoTIFF({ sources: [{ url: cogUrl }] })\n// Mapbox GL\n{ type: 'raster', tiles: [cogUrl] }\n```"
+          }
+        },
+        {
+          "name": "7. Lấy URL download",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/download",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "download"],
+              "query": [
+                { "key": "fileId", "value": "{{remoteFileId}}", "description": "ID file cụ thể (tuỳ chọn — mặc định lấy COG hoặc primary)", "disabled": true }
+              ]
+            },
+            "description": "Tạo presigned download URL để tải file GeoTIFF về máy.\n\nQuyền cần: `remote_sensing.download`\nVới ảnh public: người dùng đã đăng nhập đều tải được.\nVới ảnh private: cần permission `remote_sensing.download` trong role.\n\nGhi log download (image_id, file_id, user_id, ip, user_agent, expires_at).\nURL hết hạn sau 15 phút."
+          }
+        },
+        {
+          "name": "8. Thống kê band ảnh",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/statistics",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "statistics"]
+            },
+            "description": "Lấy thống kê pixel từng band của ảnh GeoTIFF (min, max, mean, std, histogram).\n\nDữ liệu được tính bởi processing pipeline sau khi upload.\nNếu ảnh chưa qua xử lý (status = pending/processing) → trả mảng rỗng."
+          }
+        },
+        {
+          "name": "9. Trigger xử lý (pipeline)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_type\": \"full_pipeline\",\n  \"priority\": 5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/process",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}", "process"]
+            },
+            "description": "Trigger thủ công processing job cho ảnh.\n\nQuyền cần: role `system_admin` hoặc `so_nnmt`\n\nJob types:\n- `full_pipeline`: convert COG + tính statistics + tạo thumbnail (mặc định)\n- `cog_only`: chỉ convert sang COG\n- `stats_only`: chỉ tính statistics\n- `thumbnail_only`: chỉ tạo thumbnail\n\nDùng khi ảnh bị stuck ở status `pending` hoặc cần re-process."
+          }
+        },
+        {
+          "name": "10. Layers WebGIS (public)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/layers",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "layers"],
+              "query": [
+                { "key": "satellite", "value": "sentinel2", "description": "Lọc theo vệ tinh", "disabled": true },
+                { "key": "image_type", "value": "multispectral", "disabled": true },
+                { "key": "province_code", "value": "62", "disabled": true },
+                { "key": "bbox", "value": "107.0,13.8,108.6,15.5", "description": "Spatial filter", "disabled": true },
+                { "key": "limit", "value": "50", "disabled": true }
+              ]
+            },
+            "description": "Lấy danh sách layers ảnh vệ tinh đã hoàn thành (status=completed, is_public=true) kèm presigned COG URL và thumbnail URL để hiển thị trên bản đồ WebGIS.\n\nKhông cần đăng nhập.\n\nResponse gồm:\n- `cogUrl`: presigned URL trỏ COG file (hết hạn 15 phút)\n- `thumbnailUrl`: presigned URL thumbnail\n- `bbox`: bounding box GeoJSON\n- `expiresAt`: thời điểm URL hết hạn\n\nFrontend dùng `cogUrl` với GeoTIFF.js (OpenLayers) hoặc raster source (Mapbox GL)."
+          }
+        },
+        {
+          "name": "11. Xóa ảnh (soft delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Accept-Language", "value": "{{lang}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["remote-sensing", "images", "{{remoteImageId}}"]
+            },
+            "description": "Soft delete ảnh vệ tinh — đánh dấu `deleted_at`, không xóa file MinIO.\n\nQuyền cần: `remote_sensing.delete`\nChỉ owner hoặc `system_admin` mới được xóa.\n\nĐể xóa cả file trên MinIO (hard delete), thêm query param:\n`?hardDelete=true` — chỉ dùng khi chắc chắn không cần phục hồi."
           }
         }
       ]
