@@ -3234,10 +3234,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
+                  "const json = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
                   "if (json && json.data) {",
-                  "  if (json.data.id) pm.collectionVariables.set('mapApiId', String(json.data.id));",
-                  "  if (json.data.apiKey) pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
+                  "  if (json.data.id) {",
+                  "    if (typeof pm !== 'undefined') pm.collectionVariables.set('mapApiId', String(json.data.id));",
+                  "    if (typeof bru !== 'undefined') bru.setVar('mapApiId', String(json.data.id));",
+                  "  }",
+                  "  if (json.data.apiKey) {",
+                  "    if (typeof pm !== 'undefined') pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
+                  "    if (typeof bru !== 'undefined') bru.setVar('mapApiKey', json.data.apiKey);",
+                  "  }",
                   "}"
                 ]
               }
@@ -3329,9 +3335,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const json = pm.response.json();",
+                  "const json = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
                   "if (json && json.data && json.data.apiKey) {",
-                  "  pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
+                  "  if (typeof pm !== 'undefined') pm.collectionVariables.set('mapApiKey', json.data.apiKey);",
+                  "  if (typeof bru !== 'undefined') bru.setVar('mapApiKey', json.data.apiKey);",
                   "}"
                 ]
               }
