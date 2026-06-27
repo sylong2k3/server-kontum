@@ -180,7 +180,7 @@ const updateStatus = async (actor, id, payload, context = {}) => {
 
     const updated = await feedbackRepository.updateStatus(id, {
         toStatus: payload.toStatus,
-        note: payload.note,
+        note: payload.note ? stripTags(payload.note) : null,
         changedBy: actor.id,
     });
     if (!updated) {throw new Api404Error(t('feedback_not_found', context.lang));}

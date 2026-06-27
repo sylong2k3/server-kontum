@@ -18,6 +18,8 @@ const normalizeSort = (sortBy = 'created_at', sortOrder = 'DESC') => ({
 
 // ─── WHERE builder ────────────────────────────────────────────────────────────
 
+const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
+
 const buildWhere = ({ q, docType, isPublic, publicOnly = true } = {}, startIdx = 1) => {
     const conditions = ['d.deleted_at IS NULL'];
     const params = [];
@@ -36,11 +38,11 @@ const buildWhere = ({ q, docType, isPublic, publicOnly = true } = {}, startIdx =
     }
 
     if (q) {
-        params.push(q);
+        params.push(`%${_escapeLike(q)}%`);
         const qi = idx++;
         conditions.push(
-            `(dt_eff.title ILIKE '%' || $${qi} || '%'` +
-            ` OR dt_eff.description ILIKE '%' || $${qi} || '%')`
+            `(dt_eff.title ILIKE $${qi} ESCAPE '\\'` +
+            ` OR dt_eff.description ILIKE $${qi} ESCAPE '\\')`
         );
     }
 
@@ -49,17 +51,17 @@ const buildWhere = ({ q, docType, isPublic, publicOnly = true } = {}, startIdx =
 
 // ─── Translation join fragment ────────────────────────────────────────────────
 
-const translationJoin = (reqLang = 'vi', fbLang = 'vi') => `
+const translationJoin = (reqLangParam = '$1', fbLangParam = '$2') => `
     LEFT JOIN cms.document_translations dt_req
-        ON dt_req.document_id = d.id AND dt_req.lang = '${reqLang}'
+        ON dt_req.document_id = d.id AND dt_req.lang = ${reqLangParam}
     LEFT JOIN cms.document_translations dt_fb
-        ON dt_fb.document_id = d.id AND dt_fb.lang = '${fbLang}'
+        ON dt_fb.document_id = d.id AND dt_fb.lang = ${fbLangParam}
     LEFT JOIN LATERAL (
         SELECT
             COALESCE(dt_req.id, dt_fb.id) AS id,
             COALESCE(dt_req.title, dt_fb.title) AS title,
             COALESCE(dt_req.description, dt_fb.description) AS description,
-            CASE WHEN dt_req.id IS NOT NULL THEN '${reqLang}' ELSE '${fbLang}' END AS effective_lang,
+            CASE WHEN dt_req.id IS NOT NULL THEN ${reqLangParam} ELSE ${fbLangParam} END AS effective_lang,
             (dt_req.id IS NULL AND dt_fb.id IS NOT NULL) AS fallback_used
     ) dt_eff ON true
 `;
@@ -68,9 +70,9 @@ const translationJoin = (reqLang = 'vi', fbLang = 'vi') => `
 
 const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = 'vi' }) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
-    const { where, params } = buildWhere({ ...filter, publicOnly }, 1);
+    const { where, params } = buildWhere({ ...filter, publicOnly }, 3);
     const { column, direction } = normalizeSort(filter.sortBy, filter.sortOrder);
-    params.push(limit, offset);
+    const queryParams = [lang, fbLang, ...params, limit, offset];
 
     const result = await db.query(
         `SELECT
@@ -82,36 +84,37 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
             dt_eff.fallback_used,
             u.full_name AS uploaded_by_name
          FROM cms.documents d
-         ${translationJoin(lang, fbLang)}
+         ${translationJoin('$1', '$2')}
          LEFT JOIN auth.users u ON u.id = d.uploaded_by
          WHERE ${where}
            AND dt_eff.id IS NOT NULL
          ORDER BY ${column} ${direction} NULLS LAST, d.id DESC
-         LIMIT $${params.length - 1} OFFSET $${params.length}`,
-        params
+         LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
+        queryParams
     );
     return result.rows;
 };
 
 const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
-    const { where, params } = buildWhere({ ...filter, publicOnly }, 1);
+    const { where, params } = buildWhere({ ...filter, publicOnly }, 3);
+    const queryParams = [lang, fbLang, ...params];
 
     const result = await db.query(
         `SELECT COUNT(*)::int AS total
          FROM cms.documents d
-         ${translationJoin(lang, fbLang)}
+         ${translationJoin('$1', '$2')}
          WHERE ${where}
            AND dt_eff.id IS NOT NULL`,
-        params
+        queryParams
     );
     return result.rows[0]?.total || 0;
 };
 
 const findById = async (id, { lang = 'vi', publicOnly = true } = {}) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
-    const params = [id];
-    const conditions = ['d.id = $1', 'd.deleted_at IS NULL'];
+    const params = [lang, fbLang, id];
+    const conditions = ['d.id = $3', 'd.deleted_at IS NULL'];
     if (publicOnly) {conditions.push('d.is_public = true');}
 
     const result = await db.query(
@@ -124,7 +127,7 @@ const findById = async (id, { lang = 'vi', publicOnly = true } = {}) => {
             dt_eff.fallback_used,
             u.full_name AS uploaded_by_name
          FROM cms.documents d
-         ${translationJoin(lang, fbLang)}
+         ${translationJoin('$1', '$2')}
          LEFT JOIN auth.users u ON u.id = d.uploaded_by
          WHERE ${conditions.join(' AND ')}
          LIMIT 1`,

@@ -24,6 +24,8 @@ const normalizeListSort = ({ sortBy, sortOrder } = {}, publicOnly = true) => {
 // ─── WHERE builder ────────────────────────────────────────────────────────────
 // Returns { where, params }. Params index starts at startIdx (1-based).
 
+const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
+
 const buildWhere = ({ q, status, publicOnly = true } = {}, startIdx = 1) => {
     const conditions = ['n.deleted_at IS NULL'];
     const params = [];
@@ -38,11 +40,13 @@ const buildWhere = ({ q, status, publicOnly = true } = {}, startIdx = 1) => {
 
     if (q) {
         params.push(q);
-        const qi = idx++;
+        const tsvIdx = idx++;
+        params.push(`%${_escapeLike(q)}%`);
+        const likeIdx = idx++;
         conditions.push(
-            `(nt_eff.search_tsv @@ plainto_tsquery('simple', $${qi})` +
-            ` OR nt_eff.title ILIKE '%' || $${qi} || '%'` +
-            ` OR nt_eff.summary ILIKE '%' || $${qi} || '%')`
+            `(nt_eff.search_tsv @@ plainto_tsquery('simple', $${tsvIdx})` +
+            ` OR nt_eff.title ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR nt_eff.summary ILIKE $${likeIdx} ESCAPE '\\')`
         );
     }
 

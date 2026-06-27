@@ -1,20 +1,3 @@
-/**
- * pushProvider — Lớp đẩy push notification qua Firebase Cloud Messaging (FCM).
- *
- * FCM phủ cả 3 nền tảng: Android (native), iOS (qua APNs), và Web Push.
- * Nhờ vậy chỉ cần MỘT tích hợp cho web + android + ios.
- *
- * Thiết kế "degrade an toàn": nếu chưa cài firebase-admin hoặc chưa cấu hình
- * credentials, toàn bộ hàm push trở thành no-op (chỉ log cảnh báo 1 lần) để
- * server vẫn chạy bình thường — giống cách mailer bọc try/catch.
- *
- * Cấu hình (chọn 1 trong các cách, theo thứ tự ưu tiên):
- *   - FIREBASE_SERVICE_ACCOUNT_BASE64 : nội dung JSON service account đã base64
- *   - FIREBASE_SERVICE_ACCOUNT        : đường dẫn tới file service account JSON
- *   - GOOGLE_APPLICATION_CREDENTIALS  : đường dẫn (firebase-admin tự nhận diện)
- *   - PUSH_ENABLED=false              : tắt cứng dù đã có credentials
- */
-
 const { t } = require('./i18n.util');
 
 let admin = null;            // module firebase-admin (lazy)

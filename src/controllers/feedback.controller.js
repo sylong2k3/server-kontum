@@ -10,7 +10,8 @@ const createFeedback = async (req, res) => {
         lang: req.lang,
         anonymousId: getAnonymousId(req),
     });
-    CREATED(res, result.message, {
+    const respond = result.duplicated ? OK : CREATED;
+    respond(res, result.message, {
         feedback: result.feedback,
         duplicated: result.duplicated,
     });

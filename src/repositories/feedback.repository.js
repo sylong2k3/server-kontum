@@ -1,5 +1,7 @@
 const db = require('../configs/database');
 
+const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
+
 const SORT_COLUMNS = {
     created_at: 'f.created_at',
     updated_at: 'f.updated_at',
@@ -31,9 +33,9 @@ const buildWhere = (filter = {}, startIdx = 1) => {
         conditions.push(`f.priority = $${idx++}`);
     }
     if (filter.q) {
-        params.push(filter.q);
+        params.push(`%${_escapeLike(filter.q)}%`);
         const qi = idx++;
-        conditions.push(`(f.title ILIKE '%' || $${qi} || '%' OR f.description ILIKE '%' || $${qi} || '%')`);
+        conditions.push(`(f.title ILIKE $${qi} ESCAPE '\\' OR f.description ILIKE $${qi} ESCAPE '\\')`);
     }
     if (filter.from) {
         params.push(filter.from);

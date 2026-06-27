@@ -150,6 +150,7 @@ const isVisibleToUser = async ({ notificationId, userId, roleCode }) => {
         `SELECT 1
          FROM core.notifications n
          WHERE n.id = $1
+           AND (n.expires_at IS NULL OR n.expires_at > NOW())
            AND (
                 n.user_id = $2
                 OR (n.user_id IS NULL AND n.audience = 'all')
@@ -197,18 +198,6 @@ const deletePersonal = async ({ notificationId, userId }) => {
     return rowCount > 0;
 };
 
-/** Lấy danh sách user_id theo vai trò (để fan-out push cá nhân hóa nếu cần). */
-const getUserIdsByRole = async (roleCode) => {
-    const { rows } = await db.query(
-        `SELECT u.id
-         FROM auth.users u
-         JOIN auth.roles ro ON ro.id = u.role_id
-         WHERE ro.code = $1 AND u.is_active = true AND u.deleted_at IS NULL`,
-        [roleCode]
-    );
-    return rows.map((r) => r.id);
-};
-
 // ════════════════════════════════════════════════════════════════════════════
 //  DEVICE TOKENS
 // ════════════════════════════════════════════════════════════════════════════
@@ -246,17 +235,6 @@ const getActiveTokensByUser = async (userId) => {
         `SELECT token FROM core.device_tokens
          WHERE user_id = $1 AND is_active = true`,
         [userId]
-    );
-    return rows.map((r) => r.token);
-};
-
-/** Lấy token đang hoạt động của nhiều user. */
-const getActiveTokensByUsers = async (userIds) => {
-    if (!Array.isArray(userIds) || userIds.length === 0) {return [];}
-    const { rows } = await db.query(
-        `SELECT token FROM core.device_tokens
-         WHERE user_id = ANY($1::bigint[]) AND is_active = true`,
-        [userIds]
     );
     return rows.map((r) => r.token);
 };
@@ -309,12 +287,10 @@ module.exports = {
     markRead,
     markAllRead,
     deletePersonal,
-    getUserIdsByRole,
 
     upsertDeviceToken,
     removeDeviceToken,
     getActiveTokensByUser,
-    getActiveTokensByUsers,
     deleteTokens,
 
     cleanupExpired,
