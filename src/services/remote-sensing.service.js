@@ -166,11 +166,11 @@ const getImageDetail = async (idOrUuid, user, lang) => {
         if (role === 'citizen') { throw new Api403Error(t('remote_sensing_no_view_permission', lang)); }
     }
 
-    // Lấy danh sách files
-    const files = await repo.findFilesByImageId(image.id);
-
-    // Lấy statistics nếu có
-    const statistics = await repo.findStatsByImageId(image.id);
+    // Lấy files và statistics song song
+    const [files, statistics] = await Promise.all([
+        repo.findFilesByImageId(image.id),
+        repo.findStatsByImageId(image.id),
+    ]);
 
     // Tạo presigned URL cho thumbnail (nếu có)
     let thumbnailUrl = null;
