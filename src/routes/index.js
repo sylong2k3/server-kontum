@@ -11,6 +11,8 @@ const mapRoutes = require('./map.routes');
 const pdfMapRoutes = require('./pdf-map.routes');
 const weatherRoutes = require('./weather.routes');
 const mapApiRoutes = require('./map-api.routes');
+const statisticsRoutes = require('./statistics.routes');
+const spatialRoutes = require('./spatial.routes');
 
 const router = Router();
 
@@ -37,5 +39,9 @@ router.use('/weather', weatherRoutes);
 
 // ── Remote Sensing / Viễn thám ───────────────────────────────────────────────
 router.use('/remote-sensing', remoteSensingRoutes);
+
+// ── Thống kê & Phân tích không gian (EP-07) ──────────────────────────────────
+router.use('/stats', statisticsRoutes);
+router.use('/spatial', spatialRoutes);
 
 module.exports = router;

@@ -331,6 +331,16 @@ const locales = {
         map_api_deleted: 'Đã xóa api_key',
         map_api_layer_meta_success: 'Lấy thông tin lớp thành công',
         map_api_features_success: 'Lấy dữ liệu lớp thành công',
+
+        // ── Thống kê & Phân tích không gian (EP-07) ──────────────────────────
+        stats_landcover_success: 'Lấy thống kê lớp phủ thành công',
+        stats_dashboard_success: 'Lấy dữ liệu dashboard thành công',
+        stats_year_not_available: 'Năm không có dữ liệu. Các năm hiện có: {years}',
+        spatial_forest_change_success: 'Phân tích thay đổi rừng thành công',
+        spatial_residential_distance_success: 'Phân tích khoảng cách dân cư – rừng thành công',
+        spatial_same_year: 'Hai mốc thời gian phải khác nhau',
+        spatial_year_not_available: 'Năm không có dữ liệu. Các năm hiện có: {years}',
+        spatial_layer_not_found: 'Không tìm thấy lớp GIS với mã: {code}',
      },
      en: {
         email_in_use: 'Email is already in use',
@@ -663,6 +673,16 @@ const locales = {
         map_api_deleted: 'Map api_key deleted',
         map_api_layer_meta_success: 'Layer metadata retrieved successfully',
         map_api_features_success: 'Layer features retrieved successfully',
+
+        // ── Statistics & Spatial Analysis (EP-07) ────────────────────────────
+        stats_landcover_success: 'Landcover statistics retrieved successfully',
+        stats_dashboard_success: 'Dashboard data retrieved successfully',
+        stats_year_not_available: 'Year has no data. Available years: {years}',
+        spatial_forest_change_success: 'Forest change analysis completed',
+        spatial_residential_distance_success: 'Residential–forest distance analysis completed',
+        spatial_same_year: 'The two periods must be different',
+        spatial_year_not_available: 'Year has no data. Available years: {years}',
+        spatial_layer_not_found: 'GIS layer not found with code: {code}',
     }
 };
 
