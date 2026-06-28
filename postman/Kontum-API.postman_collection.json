@@ -143,6 +143,24 @@
       "value": "anon-kontum-0001",
       "type": "string",
       "description": "Định danh ẩn danh cho phản ánh không đăng nhập (header x-anonymous-id)."
+    },
+    {
+      "key": "statsYear",
+      "value": "2024",
+      "type": "string",
+      "description": "Năm thống kê lớp phủ (EP-07)."
+    },
+    {
+      "key": "residentialLayerCode",
+      "value": "dan_cu",
+      "type": "string",
+      "description": "Mã lớp GIS dân cư (cho phân tích khoảng cách)."
+    },
+    {
+      "key": "forestLayerCode",
+      "value": "ranh_gioi_rung",
+      "type": "string",
+      "description": "Mã lớp GIS ranh giới rừng."
     }
   ],
   "item": [
@@ -5024,6 +5042,325 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Thống kê & Phân tích không gian",
+      "description": "Thống kê lớp phủ/che phủ rừng theo huyện và phân tích không gian tỉnh Kon Tum (EP-07).\n\nDữ liệu nền là SỐ LIỆU THỰC:\n- 10 huyện/thành phố: diện tích, dân số\n- Che phủ rừng 2024 theo huyện (công bố tỉnh kontum.gov.vn)\n- Tổng hợp rừng 2023/2024 (hiện trạng rừng toàn quốc, Bộ NN&PTNT)\n\nQuyền:\n- /stats/administrative-units, /stats/landcover: công khai (optionalAuth)\n- /stats/dashboard: statistics.dashboard\n- /spatial/forest-change: spatial.read\n- /spatial/residential-distance: spatial.analyze",
+      "item": [
+        {
+          "name": "1. Đơn vị hành chính (huyện)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stats/administrative-units?level=district&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stats",
+                "administrative-units"
+              ],
+              "query": [
+                {
+                  "key": "level",
+                  "value": "district",
+                  "description": "province | district | commune"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Danh sách 10 đơn vị hành chính cấp huyện tỉnh Kon Tum kèm diện tích (km²) và dân số.\n\nDùng cho dropdown lọc / hiển thị nhãn trên bản đồ. Công khai (optionalAuth)."
+          }
+        },
+        {
+          "name": "2. Che phủ rừng theo huyện (US-060)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stats/landcover?year={{statsYear}}&forest_type=total&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stats",
+                "landcover"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "{{statsYear}}",
+                  "description": "Năm (mặc định năm mới nhất). Trống = mới nhất."
+                },
+                {
+                  "key": "forest_type",
+                  "value": "total",
+                  "description": "total | natural | planted | non_forest"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Diện tích rừng + tỷ lệ che phủ từng huyện cho một năm, kèm change_pct so với năm liền trước (LAG).\n\nĐầu ra: items[] { unitCode, name, forestAreaHa, coveragePct, changePct } + summary { districtCount, totalForestHa, avgCoveragePct } + availableYears.\n\nEdge: năm không có dữ liệu → 400 YEAR_NOT_AVAILABLE; không có bản ghi → no_data=true.\n\nCông khai (optionalAuth)."
+          }
+        },
+        {
+          "name": "3. Dashboard điều hành (US-063)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stats/dashboard?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stats",
+                "dashboard"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "force",
+                  "value": "true",
+                  "description": "Bỏ qua cache, tính lại (mặc định dùng cache TTL 10 phút).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Tổng hợp điều hành: che phủ rừng toàn tỉnh, tổng diện tích rừng tự nhiên/trồng, top 5 huyện che phủ cao/thấp, số phản ánh theo trạng thái.\n\nKết quả cache TTL 10 phút (gửi force=true để tính lại).\n\nCảnh báo cháy (fireAlerts) hiện placeholder — chờ EP-06.\n\nQuyền: statistics.dashboard (system_admin, ubnd_tinh)."
+          }
+        },
+        {
+          "name": "4. Thay đổi rừng giữa 2 mốc (US-061)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/spatial/forest-change?from_year=2023&to_year=2024&forest_type=total&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "spatial",
+                "forest-change"
+              ],
+              "query": [
+                {
+                  "key": "from_year",
+                  "value": "2023",
+                  "description": "Năm mốc đầu"
+                },
+                {
+                  "key": "to_year",
+                  "value": "2024",
+                  "description": "Năm mốc sau"
+                },
+                {
+                  "key": "forest_type",
+                  "value": "total",
+                  "description": "total | natural | planted"
+                },
+                {
+                  "key": "unit_code",
+                  "value": "62",
+                  "description": "Mã đơn vị (62=tỉnh). Trống = tất cả huyện có dữ liệu.",
+                  "disabled": true
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "So sánh diện tích rừng giữa 2 năm theo đơn vị: delta_area_ha, delta_pct, trend (increase/decrease/stable).\n\nVí dụ thực: tỉnh Kon Tum 2023→2024 = 616.123,37 → 616.195,94 ha (+72,57 ha).\n\nLưu ý: chỉ huyện có dữ liệu cả 2 năm mới xuất hiện. Hiện per-district chỉ có 2024 → để xem cấp huyện cần thêm dữ liệu năm khác. Cấp tỉnh (unit_code=62) có cả 2023 & 2024.\n\nPhân tích suy giảm mức raster/NDVI cần GEE (rasterAnalysis.available=false).\n\nQuyền: spatial.read."
+          }
+        },
+        {
+          "name": "5. Khoảng cách dân cư – rừng (US-062)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/spatial/residential-distance?residential_code={{residentialLayerCode}}&forest_code={{forestLayerCode}}&threshold_m=500&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "spatial",
+                "residential-distance"
+              ],
+              "query": [
+                {
+                  "key": "residential_code",
+                  "value": "{{residentialLayerCode}}",
+                  "description": "Mã lớp GIS dân cư (đã import)"
+                },
+                {
+                  "key": "forest_code",
+                  "value": "{{forestLayerCode}}",
+                  "description": "Mã lớp GIS ranh giới rừng (đã import)"
+                },
+                {
+                  "key": "threshold_m",
+                  "value": "500",
+                  "description": "Ngưỡng khoảng cách (mét), mặc định 500"
+                },
+                {
+                  "key": "limit",
+                  "value": "500",
+                  "description": "Giới hạn số đối tượng trả về",
+                  "disabled": true
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Tìm khu dân cư nằm trong ngưỡng khoảng cách tới rừng (vùng giáp ranh nguy cơ) bằng ST_DWithin/ST_Distance trên geography (chính xác theo mét).\n\nTrả FeatureCollection GeoJSON: mỗi feature có distanceM (khoảng cách tới đối tượng rừng gần nhất).\n\nYÊU CẦU: cả 2 lớp GIS (dân cư + rừng) phải đã được import vào hệ thống (gis.layer_registry). Nếu chưa có → 404 LAYER_NOT_FOUND.\n\nQuyền: spatial.analyze (system_admin, so_nnmt)."
+          }
         }
       ]
     },
