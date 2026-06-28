@@ -132,6 +132,17 @@
       "value": "",
       "type": "string",
       "description": "Raw API key trả về 1 lần khi tạo hoặc regenerate. Script test sẽ tự lưu."
+    },
+    {
+      "key": "feedbackId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "anonymousId",
+      "value": "anon-kontum-0001",
+      "type": "string",
+      "description": "Định danh ẩn danh cho phản ánh không đăng nhập (header x-anonymous-id)."
     }
   ],
   "item": [
@@ -2023,6 +2034,550 @@
                 }
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📋 Phản ánh / Feedback",
+      "description": "Phản ánh hiện trường của người dân (cháy rừng, vi phạm, hiện trạng) kèm vị trí GPS và ảnh/video.\n\nLuồng:\n- Người dân (đăng nhập hoặc ẩn danh qua header x-anonymous-id) gửi phản ánh kèm toạ độ + media.\n- Cán bộ xem danh sách, bản đồ GeoJSON, và cập nhật trạng thái xử lý.\n\nEnum:\n- category: chay_rung | vi_pham | hien_trang\n- status:   new | in_progress | resolved | rejected\n- priority: low | normal | high | urgent\n\nScript test ở \"Tạo phản ánh\" tự lưu feedbackId.",
+      "item": [
+        {
+          "name": "1. Tạo phản ánh (người dân)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 201/200', () => pm.expect([200,201]).to.include(pm.response.code));",
+                  "const j = (typeof pm !== 'undefined') ? pm.response.json() : (typeof res !== 'undefined' ? res.getBody() : {});",
+                  "if (j && j.data && j.data.feedback && j.data.feedback.id) {",
+                  "  const id = String(j.data.feedback.id);",
+                  "  if (typeof pm !== 'undefined') pm.collectionVariables.set('feedbackId', id);",
+                  "  if (typeof bru !== 'undefined') bru.setVar('feedbackId', id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              },
+              {
+                "key": "x-anonymous-id",
+                "value": "{{anonymousId}}",
+                "disabled": true,
+                "description": "Dùng khi gửi ẩn danh (không đăng nhập). Bỏ Authorization và bật header này."
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "category",
+                  "value": "chay_rung",
+                  "type": "text",
+                  "description": "chay_rung | vi_pham | hien_trang"
+                },
+                {
+                  "key": "title",
+                  "value": "Phát hiện đốt nương gần bìa rừng",
+                  "type": "text",
+                  "description": "5–255 ký tự"
+                },
+                {
+                  "key": "description",
+                  "value": "Khói bốc lên khu vực thôn 5, có nguy cơ cháy lan vào rừng phòng hộ.",
+                  "type": "text",
+                  "description": "Tối đa 2000 ký tự (tuỳ chọn)"
+                },
+                {
+                  "key": "priority",
+                  "value": "high",
+                  "type": "text",
+                  "description": "low | normal | high | urgent (mặc định normal)"
+                },
+                {
+                  "key": "lng",
+                  "value": "107.95",
+                  "type": "text",
+                  "description": "Kinh độ 106–109"
+                },
+                {
+                  "key": "lat",
+                  "value": "14.35",
+                  "type": "text",
+                  "description": "Vĩ độ 13–16.5"
+                },
+                {
+                  "key": "clientUuid",
+                  "value": "kontum-app-0001",
+                  "type": "text",
+                  "description": "Chống gửi trùng (tuỳ chọn)"
+                },
+                {
+                  "key": "media",
+                  "type": "file",
+                  "src": [],
+                  "description": "Ảnh/video hiện trường (tối đa FEEDBACK_MAX_MEDIA_FILES files, tuỳ chọn)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/feedback?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "feedback"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Gửi phản ánh mới (multipart/form-data).\n\nXác thực: đăng nhập (Bearer) HOẶC ẩn danh qua header x-anonymous-id.\n\nNếu trùng clientUuid trong thời gian ngắn → trả 200 với duplicated=true thay vì tạo mới.\n\nResponse: { feedback, duplicated }. Script test tự lưu feedbackId."
+          }
+        },
+        {
+          "name": "2. Phản ánh của tôi (mine)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              },
+              {
+                "key": "x-anonymous-id",
+                "value": "{{anonymousId}}",
+                "disabled": true,
+                "description": "Dùng khi tra cứu phản ánh ẩn danh."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/feedback/mine?page=1&limit=20&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "feedback",
+                "mine"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "status",
+                  "value": "new",
+                  "description": "new | in_progress | resolved | rejected",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "chay_rung",
+                  "disabled": true
+                },
+                {
+                  "key": "priority",
+                  "value": "high",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "cháy",
+                  "description": "Tìm theo tiêu đề/mô tả",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01",
+                  "description": "ISO date",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lấy danh sách phản ánh của chính người gửi (theo JWT user hoặc x-anonymous-id)."
+          }
+        },
+        {
+          "name": "3. Chi tiết phản ánh (owner)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              },
+              {
+                "key": "x-anonymous-id",
+                "value": "{{anonymousId}}",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/feedback/{{feedbackId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "feedback",
+                "{{feedbackId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Người gửi xem chi tiết phản ánh của mình. Chỉ owner (hoặc anonymous id khớp) mới xem được."
+          }
+        },
+        {
+          "name": "4. Admin — Bản đồ phản ánh (GeoJSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/feedback/map?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "feedback",
+                "map"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "bbox",
+                  "value": "107.0,13.8,108.6,15.5",
+                  "description": "minLng,minLat,maxLng,maxLat",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "new",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "chay_rung",
+                  "disabled": true
+                },
+                {
+                  "key": "priority",
+                  "value": "high",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Trả FeatureCollection GeoJSON các phản ánh để hiển thị trên dashboard/bản đồ.\n\nQuyền: feedback.map"
+          }
+        },
+        {
+          "name": "5. Admin — Danh sách phản ánh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/feedback?page=1&limit=20&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "feedback"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "status",
+                  "value": "new",
+                  "description": "new | in_progress | resolved | rejected",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "chay_rung",
+                  "disabled": true
+                },
+                {
+                  "key": "priority",
+                  "value": "high",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "cháy",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Danh sách quản trị toàn bộ phản ánh.\n\nQuyền: feedback.read"
+          }
+        },
+        {
+          "name": "6. Admin — Chi tiết phản ánh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/feedback/{{feedbackId}}?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "feedback",
+                "{{feedbackId}}"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Cán bộ xem chi tiết phản ánh kèm lịch sử trạng thái (statusLogs).\n\nQuyền: feedback.read"
+          }
+        },
+        {
+          "name": "7. Admin — Cập nhật trạng thái",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toStatus\": \"in_progress\",\n  \"note\": \"Đã cử cán bộ kiểm tra hiện trường.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/feedback/{{feedbackId}}/status?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "feedback",
+                "{{feedbackId}}",
+                "status"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Chuyển trạng thái xử lý phản ánh.\n\nBody:\n- toStatus: new | in_progress | resolved | rejected (bắt buộc)\n- note: ghi chú xử lý (tuỳ chọn, tối đa 1000 ký tự)\n\nQuyền: feedback.update_status"
           }
         }
       ]
