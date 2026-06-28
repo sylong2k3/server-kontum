@@ -2039,7 +2039,7 @@
       ]
     },
     {
-      "name": "📋 Phản ánh / Feedback",
+      "name": "Phản ánh / Feedback",
       "description": "Phản ánh hiện trường của người dân (cháy rừng, vi phạm, hiện trạng) kèm vị trí GPS và ảnh/video.\n\nLuồng:\n- Người dân (đăng nhập hoặc ẩn danh qua header x-anonymous-id) gửi phản ánh kèm toạ độ + media.\n- Cán bộ xem danh sách, bản đồ GeoJSON, và cập nhật trạng thái xử lý.\n\nEnum:\n- category: chay_rung | vi_pham | hien_trang\n- status:   new | in_progress | resolved | rejected\n- priority: low | normal | high | urgent\n\nScript test ở \"Tạo phản ánh\" tự lưu feedbackId.",
       "item": [
         {
@@ -3464,7 +3464,7 @@
       ]
     },
     {
-      "name": "🌤 Thời tiết (EP-05)",
+      "name": "Thời tiết (EP-05)",
       "description": "Thời tiết thời gian thực & dự báo. Tile proxy qua backend (không lộ API key). Wind-grid dùng Open-Meteo (miễn phí, không cần key). Point & tile cần OPENWEATHER_API_KEY trong .env.",
       "item": [
         {
@@ -3723,7 +3723,7 @@
       ]
     },
     {
-      "name": "🗝 Chia sẻ API Lớp GIS (US-025)",
+      "name": "Chia sẻ API Lớp GIS (US-025)",
       "description": "=== SERVER MÌNH LÀ NHÀ CUNG CẤP — CẤP KEY CHO BÊN THỨ BA ===\n\nCác Sở, đơn vị khác hoặc đối tác muốn lấy dữ liệu GIS của tỉnh Kon Tum sẽ được system_admin cấp một API key. Họ dùng key đó gọi thẳng vào server mình, KHÔNG cần tài khoản, KHÔNG cần JWT.\n\nKhác OpenWeather:\n- OpenWeather: mình là khách, gọi API của họ bằng OPENWEATHER_API_KEY\n- Folder này: mình là chủ, cấp key cho người khác dùng X-Map-Api-Key\n\n--- Luồng sử dụng ---\n1. Admin gọi 'Tạo API Key' → server trả raw key (mapk_xxx...) — chỉ hiện 1 lần, script tự lưu vào {{mapApiKey}}\n2. Giao raw key cho đối tác (qua email / Zalo / ...)\n3. Đối tác gọi /map-data/layer để xem lớp được cấp\n4. Đối tác gọi /map-data/features?bbox=... để lấy GeoJSON\n\n--- Bảo mật ---\n• Key format: mapk_ + 64 ký tự base64url (~69 ký tự tổng)\n• DB KHÔNG lưu raw key, chỉ lưu sha256 hash + 12 ký tự đầu + 4 ký tự cuối\n• Rate limit theo scope.rate_per_min (mặc định 60 req/phút)\n• Có thể giới hạn bbox, tắt key, đặt ngày hết hạn\n\n--- Nhóm request ---\n• Admin (cần JWT): Tạo / Xem / Sửa / Xoay key / Xóa\n• Consumer (chỉ cần X-Map-Api-Key): Metadata lớp, Features GeoJSON",
       "item": [
         {
@@ -4239,7 +4239,7 @@
       ]
     },
     {
-      "name": "🛰 Viễn Thám / Ảnh Vệ Tinh (EP-06)",
+      "name": "Viễn Thám / Ảnh Vệ Tinh (EP-06)",
       "description": "Quản lý ảnh vệ tinh GeoTIFF: upload, xem, download, xử lý, WebGIS layers.\n\nLưu ý:\n- Upload file dùng multipart/form-data (field `raster_file` bắt buộc)\n- Script test tự lưu `remoteImageId` và `remoteFileId` sau khi upload\n- Endpoint download trả về presigned URL (hết hạn sau 15 phút)\n- Endpoint `/layers` không cần đăng nhập (public)\n\nBase URL test: https://apikontum.tourismpj.pro.vn/api/v1",
       "item": [
         {
@@ -5028,7 +5028,7 @@
       ]
     },
     {
-      "name": "🔌 WebSocket (Realtime)",
+      "name": "WebSocket (Realtime)",
       "description": "Kết nối WebSocket để nhận thông báo realtime khi xử lý ảnh vệ tinh hoàn tất.\n\nEndpoint: wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}\n\n──────────────────────────────────────────\nLUỒNG SỬ DỤNG:\n1. Đăng nhập → lấy accessToken\n2. Kết nối WebSocket với token\n3. Subscribe channel theo imageId vừa upload\n4. Nhận event khi processing xong\n──────────────────────────────────────────\n\nCÁC EVENT SERVER GỬI XUỐNG:\n\n• connected\n  → Xác nhận kết nối thành công\n  data: { userId, message }\n\n• subscribed\n  → Xác nhận đã subscribe channel thành công\n  data: { channels: ['remote_sensing:1'] }\n\n• remote_sensing:statistics_ready  (~60s sau upload)\n  → Tính xong thống kê band, hiển thị bảng ngay\n  data: { imageId, bandCount, statistics: [{ bandIndex, min, max, mean, std }] }\n\n• remote_sensing:job_completed  (sau statistics_ready)\n  → Pipeline xong hoàn toàn, COG sẵn sàng cho WebGIS\n  data: { jobId, imageId, imageName, bandCount, processedAt }\n\n• remote_sensing:job_failed  (nếu lỗi)\n  → Job thất bại sau hết số lần retry\n  data: { jobId, imageId, status, errorMessage }\n\n──────────────────────────────────────────\nLƯU Ý POSTMAN:\nPostman hỗ trợ WebSocket qua tab \"New > WebSocket Request\".\nBruno hiện chưa hỗ trợ WebSocket — dùng Postman hoặc wscat để test.\n\nTest bằng wscat (npm i -g wscat):\n  wscat -c \"wss://apikontum.tourismpj.pro.vn/ws?token=<accessToken>\"",
       "item": [
         {
