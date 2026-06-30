@@ -66,6 +66,56 @@ const countAllByNewsId = async ({ newsId, approvedOnly }) => {
     return rows[0]?.total || 0;
 };
 
+// ─── Admin: list toàn hệ thống cho moderation ──────────────────────────────────
+
+const ADMIN_COMMENT_SELECT = `
+    SELECT c.id, c.news_id AS "newsId", c.user_id AS "userId", c.content,
+           c.is_approved AS "isApproved", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+           u.full_name AS "userName", u.avatar_url AS "userAvatar",
+           nt.title AS "newsTitle"
+    FROM cms.comments c
+    LEFT JOIN auth.users u ON c.user_id = u.id
+    LEFT JOIN LATERAL (
+        SELECT title FROM cms.news_translations t
+        WHERE t.news_id = c.news_id
+        ORDER BY (t.lang = 'vi') DESC
+        LIMIT 1
+    ) nt ON true
+`;
+
+const buildAdminWhere = (approved, startIdx = 1) => {
+    const conditions = ['c.deleted_at IS NULL'];
+    const params = [];
+    let idx = startIdx;
+    if (approved !== undefined) {
+        conditions.push(`c.is_approved = $${idx++}`);
+        params.push(approved);
+    }
+    return { where: conditions.join(' AND '), params, idx };
+};
+
+const findAll = async ({ limit, offset, approved }) => {
+    const { where, params, idx } = buildAdminWhere(approved);
+    params.push(limit, offset);
+    const { rows } = await db.query(
+        `${ADMIN_COMMENT_SELECT}
+         WHERE ${where}
+         ORDER BY c.created_at DESC
+         LIMIT $${idx} OFFSET $${idx + 1}`,
+        params
+    );
+    return rows;
+};
+
+const countAll = async ({ approved }) => {
+    const { where, params } = buildAdminWhere(approved);
+    const { rows } = await db.query(
+        `SELECT COUNT(c.id)::int AS total FROM cms.comments c WHERE ${where}`,
+        params
+    );
+    return rows[0]?.total || 0;
+};
+
 const updateApproval = async (id, isApproved) => {
     const { rows } = await db.query(
         `UPDATE cms.comments
@@ -93,6 +143,8 @@ module.exports = {
     create,
     findAllByNewsId,
     countAllByNewsId,
+    findAll,
+    countAll,
     updateApproval,
     softDelete,
 };

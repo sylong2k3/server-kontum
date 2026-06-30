@@ -24,6 +24,16 @@ const listComments = async (req, res) => {
     OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
 };
 
+const listAllComments = async (req, res) => {
+    const { page, limit, approved } = req.query;
+    const { items, total } = await commentService.listAllComments(
+        buildActor(req),
+        { page, limit, approved },
+        { lang: req.lang }
+    );
+    OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
+};
+
 const approveComment = async (req, res) => {
     const result = await commentService.approveComment(
         buildActor(req),
@@ -35,9 +45,12 @@ const approveComment = async (req, res) => {
 };
 
 const deleteComment = async (req, res) => {
+    // Public route: /news/:id/comments/:commentId → dùng commentId
+    // Admin route:  /admin/comments/:id           → dùng id
+    const commentId = Number(req.params.commentId ?? req.params.id);
     const result = await commentService.deleteComment(
         buildActor(req),
-        Number(req.params.id), // commentId
+        commentId,
         { lang: req.lang }
     );
     OK(res, result.message, {});
@@ -46,6 +59,7 @@ const deleteComment = async (req, res) => {
 module.exports = {
     createComment,
     listComments,
+    listAllComments,
     approveComment,
     deleteComment,
 };

@@ -189,6 +189,15 @@ const findById = async (id) => {
     return result.rows[0] || null;
 };
 
+// findPublishedById dùng cho luồng bình luận công khai — chỉ tin đã xuất bản
+const findPublishedById = async (id) => {
+    const result = await db.query(
+        "SELECT * FROM cms.news WHERE id = $1 AND status = 'published' AND deleted_at IS NULL",
+        [id]
+    );
+    return result.rows[0] || null;
+};
+
 // ─── Create ───────────────────────────────────────────────────────────────────
 
 const createMeta = async ({ coverUrl, status, authorId, publishedAt }) => {
@@ -298,6 +307,7 @@ module.exports = {
     findBySlug,
     findAdminById,
     findById,
+    findPublishedById,
     createMeta,
     createTranslation,
     translationSlugExists,

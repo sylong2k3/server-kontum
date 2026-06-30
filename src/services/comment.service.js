@@ -1,12 +1,13 @@
 const commentRepository = require('../repositories/comment.repository');
 const newsRepository = require('../repositories/news.repository');
 const { Api404Error, Api403Error } = require('../core/error.response');
+const { hasPermission } = require('../middlewares/auth.middleware');
 const { t } = require('../utils/i18n.util');
 const { stripTags } = require('../utils/cms.util');
 
-const MODERATOR_ROLES = ['system_admin', 'so_nnmt'];
-
-const canModerate = (actor) => actor && MODERATOR_ROLES.includes(actor.role);
+// Kiểm tra quyền moderation theo RBAC (permissions từ DB), system_admin luôn vượt qua.
+const can = (actor, action) =>
+    !!actor && (actor.role === 'system_admin' || hasPermission(actor.permissions, 'comments', action));
 
 const createComment = async (actor, newsId, payload, context = {}) => {
     // Requires authenticated user (verified by verifyToken middleware, which sets actor)
@@ -40,8 +41,8 @@ const listComments = async (actor, newsId, { page = 1, limit = 20 }, context = {
     const limitNum = Number(limit);
     const offset = (Number(page) - 1) * limitNum;
 
-    // Moderation check: only admins/moderators can view unapproved comments.
-    const approvedOnly = !canModerate(actor);
+    // Moderation check: only users with comments.approve can view unapproved comments.
+    const approvedOnly = !can(actor, 'approve');
 
     // Public users can only list comments for published news; moderators may inspect drafts.
     const news = approvedOnly
@@ -59,8 +60,25 @@ const listComments = async (actor, newsId, { page = 1, limit = 20 }, context = {
     return { items, total };
 };
 
+// Danh sách bình luận toàn hệ thống cho moderator duyệt (lọc theo trạng thái duyệt nếu có).
+const listAllComments = async (actor, { page = 1, limit = 20, approved } = {}, context = {}) => {
+    if (!can(actor, 'approve')) {
+        throw new Api403Error(t('no_permission', context.lang));
+    }
+
+    const limitNum = Number(limit);
+    const offset = (Number(page) - 1) * limitNum;
+
+    const [items, total] = await Promise.all([
+        commentRepository.findAll({ limit: limitNum, offset, approved }),
+        commentRepository.countAll({ approved }),
+    ]);
+
+    return { items, total };
+};
+
 const approveComment = async (actor, id, payload, context = {}) => {
-    if (!canModerate(actor)) {
+    if (!can(actor, 'approve')) {
         throw new Api403Error(t('no_permission', context.lang));
     }
 
@@ -88,9 +106,9 @@ const deleteComment = async (actor, id, context = {}) => {
         throw new Api404Error(t('comment_not_found', context.lang));
     }
 
-    // Citizen can delete their own comment, but moderators can delete any comment
+    // Citizen can delete their own comment, but users with comments.delete can delete any comment
     const isOwner = String(comment.userId) === String(actor.id);
-    if (!isOwner && !canModerate(actor)) {
+    if (!isOwner && !can(actor, 'delete')) {
         throw new Api403Error(t('no_permission', context.lang));
     }
 
@@ -104,6 +122,7 @@ const deleteComment = async (actor, id, context = {}) => {
 module.exports = {
     createComment,
     listComments,
+    listAllComments,
     approveComment,
     deleteComment,
 };

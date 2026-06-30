@@ -16,6 +16,7 @@ const commentController = require('../controllers/comment.controller');
 const {
     createCommentSchema,
     listCommentsQuerySchema,
+    newsCommentParamsSchema,
 } = require('../validators/comment.validator');
 
 const publicRouter = Router();
@@ -43,6 +44,16 @@ publicRouter.post(
     validate(newsIdParamsSchema, 'params'),
     validate(createCommentSchema),
     asyncHandler(commentController.createComment)
+);
+
+// DELETE /news/:id/comments/:commentId — citizen tự xóa bình luận của mình
+publicRouter.delete(
+    '/:id/comments/:commentId',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('comments', 'delete_own'),
+    validate(newsCommentParamsSchema, 'params'),
+    asyncHandler(commentController.deleteComment)
 );
 
 // GET /news/:slug — public detail
