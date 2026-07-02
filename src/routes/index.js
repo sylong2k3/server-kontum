@@ -13,6 +13,7 @@ const weatherRoutes = require('./weather.routes');
 const mapApiRoutes = require('./map-api.routes');
 const statisticsRoutes = require('./statistics.routes');
 const spatialRoutes = require('./spatial.routes');
+const mobileRoutes = require('./mobile.routes');
 
 const router = Router();
 
@@ -43,5 +44,8 @@ router.use('/remote-sensing', remoteSensingRoutes);
 // ── Thống kê & Phân tích không gian (EP-07) ──────────────────────────────────
 router.use('/stats', statisticsRoutes);
 router.use('/spatial', spatialRoutes);
+
+// ── MobileGIS — field-updates & offline sync (EP-10) ─────────────────────────
+router.use('/mobile', mobileRoutes);
 
 module.exports = router;

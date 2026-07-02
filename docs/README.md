@@ -22,6 +22,7 @@
 | 13 | [GeoServer + PostGIS & GeoTIFF Guide](./guides/13-geoserver-postgis-setup-guide.md) | Hướng dẫn thực hành: vector PostGIS + raster GeoTIFF/ImageMosaic → Mapbox |
 | 14 | [Functional Spec chi tiết](./14-functional-spec-detailed.md) | Đặc tả field-level từng chức năng (input/validate/nghiệp vụ/lỗi) |
 | 15 | [Dev Workflow: Debug & Review](./15-dev-workflow-debug-review.md) | Vòng đời Story, bước debug, checklist code review, branch protection |
+| M | [Mobile App (Flutter)](./mobile/README.md) | Bộ tài liệu thiết kế app MobileGIS: kiến trúc, màn hình, API mapping, backlog task chi tiết, sprint plan |
 
 ## Trạng thái dự án (tại thời điểm biên soạn)
 

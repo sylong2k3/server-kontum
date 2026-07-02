@@ -919,7 +919,7 @@
       "description": "Tất cả route cần đăng nhập. Một số route yêu cầu role: system_admin / so_nnmt / ubnd_tinh.",
       "item": [
         {
-          "name": "Danh sách người dùng (admin/so_nnmt/ubnd_tinh)",
+          "name": "[Admin/so_nnmt/ubnd_tinh] Danh sách người dùng",
           "request": {
             "method": "GET",
             "header": [],
@@ -965,7 +965,7 @@
           }
         },
         {
-          "name": "Tạo người dùng (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Tạo người dùng",
           "request": {
             "method": "POST",
             "header": [
@@ -997,7 +997,7 @@
           }
         },
         {
-          "name": "Xem người dùng theo ID (admin/so_nnmt/ubnd_tinh)",
+          "name": "[Admin/so_nnmt/ubnd_tinh] Xem người dùng theo ID",
           "request": {
             "method": "GET",
             "header": [],
@@ -1021,7 +1021,7 @@
           }
         },
         {
-          "name": "Đổi vai trò người dùng (admin)",
+          "name": "[Admin] Đổi vai trò người dùng",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1055,7 +1055,7 @@
           }
         },
         {
-          "name": "Khóa/Mở khóa người dùng (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Khóa/Mở khóa người dùng",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1089,7 +1089,7 @@
           }
         },
         {
-          "name": "Đặt lại mật khẩu người dùng (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Đặt lại mật khẩu người dùng",
           "request": {
             "method": "POST",
             "header": [
@@ -1123,7 +1123,7 @@
           }
         },
         {
-          "name": "Xóa người dùng (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Xóa người dùng",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -1345,7 +1345,7 @@
           }
         },
         {
-          "name": "Gửi thông báo - Tới người dùng (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Gửi thông báo - Tới người dùng",
           "request": {
             "method": "POST",
             "header": [
@@ -1377,7 +1377,7 @@
           }
         },
         {
-          "name": "Gửi thông báo - Toàn hệ thống (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Gửi thông báo - Toàn hệ thống",
           "request": {
             "method": "POST",
             "header": [
@@ -1409,7 +1409,7 @@
           }
         },
         {
-          "name": "Gửi thông báo - Theo vai trò (admin/so_nnmt)",
+          "name": "[Admin/so_nnmt] Gửi thông báo - Theo vai trò",
           "request": {
             "method": "POST",
             "header": [
@@ -1817,7 +1817,7 @@
       ]
     },
     {
-      "name": "Báo cáo/Văn bản",
+      "name": "Báo cáo / Văn bản",
       "item": [
         {
           "name": "[Public] Danh sách tài liệu",
@@ -2061,7 +2061,7 @@
       "description": "Phản ánh hiện trường của người dân (cháy rừng, vi phạm, hiện trạng) kèm vị trí GPS và ảnh/video.\n\nLuồng:\n- Người dân (đăng nhập hoặc ẩn danh qua header x-anonymous-id) gửi phản ánh kèm toạ độ + media.\n- Cán bộ xem danh sách, bản đồ GeoJSON, và cập nhật trạng thái xử lý.\n\nEnum:\n- category: chay_rung | vi_pham | hien_trang\n- status:   new | in_progress | resolved | rejected\n- priority: low | normal | high | urgent\n\nScript test ở \"Tạo phản ánh\" tự lưu feedbackId.",
       "item": [
         {
-          "name": "1. Tạo phản ánh (người dân)",
+          "name": "[Public] Tạo phản ánh",
           "event": [
             {
               "listen": "test",
@@ -2175,7 +2175,7 @@
           }
         },
         {
-          "name": "2. Phản ánh của tôi (mine)",
+          "name": "[Public] Phản ánh của tôi",
           "event": [
             {
               "listen": "test",
@@ -2272,7 +2272,7 @@
           }
         },
         {
-          "name": "3. Chi tiết phản ánh (owner)",
+          "name": "[Public] Chi tiết phản ánh",
           "event": [
             {
               "listen": "test",
@@ -2327,7 +2327,7 @@
           }
         },
         {
-          "name": "4. Admin — Bản đồ phản ánh (GeoJSON)",
+          "name": "[Admin] Bản đồ phản ánh (GeoJSON)",
           "event": [
             {
               "listen": "test",
@@ -2399,7 +2399,7 @@
           }
         },
         {
-          "name": "5. Admin — Danh sách phản ánh",
+          "name": "[Admin] Danh sách phản ánh",
           "event": [
             {
               "listen": "test",
@@ -2488,7 +2488,7 @@
           }
         },
         {
-          "name": "6. Admin — Chi tiết phản ánh",
+          "name": "[Admin] Chi tiết phản ánh",
           "event": [
             {
               "listen": "test",
@@ -2539,7 +2539,7 @@
           }
         },
         {
-          "name": "7. Admin — Cập nhật trạng thái",
+          "name": "[Admin] Cập nhật trạng thái",
           "event": [
             {
               "listen": "test",
@@ -2667,7 +2667,7 @@
           }
         },
         {
-          "name": "[Public] Chi tiet ban do PDF",
+          "name": "[Public] Chi tiết bản đồ PDF",
           "request": {
             "auth": {
               "type": "noauth"
@@ -2694,7 +2694,7 @@
           }
         },
         {
-          "name": "[Admin] Danh sach ban do PDF (toan bo)",
+          "name": "[Admin] Danh sách bản đồ PDF (toàn bộ)",
           "request": {
             "method": "GET",
             "header": [],
@@ -2746,7 +2746,7 @@
           }
         },
         {
-          "name": "[Admin] Chi tiet ban do PDF (day du vi+en)",
+          "name": "[Admin] Chi tiết bản đồ PDF (đầy đủ vi+en)",
           "request": {
             "method": "GET",
             "header": [],
@@ -2771,7 +2771,7 @@
           }
         },
         {
-          "name": "[Admin] Upload ban do PDF (+ thumbnail)",
+          "name": "[Admin] Upload bản đồ PDF (+ thumbnail)",
           "request": {
             "method": "POST",
             "header": [],
@@ -2862,7 +2862,7 @@
           }
         },
         {
-          "name": "[Admin] Cap nhat ban do PDF (PUT gop)",
+          "name": "[Admin] Cập nhật gộp bản đồ PDF (PUT)",
           "request": {
             "method": "PUT",
             "header": [
@@ -2896,7 +2896,7 @@
           }
         },
         {
-          "name": "[Admin] Upsert ban dich ban do PDF",
+          "name": "[Admin] Upsert bản dịch bản đồ PDF",
           "request": {
             "method": "PUT",
             "header": [
@@ -2932,7 +2932,7 @@
           }
         },
         {
-          "name": "[Admin] Xoa ban do PDF",
+          "name": "[Admin] Xóa bản đồ PDF",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -2963,7 +2963,7 @@
       "description": "Các API proxy OGC qua NodeJS. Frontend không gửi trực tiếp GeoServer; token/credential GeoServer được giữ server-side.",
       "item": [
         {
-          "name": "Danh sách layer bản đồ",
+          "name": "[Public] Danh sách layer bản đồ",
           "request": {
             "auth": {
               "type": "noauth"
@@ -2990,7 +2990,7 @@
           }
         },
         {
-          "name": "Chi tiết layer",
+          "name": "[Public] Chi tiết layer",
           "request": {
             "method": "GET",
             "header": [
@@ -3021,7 +3021,7 @@
           }
         },
         {
-          "name": "Tạo layer mới",
+          "name": "[Admin] Tạo layer mới",
           "request": {
             "method": "POST",
             "header": [
@@ -3065,7 +3065,7 @@
           }
         },
         {
-          "name": "Cập nhật layer",
+          "name": "[Admin] Cập nhật layer",
           "request": {
             "method": "PATCH",
             "header": [
@@ -3110,7 +3110,7 @@
           }
         },
         {
-          "name": "Xóa layer",
+          "name": "[Admin] Xóa layer",
           "request": {
             "method": "DELETE",
             "header": [
@@ -3141,7 +3141,7 @@
           }
         },
         {
-          "name": "Publish layer lên GeoServer",
+          "name": "[Admin] Publish layer lên GeoServer",
           "request": {
             "method": "POST",
             "header": [],
@@ -3167,7 +3167,7 @@
           }
         },
         {
-          "name": "Unpublish layer khỏi GeoServer",
+          "name": "[Admin] Unpublish layer khỏi GeoServer",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -3193,7 +3193,7 @@
           }
         },
         {
-          "name": "Bật/tắt layer active",
+          "name": "[Admin] Bật/tắt layer active",
           "request": {
             "method": "PATCH",
             "header": [
@@ -3228,7 +3228,7 @@
           }
         },
         {
-          "name": "Import file GIS (Shapefile/GeoJSON/KML/GeoTIFF)",
+          "name": "[Admin] Import file GIS (Shapefile/GeoJSON/KML/GeoTIFF)",
           "request": {
             "method": "POST",
             "header": [
@@ -3329,7 +3329,7 @@
           }
         },
         {
-          "name": "Import inline GeoJSON vào layer",
+          "name": "[Admin] Import inline GeoJSON vào layer",
           "request": {
             "method": "POST",
             "header": [
@@ -3375,7 +3375,7 @@
           }
         },
         {
-          "name": "Lịch sử import jobs của layer",
+          "name": "[Admin] Lịch sử import jobs của layer",
           "request": {
             "method": "GET",
             "header": [
@@ -3407,7 +3407,7 @@
           }
         },
         {
-          "name": "Kiểm tra tiến độ import job",
+          "name": "[Admin] Kiểm tra tiến độ import job",
           "request": {
             "method": "GET",
             "header": [
@@ -3445,7 +3445,7 @@
           }
         },
         {
-          "name": "Harvest raster GeoTIFF",
+          "name": "[Admin] Harvest raster GeoTIFF",
           "request": {
             "method": "POST",
             "header": [
@@ -3486,7 +3486,7 @@
       "description": "Thời tiết thời gian thực & dự báo. Tile proxy qua backend (không lộ API key). Wind-grid dùng Open-Meteo (miễn phí, không cần key). Point & tile cần OPENWEATHER_API_KEY trong .env.",
       "item": [
         {
-          "name": "Danh sách layer tile",
+          "name": "[Public] Danh sách layer tile",
           "request": {
             "auth": {
               "type": "noauth"
@@ -3534,7 +3534,7 @@
           ]
         },
         {
-          "name": "Thời tiết tại điểm (Current Weather)",
+          "name": "[Public] Thời tiết tại điểm (Current Weather)",
           "request": {
             "auth": {
               "type": "noauth"
@@ -3585,7 +3585,7 @@
           ]
         },
         {
-          "name": "Lưới gió (Wind Grid — Open-Meteo)",
+          "name": "[Public] Lưới gió (Wind Grid — Open-Meteo)",
           "request": {
             "auth": {
               "type": "noauth"
@@ -3638,7 +3638,7 @@
           ]
         },
         {
-          "name": "Proxy Tile (PNG)",
+          "name": "[Public] Proxy Tile (PNG)",
           "request": {
             "auth": {
               "type": "noauth"
@@ -3685,7 +3685,7 @@
           ]
         },
         {
-          "name": "Làm mới cache (Admin)",
+          "name": "[Admin] Làm mới cache",
           "request": {
             "method": "POST",
             "header": [
@@ -3741,11 +3741,11 @@
       ]
     },
     {
-      "name": "Chia sẻ API Lớp GIS",
+      "name": "Chia sẻ API lớp GIS",
       "description": "=== SERVER MÌNH LÀ NHÀ CUNG CẤP — CẤP KEY CHO BÊN THỨ BA ===\n\nCác Sở, đơn vị khác hoặc đối tác muốn lấy dữ liệu GIS của tỉnh Kon Tum sẽ được system_admin cấp một API key. Họ dùng key đó gọi thẳng vào server mình, KHÔNG cần tài khoản, KHÔNG cần JWT.\n\nKhác OpenWeather:\n- OpenWeather: mình là khách, gọi API của họ bằng OPENWEATHER_API_KEY\n- Folder này: mình là chủ, cấp key cho người khác dùng X-Map-Api-Key\n\n--- Luồng sử dụng ---\n1. Admin gọi 'Tạo API Key' → server trả raw key (mapk_xxx...) — chỉ hiện 1 lần, script tự lưu vào {{mapApiKey}}\n2. Giao raw key cho đối tác (qua email / Zalo / ...)\n3. Đối tác gọi /map-data/layer để xem lớp được cấp\n4. Đối tác gọi /map-data/features?bbox=... để lấy GeoJSON\n\n--- Bảo mật ---\n• Key format: mapk_ + 64 ký tự base64url (~69 ký tự tổng)\n• DB KHÔNG lưu raw key, chỉ lưu sha256 hash + 12 ký tự đầu + 4 ký tự cuối\n• Rate limit theo scope.rate_per_min (mặc định 60 req/phút)\n• Có thể giới hạn bbox, tắt key, đặt ngày hết hạn\n\n--- Nhóm request ---\n• Admin (cần JWT): Tạo / Xem / Sửa / Xoay key / Xóa\n• Consumer (chỉ cần X-Map-Api-Key): Metadata lớp, Features GeoJSON",
       "item": [
         {
-          "name": "Admin — Tạo API Key",
+          "name": "[Admin] Tạo API Key",
           "event": [
             {
               "listen": "test",
@@ -3813,7 +3813,7 @@
           }
         },
         {
-          "name": "Admin — Danh sách API Key",
+          "name": "[Admin] Danh sách API Key",
           "request": {
             "method": "GET",
             "header": [
@@ -3880,7 +3880,7 @@
           ]
         },
         {
-          "name": "Admin — Xem API Key",
+          "name": "[Admin] Xem API Key",
           "request": {
             "method": "GET",
             "header": [
@@ -3930,7 +3930,7 @@
           ]
         },
         {
-          "name": "Admin — Cập nhật API Key",
+          "name": "[Admin] Cập nhật API Key",
           "request": {
             "method": "PATCH",
             "header": [
@@ -3988,7 +3988,7 @@
           ]
         },
         {
-          "name": "Admin — Xoay Key (Regenerate)",
+          "name": "[Admin] Xoay Key (Regenerate)",
           "event": [
             {
               "listen": "test",
@@ -4048,7 +4048,7 @@
           }
         },
         {
-          "name": "Admin — Xóa API Key",
+          "name": "[Admin] Xóa API Key",
           "request": {
             "method": "DELETE",
             "header": [
@@ -4098,7 +4098,7 @@
           ]
         },
         {
-          "name": "Consumer — Metadata Lớp",
+          "name": "[Consumer] Metadata Lớp",
           "request": {
             "auth": {
               "type": "noauth"
@@ -4146,7 +4146,7 @@
           ]
         },
         {
-          "name": "Consumer — Lấy Features (GeoJSON)",
+          "name": "[Consumer] Lấy Features (GeoJSON)",
           "request": {
             "auth": {
               "type": "noauth"
@@ -4208,7 +4208,7 @@
           ]
         },
         {
-          "name": "Consumer — Test Key sai (expect 401)",
+          "name": "[Consumer] Test Key sai (expect 401)",
           "request": {
             "auth": {
               "type": "noauth"
@@ -4257,11 +4257,11 @@
       ]
     },
     {
-      "name": "Viễn Thám / Ảnh Vệ Tinh",
+      "name": "Viễn thám / Ảnh vệ tinh",
       "description": "Quản lý ảnh vệ tinh GeoTIFF: upload, xem, download, xử lý, WebGIS layers.\n\nLưu ý:\n- Upload file dùng multipart/form-data (field `raster_file` bắt buộc)\n- Script test tự lưu `remoteImageId` và `remoteFileId` sau khi upload\n- Endpoint download trả về presigned URL (hết hạn sau 15 phút)\n- Endpoint `/layers` không cần đăng nhập (public)\n\nBase URL test: https://apikontum.tourismpj.pro.vn/api/v1",
       "item": [
         {
-          "name": "1. Upload ảnh vệ tinh",
+          "name": "[Admin] Upload ảnh vệ tinh",
           "event": [
             {
               "listen": "test",
@@ -4406,7 +4406,7 @@
           }
         },
         {
-          "name": "2. Lấy presigned upload URL (file lớn)",
+          "name": "[Admin] Lấy presigned upload URL (file lớn)",
           "request": {
             "method": "GET",
             "header": [
@@ -4461,7 +4461,7 @@
           ]
         },
         {
-          "name": "3. Danh sách ảnh (có phân trang)",
+          "name": "[Public] Danh sách ảnh (có phân trang)",
           "request": {
             "method": "GET",
             "header": [
@@ -4591,7 +4591,7 @@
           ]
         },
         {
-          "name": "4. Chi tiết ảnh",
+          "name": "[Public] Chi tiết ảnh",
           "request": {
             "method": "GET",
             "header": [
@@ -4642,7 +4642,7 @@
           ]
         },
         {
-          "name": "5. Cập nhật metadata ảnh",
+          "name": "[Admin] Cập nhật metadata ảnh",
           "request": {
             "method": "PATCH",
             "header": [
@@ -4701,7 +4701,7 @@
           ]
         },
         {
-          "name": "6. Lấy COG URL cho WebGIS",
+          "name": "[Public] Lấy COG URL cho WebGIS",
           "request": {
             "method": "GET",
             "header": [
@@ -4753,7 +4753,7 @@
           ]
         },
         {
-          "name": "7. Lấy URL download",
+          "name": "[Admin] Lấy URL download",
           "request": {
             "method": "GET",
             "header": [
@@ -4811,7 +4811,7 @@
           ]
         },
         {
-          "name": "8. Thống kê band ảnh",
+          "name": "[Public] Thống kê band ảnh",
           "request": {
             "method": "GET",
             "header": [
@@ -4863,7 +4863,7 @@
           ]
         },
         {
-          "name": "9. Trigger xử lý (pipeline)",
+          "name": "[Admin] Trigger xử lý (pipeline)",
           "request": {
             "method": "POST",
             "header": [
@@ -4923,7 +4923,7 @@
           ]
         },
         {
-          "name": "10. Layers WebGIS (public)",
+          "name": "[Public] Layers WebGIS",
           "request": {
             "auth": {
               "type": "noauth"
@@ -4993,7 +4993,7 @@
           ]
         },
         {
-          "name": "11. Xóa ảnh (soft delete)",
+          "name": "[Admin] Xóa ảnh (soft delete)",
           "request": {
             "method": "DELETE",
             "header": [
@@ -5050,7 +5050,7 @@
       "description": "Thống kê lớp phủ/che phủ rừng theo huyện và phân tích không gian tỉnh Kon Tum (EP-07).\n\nDữ liệu nền là SỐ LIỆU THỰC:\n- 10 huyện/thành phố: diện tích, dân số\n- Che phủ rừng 2024 theo huyện (công bố tỉnh kontum.gov.vn)\n- Tổng hợp rừng 2023/2024 (hiện trạng rừng toàn quốc, Bộ NN&PTNT)\n\nQuyền:\n- /stats/administrative-units, /stats/landcover: công khai (optionalAuth)\n- /stats/dashboard: statistics.dashboard\n- /spatial/forest-change: spatial.read\n- /spatial/residential-distance: spatial.analyze",
       "item": [
         {
-          "name": "1. Đơn vị hành chính (huyện)",
+          "name": "[Public] Đơn vị hành chính (huyện)",
           "event": [
             {
               "listen": "test",
@@ -5105,7 +5105,7 @@
           }
         },
         {
-          "name": "2. Che phủ rừng theo huyện (US-060)",
+          "name": "[Public] Che phủ rừng theo huyện (US-060)",
           "event": [
             {
               "listen": "test",
@@ -5165,7 +5165,7 @@
           }
         },
         {
-          "name": "3. Dashboard điều hành (US-063)",
+          "name": "[Admin] Dashboard điều hành (US-063)",
           "event": [
             {
               "listen": "test",
@@ -5221,7 +5221,7 @@
           }
         },
         {
-          "name": "4. Thay đổi rừng giữa 2 mốc (US-061)",
+          "name": "[Admin] Thay đổi rừng giữa 2 mốc (US-061)",
           "event": [
             {
               "listen": "test",
@@ -5292,7 +5292,7 @@
           }
         },
         {
-          "name": "5. Khoảng cách dân cư – rừng (US-062)",
+          "name": "[Admin] Khoảng cách dân cư – rừng (US-062)",
           "event": [
             {
               "listen": "test",
@@ -5369,7 +5369,7 @@
       "description": "Kết nối WebSocket để nhận thông báo realtime khi xử lý ảnh vệ tinh hoàn tất.\n\nEndpoint: wss://apikontum.tourismpj.pro.vn/ws?token={{accessToken}}\n\n──────────────────────────────────────────\nLUỒNG SỬ DỤNG:\n1. Đăng nhập → lấy accessToken\n2. Kết nối WebSocket với token\n3. Subscribe channel theo imageId vừa upload\n4. Nhận event khi processing xong\n──────────────────────────────────────────\n\nCÁC EVENT SERVER GỬI XUỐNG:\n\n• connected\n  → Xác nhận kết nối thành công\n  data: { userId, message }\n\n• subscribed\n  → Xác nhận đã subscribe channel thành công\n  data: { channels: ['remote_sensing:1'] }\n\n• remote_sensing:statistics_ready  (~60s sau upload)\n  → Tính xong thống kê band, hiển thị bảng ngay\n  data: { imageId, bandCount, statistics: [{ bandIndex, min, max, mean, std }] }\n\n• remote_sensing:job_completed  (sau statistics_ready)\n  → Pipeline xong hoàn toàn, COG sẵn sàng cho WebGIS\n  data: { jobId, imageId, imageName, bandCount, processedAt }\n\n• remote_sensing:job_failed  (nếu lỗi)\n  → Job thất bại sau hết số lần retry\n  data: { jobId, imageId, status, errorMessage }\n\n──────────────────────────────────────────\nLƯU Ý POSTMAN:\nPostman hỗ trợ WebSocket qua tab \"New > WebSocket Request\".\nBruno hiện chưa hỗ trợ WebSocket — dùng Postman hoặc wscat để test.\n\nTest bằng wscat (npm i -g wscat):\n  wscat -c \"wss://apikontum.tourismpj.pro.vn/ws?token=<accessToken>\"",
       "item": [
         {
-          "name": "1. Kết nối WebSocket",
+          "name": "[Public] Kết nối WebSocket",
           "request": {
             "method": "GET",
             "header": [
@@ -5404,7 +5404,7 @@
           "event": []
         },
         {
-          "name": "2. Subscribe channel ảnh viễn thám",
+          "name": "[Public] Subscribe channel ảnh viễn thám",
           "request": {
             "method": "GET",
             "header": [],
@@ -5429,7 +5429,7 @@
           "event": []
         },
         {
-          "name": "3. [Mẫu] Event statistics_ready nhận được",
+          "name": "[Mẫu] Event statistics_ready nhận được",
           "request": {
             "method": "GET",
             "header": [
@@ -5483,7 +5483,7 @@
           ]
         },
         {
-          "name": "4. [Mẫu] Event job_completed nhận được",
+          "name": "[Mẫu] Event job_completed nhận được",
           "request": {
             "method": "GET",
             "header": [
@@ -5534,6 +5534,116 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Mobile Field Updates",
+      "description": "EP-10 — Sở NN&MT (kiểm lâm) đo đạc GPS ngoài hiện trường và cập nhật đối tượng (tạo mới hoặc sửa thuộc tính/tọa độ) trên 1 layer GIS điểm (POINT/MULTIPOINT). Chỉ tài khoản đã đăng nhập role so_nnmt/system_admin — không hỗ trợ anonymous như module Phản ánh.\n\nGhi đồng bộ: feature vật lý + gis.layer_edit_history (audit) + field.field_updates (bookkeeping) cùng 1 transaction.\n\nGET /mobile/sync trả về các field-update của chính user kể từ mốc thời gian `since` (offline-first — dùng khi app đồng bộ lại sau khi mất mạng).",
+      "item": [
+        {
+          "name": "[Admin] Tạo/cập nhật đối tượng (field-update)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 201/200', () => pm.expect([200,201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"layerCode\": \"{{mapLayerCode}}\",\n  \"featureId\": null,\n  \"lng\": 107.95,\n  \"lat\": 14.35,\n  \"attributes\": {},\n  \"clientUuid\": \"kontum-field-0001\",\n  \"note\": \"Đo đạc bổ sung ranh giới rừng khu vực thôn 5\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/mobile/field-updates?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mobile",
+                "field-updates"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Đăng nhập role so_nnmt/system_admin. Layer đích phải là POINT/MULTIPOINT và is_editable=true.\n\n`featureId`: để null để tạo feature mới, truyền id để cập nhật feature đã tồn tại.\n`attributes`: object key-value — key phải khớp đúng tên cột thật của bảng vật lý layer đó (whitelist qua information_schema), sai cột sẽ trả 400 kèm danh sách cột hợp lệ.\n`clientUuid`: chống gửi trùng khi offline — gửi lại cùng uuid sẽ trả `duplicated:true`, không tạo bản ghi mới.\n\nGhi đồng bộ vào bảng vật lý của layer + gis.layer_edit_history (source='api') + field.field_updates trong 1 transaction."
+          }
+        },
+        {
+          "name": "[Admin] Đồng bộ (sync) field-updates của tôi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/mobile/sync?since={{expectedUpdatedAt}}&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mobile",
+                "sync"
+              ],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "{{expectedUpdatedAt}}",
+                  "description": "ISO 8601, tùy chọn — bỏ query này để lấy toàn bộ field-update của user"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Trả về các field-update của chính user hiện tại được tạo sau mốc `since`, kèm `serverTime` để client lưu làm cursor cho lần đồng bộ tiếp theo."
+          }
         }
       ]
     }

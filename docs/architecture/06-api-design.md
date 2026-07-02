@@ -359,12 +359,60 @@ Luồng mặc định: `new -> in_progress|rejected`, `in_progress -> resolved|r
 
 ## 11. Mobile — `/api/v1/mobile` *(EP-10)*
 
-| Method | Endpoint | Mô tả |
-|--------|----------|-------|
-| POST | `/devices/register` | Đăng ký FCM token thiết bị |
-| POST | `/field-updates` | Cập nhật đối tượng hiện trường (đo đạc) |
-| GET | `/sync?since=` | Đồng bộ dữ liệu offline-first |
-| GET | `/alerts/nearby?lng=&lat=&radius=` | Cảnh báo gần vị trí |
+| Method | Endpoint | Auth | Trạng thái | Mô tả |
+|--------|----------|------|-----------|-------|
+| POST | `/field-updates` | so_nnmt, system_admin | ✅ đã code | Cập nhật đối tượng hiện trường (đo đạc GPS) |
+| GET | `/sync?since=` | so_nnmt, system_admin | ✅ đã code | Đồng bộ tăng dần field-updates của chính user |
+| POST | `/devices/register` | — | ⬜ chưa code (dùng tạm `POST /notifications/devices`) | Đăng ký FCM token thiết bị |
+| GET | `/alerts/nearby?lng=&lat=&radius=` | — | ⬜ chưa code | Cảnh báo gần vị trí |
+
+### 11.1 `POST /mobile/field-updates`
+
+Tạo mới hoặc cập nhật 1 feature trên layer GIS điểm (`geometry_type ∈ {POINT, MULTIPOINT}`, `is_editable = true`). Ghi đồng bộ trong 1 transaction: bảng vật lý của layer + `gis.layer_edit_history` (`source='api'`) + `field.field_updates` (bookkeeping cho mobile sync).
+
+Quyền: `map_layers.feature_create` (khi `featureId` là null) hoặc `map_layers.feature_update` (khi có `featureId`) — `so_nnmt` đã có sẵn cả hai từ migration `010`.
+
+```jsonc
+// Request
+{
+  "layerCode": "ranh_gioi_rung",
+  "featureId": null,             // null = tạo mới; có giá trị = cập nhật feature đã tồn tại
+  "lng": 107.95, "lat": 14.35,   // 106–109 / 13–16.5
+  "attributes": { "ten_lo": "Lô A12" }, // key phải khớp cột thật của bảng vật lý layer
+  "clientUuid": "kontum-field-0001",     // chống gửi trùng khi offline
+  "note": "Đo đạc bổ sung ranh giới rừng khu vực thôn 5"
+}
+```
+```jsonc
+// Response 201 (hoặc 200 + duplicated:true nếu clientUuid trùng)
+{
+  "message": "Cập nhật đối tượng thành công",
+  "data": {
+    "fieldUpdate": { "id": 1, "layerId": 3, "layerCode": "ranh_gioi_rung", "featureId": 42,
+      "action": "insert", "attributes": { "ten_lo": "Lô A12" }, "clientUuid": "kontum-field-0001",
+      "lng": 107.95, "lat": 14.35, "createdAt": "2026-07-01T10:00:00.000Z" },
+    "feature": { "id": 42, "geometry": { "type": "Point", "coordinates": [107.95, 14.35] } },
+    "duplicated": false
+  }
+}
+```
+
+Lỗi: 404 nếu layer/feature không tồn tại; 400 nếu layer không phải POINT/MULTIPOINT, không `is_editable`, hoặc `attributes` chứa cột lạ (message liệt kê cột hợp lệ); 403 nếu thiếu quyền `feature_create`/`feature_update`.
+
+### 11.2 `GET /mobile/sync?since=`
+
+Trả về các field-update **của chính user đang gọi** được tạo sau mốc `since` (ISO 8601, tùy chọn — bỏ qua để lấy toàn bộ). Dùng cho app đồng bộ lại sau khi mất mạng.
+
+```jsonc
+// Response 200
+{
+  "message": "Đồng bộ dữ liệu thành công",
+  "data": {
+    "fieldUpdates": [ /* mảng field-update, xem shape ở 11.1 */ ],
+    "serverTime": "2026-07-01T10:05:00.000Z"   // client lưu làm `since` cho lần sync tiếp theo
+  }
+}
+```
 
 ---
 
