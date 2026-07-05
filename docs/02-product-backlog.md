@@ -14,7 +14,7 @@
 | EP-06 | Dự báo & cảnh báo cháy rừng | P0 | ⬜ |
 | EP-07 | Phân tích không gian & Thống kê | P2 | ⬜ |
 | EP-08 | CMS: Tin tức, Văn bản, Bản đồ PDF | P2 | 🟡 |
-| EP-09 | Phản ánh hiện trường (Feedback) | P1 | ⬜ |
+| EP-09 | Phản ánh hiện trường (Feedback) | P1 | ✅ Done |
 | EP-10 | MobileGIS | P1 | ⬜ |
 | EP-11 | Vận hành, Pipeline dữ liệu & DevOps | P0 | 🟡 |
 
@@ -154,10 +154,10 @@ Scenario: Cảnh báo ưu tiên cao
 
 | ID | User Story | AC | P | SP | TT |
 |----|-----------|----|---|----|----|
-| US-080 | Là người dân, tôi muốn gửi phản ánh kèm ảnh + GPS. | Bảng `field.feedback`; upload ảnh; geom point 4326. | P1 | 8 | ⬜ |
-| US-081 | Là `so_nnmt`, tôi muốn xử lý phản ánh theo trạng thái. | mới → đang xử lý → đã xử lý; ghi chú xử lý. | P1 | 5 | ⬜ |
-| US-082 | Là UBND tỉnh, tôi muốn theo dõi phản ánh toàn tỉnh. | Bản đồ + danh sách + lọc theo trạng thái/khu vực. | P2 | 5 | ⬜ |
-| US-083 | Là người dân, tôi muốn theo dõi tiến độ phản ánh của tôi. | Xem trạng thái + phản hồi cơ quan. | P2 | 3 | ⬜ |
+| US-080 | Là người dân, tôi muốn gửi phản ánh kèm ảnh + GPS. | Bảng `field.feedback`; upload ảnh; geom point 4326. | P1 | 8 | ✅ |
+| US-081 | Là `so_nnmt`, tôi muốn xử lý phản ánh theo trạng thái. | mới → đang xử lý → đã xử lý; ghi chú xử lý; thông báo người gửi. | P1 | 5 | ✅ |
+| US-082 | Là UBND tỉnh, tôi muốn theo dõi phản ánh toàn tỉnh. | Bản đồ + danh sách + lọc theo trạng thái/khu vực. | P2 | 5 | ✅ |
+| US-083 | Là người dân, tôi muốn theo dõi tiến độ phản ánh của tôi. | Xem trạng thái + phản hồi cơ quan. | P2 | 3 | ✅ |
 
 ---
 

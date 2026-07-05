@@ -1,4 +1,5 @@
 const feedbackRepository = require('../repositories/feedback.repository');
+const notificationService = require('./notification.service');
 const { Api400Error, Api403Error, Api404Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 const { stripTags } = require('../utils/cms.util');
@@ -69,6 +70,18 @@ const canAccessOwn = (actor, feedback, anonymousId) => {
     return Boolean(anonymousId && feedback.anonymous_id === anonymousId);
 };
 
+// Gửi realtime/push best-effort — lỗi notification không được làm hỏng luồng chính.
+const dispatchSafe = (fn) => {
+    try {
+        const result = fn();
+        if (result && typeof result.catch === 'function') {
+            result.catch((err) => console.error('[FEEDBACK] notify error:', err.message));
+        }
+    } catch (err) {
+        console.error('[FEEDBACK] notify error:', err.message);
+    }
+};
+
 const createFeedback = async (actor, payload, files = [], context = {}) => {
     const identity = ensureOwnerIdentity(actor, context.anonymousId, context.lang);
     const clientUuid = payload.clientUuid || null;
@@ -98,6 +111,24 @@ const createFeedback = async (actor, payload, files = [], context = {}) => {
         lat: payload.lat,
         createdBy: actor?.id || null,
     });
+
+    // Doc 14 §I1 — phản ánh cháy rừng broadcast ngay cho so_nnmt (WS + FCM topic role).
+    // Đối chiếu "gần vùng nguy cơ ≥ cấp 4" để nâng priority sẽ bổ sung khi EP-06 có dữ liệu fire.*.
+    if (feedback.category === 'chay_rung') {
+        dispatchSafe(() => notificationService.broadcastToRole('so_nnmt', {
+            channel: 'feedback',
+            type: 'feedback_fire_report',
+            title: t('feedback_notify_fire_title', context.lang),
+            body: t('feedback_notify_fire_body', context.lang, { title: feedback.title }),
+            data: {
+                feedbackId: feedback.id,
+                category: feedback.category,
+                priority: feedback.priority,
+                lng: feedback.lng,
+                lat: feedback.lat,
+            },
+        }, context));
+    }
 
     return {
         message: t('feedback_created_success', context.lang),
@@ -161,7 +192,8 @@ const getFeedbackById = async (actor, id, context = {}) => {
         throw new Api403Error(t('no_permission', context.lang));
     }
 
-    const logs = isStaff(actor) ? await feedbackRepository.findStatusLogs(id) : [];
+    // Doc 14 §I4 — chủ phản ánh cũng thấy lịch sử trạng thái + phản hồi cơ quan.
+    const logs = await feedbackRepository.findStatusLogs(id);
     return { ...toFeedbackItem(feedback), statusLogs: logs.map(toStatusLog) };
 };
 
@@ -178,12 +210,33 @@ const updateStatus = async (actor, id, payload, context = {}) => {
         }
     }
 
+    const note = payload.note ? stripTags(payload.note) : null;
     const updated = await feedbackRepository.updateStatus(id, {
         toStatus: payload.toStatus,
-        note: payload.note ? stripTags(payload.note) : null,
+        note,
         changedBy: actor.id,
     });
     if (!updated) {throw new Api404Error(t('feedback_not_found', context.lang));}
+
+    // Doc 14 §I2 — thông báo người gửi khi trạng thái thay đổi (chỉ user đăng nhập,
+    // phản ánh ẩn danh không có kênh nhận).
+    if (existing.user_id) {
+        dispatchSafe(() => notificationService.sendToUser(existing.user_id, {
+            channel: 'feedback',
+            type: 'feedback_status_changed',
+            title: t('feedback_notify_status_title', context.lang),
+            body: t('feedback_notify_status_body', context.lang, {
+                title: existing.title,
+                status: t(`feedback_status_${payload.toStatus}`, context.lang),
+            }),
+            data: {
+                feedbackId: Number(id),
+                fromStatus: existing.status,
+                toStatus: payload.toStatus,
+                note,
+            },
+        }, context));
+    }
 
     return {
         message: t('feedback_updated_success', context.lang),

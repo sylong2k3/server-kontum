@@ -28,20 +28,22 @@ const create = async (client, { userId, layerId, featureId, action, attributes, 
     return rows[0];
 };
 
-const findSince = async (userId, since) => {
+const findSince = async (userId, since, limit = 500) => {
     const params = [userId];
     let where = 'user_id = $1';
     if (since) {
         params.push(since);
         where += ` AND created_at > $${params.length}`;
     }
+    params.push(limit);
     const { rows } = await db.query(
         `SELECT fu.id, fu.layer_id, l.code AS layer_code, fu.feature_id, fu.action,
                 fu.attributes, fu.client_uuid, fu.note, fu.lng, fu.lat, fu.created_at
          FROM field.field_updates fu
          JOIN gis.layer_registry l ON l.id = fu.layer_id
          WHERE ${where}
-         ORDER BY fu.created_at ASC`,
+         ORDER BY fu.created_at ASC
+         LIMIT $${params.length}`,
         params
     );
     return rows;

@@ -393,7 +393,11 @@ const findFeaturesAsGeoJSON = async (layer, { bbox = null, limit = 500, offset =
  *
  * @returns {Promise<string>} tên cột PK
  */
+const _pkColumnCache = new Map();
+
 const getPrimaryKeyColumn = async (layer, client = null) => {
+    const cacheKey = `${layer.schema_name}.${layer.table_name}`;
+    if (_pkColumnCache.has(cacheKey)) { return _pkColumnCache.get(cacheKey); }
     const { rows } = await exec(client)(
         `SELECT a.attname
          FROM pg_index i
@@ -403,7 +407,9 @@ const getPrimaryKeyColumn = async (layer, client = null) => {
          LIMIT 1`,
         [layer.schema_name, layer.table_name]
     );
-    return rows[0]?.attname || 'id';
+    const pk = rows[0]?.attname || 'id';
+    _pkColumnCache.set(cacheKey, pk);
+    return pk;
 };
 
 /**
@@ -419,7 +425,8 @@ const getEditableColumns = async (layer, client = null) => {
     const { rows } = await exec(client)(
         `SELECT column_name FROM information_schema.columns
          WHERE table_schema = $1 AND table_name = $2
-           AND column_name NOT IN ($3, $4)`,
+           AND column_name NOT IN ($3, $4)
+           AND udt_name <> 'geometry'`,
         [layer.schema_name, layer.table_name, pkColumn, geometryColumn]
     );
     return rows.map((r) => r.column_name);

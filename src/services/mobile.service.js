@@ -60,17 +60,18 @@ const createFieldUpdate = async (actor, payload, lang) => {
     }
 
     const client = await db.pool.connect();
+    let fieldUpdate, feature;
     try {
         await client.query('BEGIN');
 
         let oldData = null;
-        let feature;
         if (action === 'update') {
             oldData = await layerRepo.findFeatureById(client, layer, payload.featureId);
             if (!oldData) { throw new Api404Error(t('map_feature_not_found', lang)); }
             feature = await layerRepo.updateFeature(client, layer, payload.featureId, {
                 lng: payload.lng, lat: payload.lat, attributes,
             });
+            if (!feature) { throw new Api404Error(t('map_feature_not_found', lang)); }
         } else {
             feature = await layerRepo.insertFeature(client, layer, {
                 lng: payload.lng, lat: payload.lat, attributes,
@@ -82,21 +83,13 @@ const createFieldUpdate = async (actor, payload, lang) => {
             oldData, newData: attributes, geometryChanged: true, changedBy: actor.id,
         });
 
-        const fieldUpdate = await fieldUpdateRepo.create(client, {
+        fieldUpdate = await fieldUpdateRepo.create(client, {
             userId: actor.id, layerId: layer.id, featureId: feature.id, action,
             attributes, clientUuid: payload.clientUuid, note: payload.note,
             lng: payload.lng, lat: payload.lat,
         });
 
-        await layerRepo.refreshStats(client, layer.id);
-
         await client.query('COMMIT');
-        return {
-            message: t('mobile_field_update_created_success', lang),
-            fieldUpdate: toFieldUpdateItem({ ...fieldUpdate, layer_code: layer.code }),
-            feature: { id: feature.id, geometry: feature.geometry },
-            duplicated: false,
-        };
     } catch (error) {
         await client.query('ROLLBACK');
         if (error.code === PG_UNIQUE_VIOLATION && payload.clientUuid) {
@@ -113,12 +106,25 @@ const createFieldUpdate = async (actor, payload, lang) => {
     } finally {
         client.release();
     }
+
+    // refreshStats chạy ngoài transaction — tránh full-scan kéo dài lock-hold
+    layerRepo.refreshStats(null, layer.id).catch(() => {});
+
+    return {
+        message: t('mobile_field_update_created_success', lang),
+        fieldUpdate: toFieldUpdateItem({ ...fieldUpdate, layer_code: layer.code }),
+        feature: { id: feature.id, geometry: feature.geometry },
+        duplicated: false,
+    };
 };
 
-const syncSince = async (actor, since) => {
-    const rows = await fieldUpdateRepo.findSince(actor.id, since || null);
+const syncSince = async (actor, since, limit = 500) => {
+    const cappedLimit = Math.min(Number(limit) || 500, 1000);
+    const rows = await fieldUpdateRepo.findSince(actor.id, since || null, cappedLimit + 1);
+    const hasMore = rows.length > cappedLimit;
     return {
-        fieldUpdates: rows.map(toFieldUpdateItem),
+        fieldUpdates: (hasMore ? rows.slice(0, cappedLimit) : rows).map(toFieldUpdateItem),
+        hasMore,
         serverTime: new Date().toISOString(),
     };
 };

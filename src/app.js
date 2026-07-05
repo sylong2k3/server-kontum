@@ -64,7 +64,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(morgan(":method :url :status :response-time ms - :res[content-length]"));
 app.use(passport.initialize());
 app.use(cookieParser());
 app.use(localeMiddleware);
@@ -80,6 +79,12 @@ app.use(compression({
         return compression.filter(req, res);
     },
 }));
+
+if (process.env.NODE_ENV === "development") {
+  app.use(morgan("dev"));
+} else {
+  app.use(morgan("combined"));
+}
 
 
 const limiter = rateLimit({

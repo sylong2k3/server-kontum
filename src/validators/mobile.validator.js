@@ -12,6 +12,7 @@ const createFieldUpdateSchema = Joi.object({
 
 const syncQuerySchema = Joi.object({
     since: Joi.date().iso().optional(),
+    limit: Joi.number().integer().min(1).max(1000).default(500),
 });
 
 module.exports = { createFieldUpdateSchema, syncQuerySchema };

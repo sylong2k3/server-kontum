@@ -16,7 +16,7 @@ const createFieldUpdate = async (req, res) => {
 
 const sync = async (req, res) => {
     const actor = buildActor(req);
-    const result = await mobileService.syncSince(actor, req.query.since);
+    const result = await mobileService.syncSince(actor, req.query.since, req.query.limit);
     OK(res, t('mobile_sync_success', req.lang), result);
 };
 
