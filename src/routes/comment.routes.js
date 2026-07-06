@@ -5,6 +5,7 @@ const { verifyToken, requirePermission, enforcePasswordChange } = require('../mi
 const { validate } = require('../middlewares/validate.middleware');
 const {
     commentIdParamsSchema,
+    newsIdParamsSchema,
     approveCommentSchema,
     listAllCommentsQuerySchema,
 } = require('../validators/comment.validator');
@@ -17,6 +18,17 @@ adminRouter.get(
     verifyToken,
     enforcePasswordChange,
     requirePermission('comments', 'approve'),
+    validate(listAllCommentsQuerySchema, 'query'),
+    asyncHandler(commentController.listAllComments)
+);
+
+// GET /admin/comments/news/:newsId — moderator xem bình luận theo một tin tức cụ thể
+adminRouter.get(
+    '/news/:newsId',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('comments', 'approve'),
+    validate(newsIdParamsSchema, 'params'),
     validate(listAllCommentsQuerySchema, 'query'),
     asyncHandler(commentController.listAllComments)
 );

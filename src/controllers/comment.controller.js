@@ -6,7 +6,7 @@ const { buildActor } = require('../utils/actor.util');
 const createComment = async (req, res) => {
     const result = await commentService.createComment(
         buildActor(req),
-        Number(req.params.id), // newsId
+        req.params.slug,
         req.body,
         { lang: req.lang }
     );
@@ -17,7 +17,7 @@ const listComments = async (req, res) => {
     const { page, limit } = req.query;
     const { items, total } = await commentService.listComments(
         buildActor(req),
-        Number(req.params.id), // newsId
+        req.params.slug,
         { page, limit },
         { lang: req.lang }
     );
@@ -25,10 +25,10 @@ const listComments = async (req, res) => {
 };
 
 const listAllComments = async (req, res) => {
-    const { page, limit, approved } = req.query;
+    const { page, limit, approved, newsId } = req.query;
     const { items, total } = await commentService.listAllComments(
         buildActor(req),
-        { page, limit, approved },
+        { page, limit, approved, newsId: req.params.newsId || newsId },
         { lang: req.lang }
     );
     OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
@@ -45,8 +45,8 @@ const approveComment = async (req, res) => {
 };
 
 const deleteComment = async (req, res) => {
-    // Public route: /news/:id/comments/:commentId → dùng commentId
-    // Admin route:  /admin/comments/:id           → dùng id
+    // Public route: /news/:slug/comments/:commentId → dùng commentId
+    // Admin route:  /admin/comments/:id              → dùng id
     const commentId = Number(req.params.commentId ?? req.params.id);
     const result = await commentService.deleteComment(
         buildActor(req),

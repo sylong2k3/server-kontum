@@ -16,7 +16,7 @@ const commentController = require('../controllers/comment.controller');
 const {
     createCommentSchema,
     listCommentsQuerySchema,
-    newsCommentParamsSchema,
+    newsCommentSlugParamsSchema,
 } = require('../validators/comment.validator');
 
 const publicRouter = Router();
@@ -26,33 +26,33 @@ const adminRouter = Router();
 
 publicRouter.get('/', optionalAuth, validate(listNewsSchema, 'query'), asyncHandler(newsController.listNews));
 
-// GET /news/:id/comments — public list comments (only approved comments unless admin)
+// GET /news/:slug/comments — public list comments (only approved comments unless admin)
 publicRouter.get(
-    '/:id/comments',
+    '/:slug/comments',
     optionalAuth,
-    validate(newsIdParamsSchema, 'params'),
+    validate(newsSlugParamsSchema, 'params'),
     validate(listCommentsQuerySchema, 'query'),
     asyncHandler(commentController.listComments)
 );
 
-// POST /news/:id/comments — tạo bình luận mới (chỉ citizen đã đăng nhập)
+// POST /news/:slug/comments — tạo bình luận mới (chỉ citizen đã đăng nhập)
 publicRouter.post(
-    '/:id/comments',
+    '/:slug/comments',
     verifyToken,
     enforcePasswordChange,
     requirePermission('comments', 'create'),
-    validate(newsIdParamsSchema, 'params'),
+    validate(newsSlugParamsSchema, 'params'),
     validate(createCommentSchema),
     asyncHandler(commentController.createComment)
 );
 
-// DELETE /news/:id/comments/:commentId — citizen tự xóa bình luận của mình
+// DELETE /news/:slug/comments/:commentId — citizen tự xóa bình luận của mình
 publicRouter.delete(
-    '/:id/comments/:commentId',
+    '/:slug/comments/:commentId',
     verifyToken,
     enforcePasswordChange,
     requirePermission('comments', 'delete_own'),
-    validate(newsCommentParamsSchema, 'params'),
+    validate(newsCommentSlugParamsSchema, 'params'),
     asyncHandler(commentController.deleteComment)
 );
 
@@ -60,6 +60,16 @@ publicRouter.delete(
 publicRouter.get('/:slug', optionalAuth, validate(newsSlugParamsSchema, 'params'), asyncHandler(newsController.getNewsBySlug));
 
 // ─── Admin endpoints: /api/v1/admin/news ──────────────────────────────────────
+
+// GET /admin/news — danh sách tin tức quản trị
+adminRouter.get(
+    '/',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('news', 'read'),
+    validate(listNewsSchema, 'query'),
+    asyncHandler(newsController.listNews)
+);
 
 // GET /admin/news/:id — admin detail với đầy đủ translations
 adminRouter.get(

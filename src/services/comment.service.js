@@ -9,17 +9,27 @@ const { stripTags } = require('../utils/cms.util');
 const can = (actor, action) =>
     !!actor && (actor.role === 'system_admin' || hasPermission(actor.permissions, 'comments', action));
 
-const createComment = async (actor, newsId, payload, context = {}) => {
+const resolveNewsForComments = async (actor, slug, context = {}) => {
+    const publicOnly = !can(actor, 'approve');
+    const news = await newsRepository.findBySlug(slug, {
+        lang: context.lang,
+        publicOnly,
+    });
+    if (!news) {
+        throw new Api404Error(t('news_not_found', context.lang));
+    }
+    return news;
+};
+
+const createComment = async (actor, slug, payload, context = {}) => {
     // Requires authenticated user (verified by verifyToken middleware, which sets actor)
     if (!actor) {
         throw new Api403Error(t('no_permission', context.lang));
     }
 
     // 1. Citizen comments are only allowed on published news.
-    const news = await newsRepository.findPublishedById(newsId);
-    if (!news) {
-        throw new Api404Error(t('news_not_found', context.lang));
-    }
+    const news = await resolveNewsForComments(actor, slug, context);
+    const newsId = news.id;
 
     // 2. Sanitize content (strip HTML tags completely for security)
     const content = stripTags(payload.content || '').trim();
@@ -37,7 +47,7 @@ const createComment = async (actor, newsId, payload, context = {}) => {
     };
 };
 
-const listComments = async (actor, newsId, { page = 1, limit = 20 }, context = {}) => {
+const listComments = async (actor, slug, { page = 1, limit = 20 }, context = {}) => {
     const limitNum = Number(limit);
     const offset = (Number(page) - 1) * limitNum;
 
@@ -45,12 +55,8 @@ const listComments = async (actor, newsId, { page = 1, limit = 20 }, context = {
     const approvedOnly = !can(actor, 'approve');
 
     // Public users can only list comments for published news; moderators may inspect drafts.
-    const news = approvedOnly
-        ? await newsRepository.findPublishedById(newsId)
-        : await newsRepository.findAdminById(newsId);
-    if (!news) {
-        throw new Api404Error(t('news_not_found', context.lang));
-    }
+    const news = await resolveNewsForComments(actor, slug, context);
+    const newsId = news.id;
 
     const [items, total] = await Promise.all([
         commentRepository.findAllByNewsId({ newsId, limit: limitNum, offset, approvedOnly }),
@@ -61,7 +67,7 @@ const listComments = async (actor, newsId, { page = 1, limit = 20 }, context = {
 };
 
 // Danh sách bình luận toàn hệ thống cho moderator duyệt (lọc theo trạng thái duyệt nếu có).
-const listAllComments = async (actor, { page = 1, limit = 20, approved } = {}, context = {}) => {
+const listAllComments = async (actor, { page = 1, limit = 20, approved, newsId } = {}, context = {}) => {
     if (!can(actor, 'approve')) {
         throw new Api403Error(t('no_permission', context.lang));
     }
@@ -69,9 +75,11 @@ const listAllComments = async (actor, { page = 1, limit = 20, approved } = {}, c
     const limitNum = Number(limit);
     const offset = (Number(page) - 1) * limitNum;
 
+    const filter = { approved, newsId: newsId ? Number(newsId) : undefined };
+
     const [items, total] = await Promise.all([
-        commentRepository.findAll({ limit: limitNum, offset, approved }),
-        commentRepository.countAll({ approved }),
+        commentRepository.findAll({ limit: limitNum, offset, ...filter }),
+        commentRepository.countAll(filter),
     ]);
 
     return { items, total };
