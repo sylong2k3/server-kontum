@@ -5646,6 +5646,274 @@
           }
         }
       ]
+    },
+    {
+      "name": "Cháy rừng / Fire Risk",
+      "description": "Dự báo & cảnh báo cháy rừng theo ngày từ GEE pipeline.\n\nDữ liệu từ:\n- Sentinel-2: NDVI, NDMI, NBR\n- MODIS MOD11A1: nhiệt độ bề mặt (LST)\n- ERA5-Land: nhiệt độ, độ ẩm, gió, mưa\n- Chỉ số P Nesterov (QĐ 25/2022/QĐ-UBND)\n\nCronJob: hàng ngày 06:00 VN = 23:00 UTC\nRiskLevel: 1 (thấp) → 5 (rất cao)\n\nRBac:\n- GET /latest, /map: công khai (optionalAuth)\n- GET /history, POST /refresh: fire_risk.manage (system_admin / so_nnmt / ubnd_tinh)",
+      "item": [
+        {
+          "name": "[Public] Dự báo cháy rừng mới nhất",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== \"undefined\") pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fire-risk/latest?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fire-risk",
+                "latest"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "minRiskLevel",
+                  "value": "1",
+                  "description": "Lọc features theo mức rủi ro tối thiểu (1-5)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Trả về snapshot cháy rừng mới nhất đã tính xong:\n- provinceSummary: tổng hợp toàn tỉnh (tổng ha rừng theo level, P Nesterov trung bình)\n- districtStats: thống kê theo từng huyện\n- pNesterovStats: phân phối P Nesterov\n- features: danh sách vùng rủi ro\n\nstale=true khi đang tính hoặc GEE lỗi."
+          }
+        },
+        {
+          "name": "[Public] Bản đồ cháy rừng (GeoJSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== \"undefined\") pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = (typeof pm !== \"undefined\") ? pm.response.json() : {};",
+                  "if (typeof pm !== \"undefined\") pm.test(\"Is GeoJSON\", () => pm.expect(j.type).to.eql(\"FeatureCollection\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fire-risk/map?lang={{lang}}&minRiskLevel=4",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fire-risk",
+                "map"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                },
+                {
+                  "key": "minRiskLevel",
+                  "value": "4",
+                  "description": "Chỉ trả features có RiskLevel >= giá trị này (mặc định 4 = cao / rất cao)"
+                }
+              ]
+            },
+            "description": "Trả FeatureCollection GeoJSON các vùng cháy rủi ro để hiển thị bản đồ.\n\nMặc định minRiskLevel=4 → chỉ vùng rủi ro cao (4) và rất cao (5).\n\nMỗi feature có properties:\n- riskLevel: 1-5\n- districtCode, districtName\n- areaHa: diện tích (ha)\n- pNesterovMean: P Nesterov trung bình\n- ndviMean: NDVI trung bình (nếu có)\n\ngeoserverLayer: tên layer WMS nếu raster đã publish lên GeoServer."
+          }
+        },
+        {
+          "name": "[Admin] Lịch sử dự báo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== \"undefined\") pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fire-risk/history?page=1&limit=30&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fire-risk",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "30"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Danh sách tất cả snapshot đã tính (status=completed/published), mới nhất trước.\n\nQuyền: fire_risk.manage (system_admin, so_nnmt, ubnd_tinh)."
+          }
+        },
+        {
+          "name": "[Admin] Kích hoạt phân tích thủ công",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== \"undefined\") pm.test(\"Status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/fire-risk/refresh?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fire-risk",
+                "refresh"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"analysisDate\": null,\n  \"submitExport\": false\n}"
+            },
+            "description": "Kích hoạt tính toán GEE ngay lập tức (không chờ cron).\n\nBody:\n- analysisDate: \"YYYY-MM-DD\" — ngày phân tích (mặc định hôm nay UTC)\n- submitExport: true → submit task export GeoTIFF sang GCS sau khi tính xong (cần GEE_GCS_BUCKET)\n\nQuyền: fire_risk.manage (system_admin, so_nnmt, ubnd_tinh).\n\nLưu ý: GEE tính khoảng 5-15 phút. Endpoint trả ngay response với snapshot.status=computing; poll GET /latest để theo dõi tiến độ."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ảnh vệ tinh / Satellite",
+      "item": [
+        {
+          "name": "RGB Composite",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/satellite/rgb", "host": ["{{baseUrl}}"], "path": ["satellite","rgb"]},
+            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"},
+            "description": "Tạo ảnh composite True Color từ GEE. Trả tile URL + số ảnh dùng."
+          }
+        },
+        {
+          "name": "NDVI",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/satellite/ndvi", "host": ["{{baseUrl}}"], "path": ["satellite","ndvi"]},
+            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50,\n  \"ndviMinThresh\": 0.3\n}"},
+            "description": "Tính NDVI + diện tích thực vật (ha)."
+          }
+        },
+        {
+          "name": "Heatmap (LST)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/satellite/heat-map", "host": ["{{baseUrl}}"], "path": ["satellite","heat-map"]},
+            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-03-01\",\n  \"endDate\": \"2024-05-31\"\n}"},
+            "description": "Bản đồ nhiệt MODIS LST (nhiệt độ bề mặt đất, °C)."
+          }
+        },
+        {
+          "name": "Phân loại lớp phủ (7 lớp)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/satellite/classified", "host": ["{{baseUrl}}"], "path": ["satellite","classified"]},
+            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"},
+            "description": "Phân loại ngưỡng 7 lớp nhanh: Nước, Đô thị, Đất trống, Nông nghiệp, Trảng cỏ, Rừng trồng, Rừng tự nhiên."
+          }
+        },
+        {
+          "name": "So sánh thay đổi rừng",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/satellite/compare", "host": ["{{baseUrl}}"], "path": ["satellite","compare"]},
+            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2022-01-01\",\n  \"endDate\": \"2022-12-31\",\n  \"startDate2\": \"2024-01-01\",\n  \"endDate2\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"},
+            "description": "Phát hiện thay đổi rừng giữa 2 giai đoạn. Trả về tile ảnh + diện tích mất/tăng rừng (ha)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Phân loại rừng / Forest Classification",
+      "item": [
+        {
+          "name": "[Public] Phân loại mới nhất",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/forest-classification/latest?lang={{lang}}", "host": ["{{baseUrl}}"], "path": ["forest-classification","latest"], "query": [{"key":"lang","value":"{{lang}}"}]},
+            "description": "Lấy kết quả phân loại lớp phủ rừng 11 lớp mới nhất + diện tích theo huyện."
+          }
+        },
+        {
+          "name": "[Admin] Lịch sử phân loại",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/forest-classification/history?page=1&limit=24&lang={{lang}}", "host": ["{{baseUrl}}"], "path": ["forest-classification","history"], "query": [{"key":"page","value":"1"},{"key":"limit","value":"24"},{"key":"lang","value":"{{lang}}"}]},
+            "description": "Lịch sử các lần phân loại (phân trang). Quyền: forest_classification.manage."
+          }
+        },
+        {
+          "name": "[Admin] Kích hoạt phân loại thủ công",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/forest-classification/refresh?lang={{lang}}", "host": ["{{baseUrl}}"], "path": ["forest-classification","refresh"], "query": [{"key":"lang","value":"{{lang}}"}]},
+            "body": {"mode": "raw", "raw": "{\n  \"year\": 2024,\n  \"month\": 6\n}"},
+            "description": "Kích hoạt phân loại RF 11 lớp ngay lập tức. GEE tính ~10-20 phút. Quyền: forest_classification.manage."
+          }
+        }
+      ]
     }
   ]
 }
