@@ -13,6 +13,21 @@
  */
 
 const crypto = require('crypto');
+
+const DEBUG = process.env.SATELLITE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
+function dbg(tag, msg, data) {
+    if (!DEBUG) return;
+    const ts = new Date().toISOString();
+    if (data !== undefined) {
+        console.debug(`[SATELLITE:${tag}] ${ts} — ${msg}`, typeof data === 'object' ? JSON.stringify(data) : data);
+    } else {
+        console.debug(`[SATELLITE:${tag}] ${ts} — ${msg}`);
+    }
+}
+function dbgTime(tag, label, startMs) {
+    if (!DEBUG) return;
+    dbg(tag, `${label} (${Date.now() - startMs}ms)`);
+}
 const { ee, initializeEarthEngine } = require('../configs/gge');
 const {
     eeEval,
@@ -73,9 +88,12 @@ function buildCollection(region, startDate, endDate, collection, cloudCover) {
     const useS2      = !collection || collection.toUpperCase() === 'S2';
     const useLandsat = !collection || collection.toUpperCase() === 'LANDSAT';
 
+    dbg('COLLECTION', `building — collection=${collection || 'auto'} dates=${startDate}→${endDate} cloudCover≤${cloudCover}%`);
+
     let col = ee.ImageCollection([]);
 
     if (useLandsat) {
+        // L8 + L9 only (L5/L7 excluded — on-demand service targets post-2013 only)
         const l8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
             .filterBounds(region).filterDate(startDate, endDate)
             .map(maskLandsatC2).map(prepL89);
@@ -83,6 +101,7 @@ function buildCollection(region, startDate, endDate, collection, cloudCover) {
             .filterBounds(region).filterDate(startDate, endDate)
             .map(maskLandsatC2).map(prepL89);
         col = col.merge(l8).merge(l9);
+        dbg('COLLECTION', 'merged L8 + L9');
     }
 
     if (useS2) {
@@ -91,6 +110,7 @@ function buildCollection(region, startDate, endDate, collection, cloudCover) {
             .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', cloudCover))
             .map(maskS2);
         col = col.merge(s2);
+        dbg('COLLECTION', 'merged S2_SR_HARMONIZED');
     }
 
     return col;
@@ -121,11 +141,15 @@ async function computeAreaStats(classImage, region, nClasses, scale = 100) {
 // Each builder returns: { eeImage, vizParams, stats, legend, metadata }
 
 async function buildRgb(params, region) {
+    const t0 = Date.now();
+    dbg('RGB', `start — ${params.startDate} → ${params.endDate}`);
     const col       = buildCollection(region, params.startDate, params.endDate,
         params.collection, params.cloudCover);
     const imgCount  = await eeEval(col.size());
+    dbgTime('RGB', `collection size=${imgCount}`, t0);
     const eeImage   = col.select(['red', 'green', 'blue']).median().clip(region);
     const vizParams = { bands: ['red', 'green', 'blue'], min: 0, max: 0.3 };
+    dbgTime('RGB', 'done', t0);
     return {
         eeImage,
         vizParams,
@@ -137,17 +161,22 @@ async function buildRgb(params, region) {
 }
 
 async function buildNdvi(params, region) {
+    const t0 = Date.now();
+    dbg('NDVI', `start — ${params.startDate} → ${params.endDate}`);
     const col       = buildCollection(region, params.startDate, params.endDate,
         params.collection, params.cloudCover);
     const imgCount  = await eeEval(col.size());
+    dbgTime('NDVI', `collection size=${imgCount}`, t0);
     const composite = col.median().clip(region);
     const eeImage   = composite.normalizedDifference(['nir', 'red']).rename('NDVI');
     const vizParams = { bands: ['NDVI'], min: -0.2, max: 0.8,
         palette: ['#d73027', '#fee08b', '#ffffbf', '#90ee90', '#1a9641'] };
 
     const ndviThresh = parseFloat(params.ndviMinThresh) || 0.3;
+    dbg('NDVI', `computing area stats with thresh=${ndviThresh}`);
     const areaStats  = await computeAreaStats(
         eeImage.gt(ndviThresh).selfMask().toByte(), region, 2);
+    dbgTime('NDVI', `vegetationHa=${areaStats[1] || 0}`, t0);
 
     return {
         eeImage,
@@ -165,18 +194,23 @@ async function buildNdvi(params, region) {
 }
 
 async function buildHeatmap(params, region) {
+    const t0 = Date.now();
+    dbg('HEATMAP', `start — MODIS MOD11A1 ${params.startDate} → ${params.endDate}`);
     const modis    = ee.ImageCollection('MODIS/061/MOD11A1')
         .filterBounds(region).filterDate(params.startDate, params.endDate);
     const imgCount = await eeEval(modis.size());
+    dbgTime('HEATMAP', `MODIS images=${imgCount}`, t0);
     const eeImage  = modis.select('LST_Day_1km').mean()
         .multiply(0.02).subtract(273.15).rename('LST_C').clip(region);
     const vizParams = { bands: ['LST_C'], min: 20, max: 45,
         palette: ['#313695', '#74add1', '#fed976', '#fd8d3c', '#d73027'] };
 
+    dbg('HEATMAP', 'reducing LST stats');
     const r = await eeEval(eeImage.reduceRegion({
         reducer: ee.Reducer.mean().combine(ee.Reducer.minMax(), null, true),
         geometry: region, scale: 1000, bestEffort: true, maxPixels: 1e12,
     }));
+    dbgTime('HEATMAP', `LST mean=${r.LST_C_mean?.toFixed(2)}°C min=${r.LST_C_min?.toFixed(2)} max=${r.LST_C_max?.toFixed(2)}`, t0);
 
     return {
         eeImage,
@@ -207,14 +241,21 @@ const CLASSIFIED_CLASSES = [
 ];
 
 async function buildClassified(params, region) {
+    const t0 = Date.now();
+    dbg('CLASSIFIED', `start — 7-class NDVI threshold ${params.startDate} → ${params.endDate}`);
+    // NOTE: This is a fast 7-class threshold classifier for on-demand preview.
+    // The scheduled monthly job (forest-classification.service.js) uses an
+    // 11-class Random Forest trained on Landsat+S2 as in kontum_forest_classification_final.js.
     const col       = buildCollection(region, params.startDate, params.endDate,
         params.collection, params.cloudCover);
     const imgCount  = await eeEval(col.size());
+    dbgTime('CLASSIFIED', `collection size=${imgCount}`, t0);
     const composite = col.median().clip(region);
     const indices   = addIndices(composite, '');
     const ndvi = indices.select('NDVI'); const ndwi = indices.select('NDWI');
     const mndwi = indices.select('MNDWI'); const ndbi = indices.select('NDBI');
 
+    dbg('CLASSIFIED', 'applying threshold rules (water/urban/bare/agri/shrub/planted/forest)');
     const water   = mndwi.gt(0.1).and(ndvi.lt(0.2));
     const urban   = ndbi.gt(0.0).and(ndvi.lt(0.15)).and(mndwi.lt(0.0));
     const bare    = ndvi.lt(0.12).and(mndwi.lt(0.05)).and(ndbi.gt(-0.1));
@@ -230,10 +271,12 @@ async function buildClassified(params, region) {
 
     const palette   = CLASSIFIED_CLASSES.map((c) => c.color);
     const vizParams = { bands: ['class'], min: 0, max: 6, palette };
+    dbg('CLASSIFIED', 'computing area stats at 60m scale');
     const areaStats = await computeAreaStats(eeImage, region, 7, 60);
     const areaByClass = CLASSIFIED_CLASSES.map((c) => ({
         classId: c.id, name: c.name, color: c.color, areaHa: areaStats[c.id] || 0,
     }));
+    dbgTime('CLASSIFIED', `area by class: ${areaByClass.map(c => `${c.name}=${c.areaHa}ha`).join(', ')}`, t0);
 
     return {
         eeImage,
@@ -245,6 +288,8 @@ async function buildClassified(params, region) {
 }
 
 async function buildCompare(params, region) {
+    const t0 = Date.now();
+    dbg('COMPARE', `start — period1=${params.startDate}→${params.endDate}  period2=${params.startDate2}→${params.endDate2}`);
     const buildNdviImg = (sd, ed) =>
         buildCollection(region, sd, ed, params.collection, params.cloudCover)
             .median().clip(region).normalizedDifference(['nir', 'red']).rename('NDVI');
@@ -252,6 +297,7 @@ async function buildCompare(params, region) {
     const ndvi1 = buildNdviImg(params.startDate, params.endDate);
     const ndvi2 = buildNdviImg(params.startDate2, params.endDate2);
     const FOREST = 0.5;
+    dbg('COMPARE', `forest NDVI threshold=${FOREST} — detecting loss/gain/other`);
 
     const forLoss  = ndvi1.gt(FOREST).and(ndvi2.gt(FOREST).not());
     const forGain  = ndvi1.gt(FOREST).not().and(ndvi2.gt(FOREST));
@@ -262,7 +308,9 @@ async function buildCompare(params, region) {
         .rename('change').clip(region);
     const vizParams = { bands: ['change'], min: 0, max: 3,
         palette: ['#e0e0e0', '#d73027', '#1a9641', '#ff9800'] };
+    dbg('COMPARE', 'computing change area stats at 60m scale');
     const areaStats = await computeAreaStats(eeImage, region, 4, 60);
+    dbgTime('COMPARE', `loss=${areaStats[1]}ha gain=${areaStats[2]}ha other=${areaStats[3]}ha`, t0);
 
     return {
         eeImage,
@@ -295,21 +343,28 @@ const IMAGE_BUILDERS = {
 // ── Main request processor ────────────────────────────────────────────────────
 
 async function processRequest(imageType, rawParams) {
+    const t0 = Date.now();
+    dbg('PROCESS', `→ type=${imageType}`, { startDate: rawParams.startDate, endDate: rawParams.endDate,
+        collection: rawParams.collection, cloudCover: rawParams.cloudCover });
+
     await initializeEarthEngine();
 
     const normalType = imageType === 'heat-map' ? 'heatmap' : imageType;
     const handler    = IMAGE_BUILDERS[normalType] || IMAGE_BUILDERS[imageType];
     if (!handler) {
+        console.warn(`[SATELLITE:PROCESS] unknown imageType=${imageType}`);
         throw new BusinessLogicError(`Loại ảnh không hợp lệ: ${imageType}`,
             ['INVALID_IMAGE_TYPE'], StatusCodes.BAD_REQUEST);
     }
 
     const params = normalizeParams({ ...rawParams, imageType: normalType });
     const hash   = hashParams(params);
+    dbg('PROCESS', `cache hash=${hash.slice(0, 12)}…`);
 
     // Cache hit.
     const cached = await repo.getByHash(hash);
     if (cached) {
+        dbgTime('PROCESS', `cache HIT id=${cached.id}`, t0);
         return {
             resultId:    cached.id,
             tileUrl:     buildProxyUrl(cached.id),
@@ -322,10 +377,13 @@ async function processRequest(imageType, rawParams) {
         };
     }
 
+    dbg('PROCESS', 'cache MISS — computing via GEE');
     // Compute via GEE.
     const region  = toEeGeometry(params.geometry);
     const { eeImage, vizParams, stats, legend, metadata } = await handler(params, region);
+    dbgTime('PROCESS', 'builder done — calling getEeMapId', t0);
     const { mapId, tileUrl } = await getEeMapId(eeImage, vizParams);
+    dbgTime('PROCESS', `mapId obtained mapId=${mapId?.slice(0, 12)}…`, t0);
 
     const saved = await repo.upsert({
         request_hash: hash,
@@ -344,6 +402,7 @@ async function processRequest(imageType, rawParams) {
         return { id: null, tile_url: tileUrl, geoserver_layer: null };
     });
 
+    dbgTime('PROCESS', `saved id=${saved.id} — done`, t0);
     return {
         resultId:       saved.id,
         tileUrl:        saved.id ? buildProxyUrl(saved.id) : tileUrl,
@@ -361,8 +420,11 @@ async function processRequest(imageType, rawParams) {
  * Called by GET /satellite/tiles/:resultId/:z/:x/:y.
  */
 async function streamTile(resultId, z, x, y, res) {
+    const t0 = Date.now();
+    dbg('TILE', `fetch id=${resultId} z=${z} x=${x} y=${y}`);
     const result = await repo.getById(resultId);
     if (!result) {
+        dbg('TILE', `id=${resultId} not found → 404`);
         res.status(404).end();
         return;
     }
@@ -378,19 +440,24 @@ async function streamTile(resultId, z, x, y, res) {
         clearTimeout(timer);
 
         if (!upstream.ok) {
+            dbg('TILE', `upstream ${upstream.status} for z=${z} x=${x} y=${y}`);
             res.status(upstream.status).end();
             return;
         }
 
         res.set('Content-Type', upstream.headers.get('content-type') || 'image/png');
         res.set('Cache-Control', 'public, max-age=3600');
+        dbgTime('TILE', `streaming z=${z}/${x}/${y}`, t0);
 
         // Node 18+ readable stream from Response.
         const { Readable } = require('stream');
         Readable.fromWeb(upstream.body).pipe(res);
     } catch (err) {
         clearTimeout(timer);
-        if (err.name === 'AbortError') { res.status(504).end(); return; }
+        if (err.name === 'AbortError') {
+            dbg('TILE', `timeout z=${z} x=${x} y=${y} → 504`);
+            res.status(504).end(); return;
+        }
         throw err;
     }
 }
@@ -403,6 +470,7 @@ async function streamTile(resultId, z, x, y, res) {
  * Polled by pollPublishes().
  */
 async function publishResult(resultId) {
+    dbg('PUBLISH', `start id=${resultId}`);
     await initializeEarthEngine();
 
     const result = await repo.getById(resultId);
@@ -410,6 +478,7 @@ async function publishResult(resultId) {
     if (!GCS_BUCKET) throw new BusinessLogicError('GEE_GCS_BUCKET chưa được cấu hình.', ['GCS_NOT_CONFIGURED'], 503);
 
     if (result.geoserver_layer) {
+        dbg('PUBLISH', `id=${resultId} already published → ${result.geoserver_layer}`);
         return result;  // already published
     }
 
@@ -445,6 +514,7 @@ async function publishResult(resultId) {
 
     const status   = await eeEval(task.status());
     const taskName = status.name || status.id || String(task);
+    dbg('PUBLISH', `GEE export task started id=${resultId} taskName=${taskName}`);
 
     return repo.updatePublish(resultId, { status: 'exporting', gee_task_id: taskName });
 }
@@ -455,10 +525,13 @@ async function publishResult(resultId) {
  */
 async function pollPublishes() {
     const exporting = await repo.listExporting();
+    dbg('POLL', `checking ${exporting.length} exporting result(s)`);
     for (const r of exporting) {
         try {
             const state = await pollGeeTask(r.gee_task_id);
+            dbg('POLL', `id=${r.id} taskId=${r.gee_task_id} state=${state}`);
             if (state === 'COMPLETED') {
+                dbg('POLL', `id=${r.id} COMPLETED — starting MinIO/GeoServer publish`);
                 const dateTag  = `${r.image_type}_${r.start_date}`.replace(/-/g, '');
                 const fileName = `sat_${dateTag}_${r.id}.tif`;
                 const minioKey = `satellite/${fileName}`;
