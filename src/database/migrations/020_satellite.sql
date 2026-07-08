@@ -110,51 +110,26 @@ END;
 $$;
 
 -- ── RBAC — satellite permissions ─────────────────────────────────────────────
+-- Uses JSONB merge on auth.roles (same pattern as 019_fire_risk.sql)
 
-DO $$
-DECLARE
-    v_perm_id  INTEGER;
-    v_role_id  INTEGER;
-BEGIN
-    INSERT INTO core.permissions (module, action, description)
-    VALUES ('satellite', 'manage', 'Xuất bản ảnh vệ tinh lên GeoServer')
-    ON CONFLICT (module, action) DO NOTHING;
+UPDATE auth.roles
+SET permissions = COALESCE(permissions, '{}'::jsonb) ||
+    '{"satellite":{"read":true,"manage":true}}'::jsonb
+WHERE code IN ('system_admin', 'so_nnmt', 'ubnd_tinh');
 
-    SELECT id INTO v_perm_id
-    FROM core.permissions
-    WHERE module = 'satellite' AND action = 'manage';
-
-    FOR v_role_id IN
-        SELECT id FROM core.roles WHERE name IN ('system_admin', 'so_nnmt', 'ubnd_tinh')
-    LOOP
-        INSERT INTO core.role_permissions (role_id, permission_id)
-        VALUES (v_role_id, v_perm_id)
-        ON CONFLICT DO NOTHING;
-    END LOOP;
-END;
-$$;
+UPDATE auth.roles
+SET permissions = COALESCE(permissions, '{}'::jsonb) ||
+    '{"satellite":{"read":true}}'::jsonb
+WHERE code = 'citizen';
 
 -- ── RBAC — forest classification permissions ──────────────────────────────────
 
-DO $$
-DECLARE
-    v_perm_id  INTEGER;
-    v_role_id  INTEGER;
-BEGIN
-    INSERT INTO core.permissions (module, action, description)
-    VALUES ('forest_classification', 'manage', 'Quản lý phân loại lớp phủ rừng')
-    ON CONFLICT (module, action) DO NOTHING;
+UPDATE auth.roles
+SET permissions = COALESCE(permissions, '{}'::jsonb) ||
+    '{"forest_classification":{"read":true,"manage":true}}'::jsonb
+WHERE code IN ('system_admin', 'so_nnmt', 'ubnd_tinh');
 
-    SELECT id INTO v_perm_id
-    FROM core.permissions
-    WHERE module = 'forest_classification' AND action = 'manage';
-
-    FOR v_role_id IN
-        SELECT id FROM core.roles WHERE name IN ('system_admin', 'so_nnmt', 'ubnd_tinh')
-    LOOP
-        INSERT INTO core.role_permissions (role_id, permission_id)
-        VALUES (v_role_id, v_perm_id)
-        ON CONFLICT DO NOTHING;
-    END LOOP;
-END;
-$$;
+UPDATE auth.roles
+SET permissions = COALESCE(permissions, '{}'::jsonb) ||
+    '{"forest_classification":{"read":true}}'::jsonb
+WHERE code = 'citizen';

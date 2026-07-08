@@ -9,7 +9,7 @@
 
 ALTER TABLE forest.forest_snapshots
     ADD COLUMN IF NOT EXISTS trigger       VARCHAR(16) NOT NULL DEFAULT 'cron',
-    ADD COLUMN IF NOT EXISTS requested_by  BIGINT REFERENCES core.users(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS requested_by  BIGINT REFERENCES auth.users(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS duration_ms   INTEGER;
 
 COMMENT ON COLUMN forest.forest_snapshots.trigger IS
