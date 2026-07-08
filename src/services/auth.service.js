@@ -537,14 +537,19 @@ const getMe = async (userId, context = {}) => {
     return _sanitizeUser(user, context.lang);
 };
 
-const updateMe = async (userId, data, context = {}) => {
+const updateMe = async (userId, data, file, context = {}) => {
     const user = await userRepository.findById(userId);
     if (!user) {throw new Api404Error(t('user_not_found', context.lang));}
+
+    let avatarUrl = data.avatarUrl;
+    if (file) {
+        avatarUrl = `${file._relativeDir}/${file.filename}`;
+    }
 
     const normalized = {
         ...data,
         phone: data.phone !== undefined ? (data.phone === '' ? null : data.phone) : undefined,
-        avatarUrl: data.avatarUrl !== undefined ? (data.avatarUrl === '' ? null : data.avatarUrl) : undefined,
+        avatarUrl: avatarUrl !== undefined ? (avatarUrl === '' ? null : avatarUrl) : undefined,
     };
 
     const updated = await userRepository.updateProfile(userId, normalized);

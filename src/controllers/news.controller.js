@@ -6,8 +6,8 @@ const { buildActor } = require('../utils/actor.util');
 // ─── Public ───────────────────────────────────────────────────────────────────
 
 const listNews = async (req, res) => {
-    const { page, limit, q, status, lang, sortBy, sortOrder } = req.query;
-    const { items, total } = await newsService.listNews(buildActor(req), { page, limit, q, status, lang, sortBy, sortOrder });
+    const { page, limit, q, status, category, lang, sortBy, sortOrder } = req.query;
+    const { items, total } = await newsService.listNews(buildActor(req), { page, limit, q, status, category, lang, sortBy, sortOrder });
     OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
 };
 

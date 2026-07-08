@@ -85,7 +85,7 @@ const getMe = async (req, res) => {
 
 const updateMe = async (req, res) => {
     const context = getRequestContext(req);
-    const user = await authService.updateMe(req.user.id, req.body, context);
+    const user = await authService.updateMe(req.user.id, req.body, req.file, context);
     OK(res, t('profile_updated', req.lang), user);
 };
 

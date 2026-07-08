@@ -22,6 +22,8 @@ const {
     updateProfileSchema,
 } = require('../validators/auth.validator');
 
+const { uploadImage, handleUploadError } = require('../middlewares/upload.middleware');
+
 const router = Router();
 const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 const tooManyRequestsMessage = () => ({
@@ -69,6 +71,6 @@ router.post('/logout', verifyToken, validate(logoutSchema), asyncHandler(authCon
 router.post('/change-password', verifyToken, validate(changePasswordSchema), asyncHandler(authController.changePassword));
 router.post('/set-password', verifyToken, validate(setPasswordSchema), asyncHandler(authController.setPassword));
 router.get('/me', verifyToken, asyncHandler(authController.getMe));
-router.patch('/me', verifyToken, validate(updateProfileSchema), asyncHandler(authController.updateMe));
+router.patch('/me', verifyToken, uploadImage.single('avatar'), handleUploadError, validate(updateProfileSchema), asyncHandler(authController.updateMe));
 
 module.exports = router;

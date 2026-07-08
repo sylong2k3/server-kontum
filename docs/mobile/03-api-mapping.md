@@ -68,8 +68,9 @@ Quy tắc dio interceptor:
 ### Field-update & offline sync (EP-10)
 | Tính năng | Endpoint | Ghi chú |
 |---|---|---|
-| Tạo field-update | `POST /mobile/field-updates` | body: `layerCode`, `featureId?`, `lng` (106–109), `lat` (13–16.5), `attributes{}`, `clientUuid`, `note` — chỉ `so_nnmt`/`system_admin` |
-| Đồng bộ tăng dần | `GET /mobile/sync?since=<ISO>` | trả field-update của chính user từ mốc `since`; app lưu mốc `last_synced_at` |
+| Tạo field-update | `POST /mobile/field-updates` | multipart: `layerCode`, `featureId?`, `lng` (106–109), `lat` (13–16.5), `attributes` (JSON string), `clientUuid`, `note`, `media[]` (ảnh, tối đa `FIELD_UPDATE_MAX_MEDIA_FILES`=5) — chỉ `so_nnmt`/`system_admin`; JSON thuần không ảnh vẫn hợp lệ |
+| Đồng bộ tăng dần | `GET /mobile/sync?since=<ISO>` | trả field-update của chính user (kèm `mediaUrls`) từ mốc `since`; app lưu mốc `last_synced_at` |
+| Báo cáo hiện trường (MB-092) | `GET /admin/field-updates?page=&limit=` | field-update toàn hệ thống kèm `layerName`, `userName`; lọc `layerCode`/`userId`/`action`/`from`/`to` — chỉ `ubnd_tinh`/`system_admin` |
 
 ### Tin tức / văn bản / bản đồ PDF
 | Tính năng | Endpoint |

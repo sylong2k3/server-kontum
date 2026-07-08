@@ -46,6 +46,7 @@ router.use('/stats', statisticsRoutes);
 router.use('/spatial', spatialRoutes);
 
 // ── MobileGIS — field-updates & offline sync (EP-10) ─────────────────────────
-router.use('/mobile', mobileRoutes);
+router.use('/mobile', mobileRoutes.router);
+router.use('/admin/field-updates', mobileRoutes.adminRouter);
 
 module.exports = router;

@@ -1,6 +1,7 @@
 const Joi = require('joi');
 
 const langSchema = Joi.string().valid('vi', 'en').default('vi');
+const categorySchema = Joi.string().valid('general', 'so_nnmt');
 
 // ─── Params ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ const listNewsSchema = Joi.object({
         .optional()
         .default('created_at'),
     sortOrder: Joi.string().valid('ASC', 'DESC', 'asc', 'desc').optional().default('DESC'),
+    category: categorySchema.optional(),
 });
 
 // ─── Create ───────────────────────────────────────────────────────────────────
@@ -38,6 +40,7 @@ const createNewsSchema = Joi.object({
     content: Joi.string().min(1).required(),
     status: Joi.string().valid('draft', 'published').default('draft'),
     coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
+    category: categorySchema.default('general'),
 });
 
 // ─── Update metadata chung ────────────────────────────────────────────────────
@@ -46,6 +49,7 @@ const createNewsSchema = Joi.object({
 const updateNewsMetaSchema = Joi.object({
     status: Joi.string().valid('draft', 'published').optional(),
     coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
+    category: categorySchema.optional(),
     expectedUpdatedAt: Joi.date().iso().required(),
 }).min(2);
 
@@ -62,6 +66,7 @@ const translationBodySchema = Joi.object({
 const updateNewsFullSchema = Joi.object({
     status: Joi.string().valid('draft', 'published').optional(),
     coverUrl: Joi.string().uri({ allowRelative: true }).max(1000).optional().allow('', null),
+    category: categorySchema.optional(),
     expectedUpdatedAt: Joi.date().iso().required(),
     translations: Joi.object().pattern(
         Joi.string().valid('vi', 'en'),

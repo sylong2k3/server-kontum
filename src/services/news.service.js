@@ -4,10 +4,17 @@ const { Api404Error, Api403Error, Api409Error } = require('../core/error.respons
 const { t } = require('../utils/i18n.util');
 const { slugify, stripTags, sanitizeHtml, normalizeLang } = require('../utils/cms.util');
 
-const CMS_ROLES = ['system_admin', 'so_nnmt'];
 const INTERNAL_ROLES = ['system_admin', 'so_nnmt', 'ubnd_tinh'];
 
-const canManage = (actor) => actor && CMS_ROLES.includes(actor.role);
+const hasPermission = (actor, resource, action) => {
+    if (actor?.role === 'system_admin') {return true;}
+    const resourcePerms = actor?.permissions?.[resource];
+    return resourcePerms && typeof resourcePerms === 'object' && resourcePerms[action] === true;
+};
+const canReadNews = (actor) => hasPermission(actor, 'news', 'read');
+const canCreateNews = (actor) => hasPermission(actor, 'news', 'create');
+const canUpdateNews = (actor) => hasPermission(actor, 'news', 'update');
+const canDeleteNews = (actor) => hasPermission(actor, 'news', 'delete');
 const canViewInternal = (actor) => actor && INTERNAL_ROLES.includes(actor.role);
 
 // ─── Response mappers ─────────────────────────────────────────────────────────
@@ -19,6 +26,7 @@ const toPublicItem = (n) => ({
     summary: n.summary,
     coverUrl: n.cover_url,
     status: n.status,
+    category: n.category,
     authorId: n.author_id,
     authorName: n.author_name,
     publishedAt: n.published_at,
@@ -37,6 +45,7 @@ const toAdminDetail = (n) => ({
     id: n.id,
     coverUrl: n.cover_url,
     status: n.status,
+    category: n.category,
     authorId: n.author_id,
     authorName: n.author_name,
     publishedAt: n.published_at,
@@ -60,10 +69,19 @@ const buildUniqueSlug = async (title, lang, excludeNewsId = null) => {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-const listNews = async (actor, { page = 1, limit = 20, q, status, lang = 'vi', sortBy = 'created_at', sortOrder = 'DESC' }) => {
+const resolveNewsCategory = (actor, category = 'general') => (actor?.role === 'so_nnmt' ? 'so_nnmt' : category);
+
+const assertNewsCategoryAccess = (actor, news, context = {}, action = 'update') => {
+    if (actor?.role === 'so_nnmt' && news?.category !== 'so_nnmt') {
+        throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action }));
+    }
+};
+
+const listNews = async (actor, { page = 1, limit = 20, q, status, category, lang = 'vi', sortBy = 'created_at', sortOrder = 'DESC' }) => {
     const resolvedLang = normalizeLang(lang);
     const publicOnly = !canViewInternal(actor);
-    const filter = { q, status, sortBy, sortOrder };
+    const categoryFilter = actor?.role === 'so_nnmt' ? 'so_nnmt' : category;
+    const filter = { q, status, category: categoryFilter, sortBy, sortOrder };
     const offset = (Number(page) - 1) * Number(limit);
 
     const [items, total] = await Promise.all([
@@ -87,17 +105,18 @@ const getNewsBySlug = async (actor, slug, context = {}) => {
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
 const getAdminNewsById = async (actor, id, context = {}) => {
-    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang));}
+    if (!canReadNews(actor)) {throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action: 'read' }));}
     const news = await newsRepository.findAdminById(id);
     if (!news) {throw new Api404Error(t('news_not_found', context.lang));}
     return toAdminDetail(news);
 };
 
 const createNews = async (actor, payload, file, context = {}) => {
-    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
+    if (!canCreateNews(actor)) {throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action: 'create' }));}
 
     const lang = normalizeLang(payload.lang);
     const status = payload.status || 'draft';
+    const category = resolveNewsCategory(actor, payload.category);
     const title = stripTags(payload.title);
     const slug = await buildUniqueSlug(title, lang);
     const summary = payload.summary ? stripTags(payload.summary) : null;
@@ -106,7 +125,7 @@ const createNews = async (actor, payload, file, context = {}) => {
     const publishedAt = status === 'published' ? new Date() : null;
 
     // 1. Tạo metadata row
-    const meta = await newsRepository.createMeta({ coverUrl, status, authorId: actor.id, publishedAt });
+    const meta = await newsRepository.createMeta({ coverUrl, status, category, authorId: actor.id, publishedAt });
 
     // 2. Tạo translation
     const translation = await newsRepository.createTranslation({
@@ -124,6 +143,7 @@ const createNews = async (actor, payload, file, context = {}) => {
             id: meta.id,
             coverUrl: meta.cover_url,
             status: meta.status,
+            category: meta.category,
             lang: translation.lang,
             title: translation.title,
             slug: translation.slug,
@@ -135,10 +155,11 @@ const createNews = async (actor, payload, file, context = {}) => {
 };
 
 const updateNewsMeta = async (actor, id, payload, file, context = {}) => {
-    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
+    if (!canUpdateNews(actor)) {throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action: 'update' }));}
 
     const existing = await newsRepository.findById(id);
     if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
+    assertNewsCategoryAccess(actor, existing, context);
 
     const updatePayload = {};
     if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
@@ -152,20 +173,24 @@ const updateNewsMeta = async (actor, id, payload, file, context = {}) => {
     } else if (Object.prototype.hasOwnProperty.call(payload, 'coverUrl')) {
         updatePayload.coverUrl = payload.coverUrl;
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'category')) {
+        updatePayload.category = resolveNewsCategory(actor, payload.category);
+    }
 
     updatePayload.expectedUpdatedAt = payload.expectedUpdatedAt;
 
     const updated = await newsRepository.updateMeta(id, updatePayload);
     if (!updated) {throw new Api409Error(t('news_optimistic_lock_conflict', context.lang));}
 
-    return { message: t('news_updated_success', context.lang), news: { id: updated.id, status: updated.status, coverUrl: updated.cover_url } };
+    return { message: t('news_updated_success', context.lang), news: { id: updated.id, status: updated.status, category: updated.category, coverUrl: updated.cover_url } };
 };
 
 const upsertNewsTranslation = async (actor, id, lang, payload, context = {}) => {
-    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
+    if (!canUpdateNews(actor)) {throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action: 'update' }));}
 
     const existing = await newsRepository.findById(id);
     if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
+    assertNewsCategoryAccess(actor, existing, context);
 
     const resolvedLang = normalizeLang(lang);
     const title = stripTags(payload.title);
@@ -193,16 +218,20 @@ const upsertNewsTranslation = async (actor, id, lang, payload, context = {}) => 
 };
 
 const deleteNews = async (actor, id, context = {}) => {
-    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
+    if (!canDeleteNews(actor)) {throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action: 'delete' }));}
+    const existing = await newsRepository.findById(id);
+    if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
+    assertNewsCategoryAccess(actor, existing, context, 'delete');
     const deleted = await newsRepository.softDelete(id);
     if (!deleted) {throw new Api404Error(t('news_not_found', context.lang));}
     return { message: t('news_deleted_success', context.lang) };
 };
 const updateNewsFull = async (actor, id, payload, file, context = {}) => {
-    if (!canManage(actor)) {throw new Api403Error(t('no_permission', context.lang, { roles: CMS_ROLES.join(', ') }));}
+    if (!canUpdateNews(actor)) {throw new Api403Error(t('no_permission_resource', context.lang, { resource: 'news', action: 'update' }));}
 
     const existing = await newsRepository.findById(id);
     if (!existing) {throw new Api404Error(t('news_not_found', context.lang));}
+    assertNewsCategoryAccess(actor, existing, context);
 
     const client = await db.getClient();
     try {
@@ -220,6 +249,10 @@ const updateNewsFull = async (actor, id, payload, file, context = {}) => {
             metaPayload.coverUrl = `${file._relativeDir}/${file.filename}`;
         } else if (Object.prototype.hasOwnProperty.call(payload, 'coverUrl')) {
             metaPayload.coverUrl = payload.coverUrl;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'category')) {
+            metaPayload.category = resolveNewsCategory(actor, payload.category);
         }
 
         const metaUpdated = await newsRepository.updateMeta(id, metaPayload, { client });

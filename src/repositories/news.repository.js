@@ -26,7 +26,7 @@ const normalizeListSort = ({ sortBy, sortOrder } = {}, publicOnly = true) => {
 
 const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
 
-const buildWhere = ({ q, status, publicOnly = true } = {}, startIdx = 1) => {
+const buildWhere = ({ q, status, category, publicOnly = true } = {}, startIdx = 1) => {
     const conditions = ['n.deleted_at IS NULL'];
     const params = [];
     let idx = startIdx;
@@ -36,6 +36,11 @@ const buildWhere = ({ q, status, publicOnly = true } = {}, startIdx = 1) => {
     } else if (status) {
         params.push(status);
         conditions.push(`n.status = $${idx++}`);
+    }
+
+    if (category) {
+        params.push(category);
+        conditions.push(`n.category = $${idx++}`);
     }
 
     if (q) {
@@ -85,7 +90,7 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
 
     const result = await db.query(
         `SELECT
-            n.id, n.cover_url, n.status, n.author_id, n.published_at,
+            n.id, n.cover_url, n.status, n.category, n.author_id, n.published_at,
             n.created_at, n.updated_at,
             nt_eff.title, nt_eff.slug, nt_eff.summary,
             nt_eff.effective_lang AS lang,
@@ -127,7 +132,7 @@ const findBySlug = async (slug, { lang = 'vi', publicOnly = true } = {}) => {
 
     const result = await db.query(
         `SELECT
-            n.id, n.cover_url, n.status, n.author_id, n.published_at,
+            n.id, n.cover_url, n.status, n.category, n.author_id, n.published_at,
             n.created_at, n.updated_at,
             nt_eff.title, nt_eff.slug, nt_eff.summary, nt_eff.content,
             nt_eff.effective_lang AS lang,
@@ -200,12 +205,12 @@ const findPublishedById = async (id) => {
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
-const createMeta = async ({ coverUrl, status, authorId, publishedAt }) => {
+const createMeta = async ({ coverUrl, status, category, authorId, publishedAt }) => {
     const result = await db.query(
-        `INSERT INTO cms.news (cover_url, status, author_id, published_at)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO cms.news (cover_url, status, category, author_id, published_at)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [coverUrl || null, status, authorId, publishedAt || null]
+        [coverUrl || null, status, category || 'general', authorId, publishedAt || null]
     );
     return result.rows[0];
 };
@@ -244,6 +249,7 @@ const updateMeta = async (id, payload, options = {}) => {
     const map = {
         coverUrl: 'cover_url',
         status: 'status',
+        category: 'category',
         publishedAt: 'published_at',
     };
 

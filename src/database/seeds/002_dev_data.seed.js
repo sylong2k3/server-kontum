@@ -55,6 +55,7 @@ const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
             {
                 cover_url: 'https://images.unsplash.com/photo-1542273917363-3b1817f69a2d?auto=format&fit=crop&w=800&q=80',
                 status: 'published',
+                category: 'general',
                 author_id: authorAdmin,
                 published_at: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 tiếng trước
                 translations: [
@@ -77,6 +78,7 @@ const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
             {
                 cover_url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=800&q=80',
                 status: 'published',
+                category: 'so_nnmt',
                 author_id: authorSonn,
                 published_at: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 ngày trước
                 translations: [
@@ -92,6 +94,7 @@ const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
             {
                 cover_url: 'https://images.unsplash.com/photo-1502082553048-f009c37129b9?auto=format&fit=crop&w=800&q=80',
                 status: 'draft',
+                category: 'general',
                 author_id: authorAdmin,
                 published_at: null,
                 translations: [
@@ -108,9 +111,9 @@ const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
 
         for (const item of newsItems) {
             const newsRes = await db.query(
-                `INSERT INTO cms.news (cover_url, status, author_id, published_at)
-                 VALUES ($1, $2, $3, $4) RETURNING id`,
-                [item.cover_url, item.status, item.author_id, item.published_at]
+                `INSERT INTO cms.news (cover_url, status, category, author_id, published_at)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [item.cover_url, item.status, item.category || 'general', item.author_id, item.published_at]
             );
             const newsId = newsRes.rows[0].id;
 

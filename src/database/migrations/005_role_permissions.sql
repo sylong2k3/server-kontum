@@ -58,9 +58,9 @@ UPDATE auth.roles SET permissions = '{
     "notifications": { "read_own": true, "delete_own": true, "send": true },
     "notification_reads": { "read_own": true, "create": true, "update_own": true },
     "device_tokens": { "read_own": true, "create_own": true, "delete_own": true },
-    "news": { "read": true, "create": true, "update": true, "delete": true, "publish": true },
-    "news_translations": { "read": true, "create": true, "update": true, "delete": true },
-    "comments": { "read": true, "delete": true, "approve": true },
+    "news": { "read": true, "create": true, "publish": true },
+    "news_translations": { "read": true, "create": true },
+    "comments": { "read": true },
     "documents": { "read": true, "create": true, "update": true, "delete": true, "publish": true },
     "document_translations": { "read": true, "create": true, "update": true, "delete": true }
 }'::jsonb WHERE code = 'so_nnmt';

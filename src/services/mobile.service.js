@@ -8,6 +8,9 @@ const { t } = require('../utils/i18n.util');
 const POINT_GEOMETRY_TYPES = new Set(['POINT', 'MULTIPOINT']);
 const PG_UNIQUE_VIOLATION = '23505';
 
+// Cùng format với feedback.service: đường dẫn tương đối `/uploads/images/...`
+const toMediaUrls = (files = []) => files.map((file) => `${file._relativeDir}/${file.filename}`);
+
 const toFieldUpdateItem = (row) => ({
     id: row.id,
     layerId: row.layer_id,
@@ -17,6 +20,7 @@ const toFieldUpdateItem = (row) => ({
     attributes: row.attributes,
     clientUuid: row.client_uuid,
     note: row.note,
+    mediaUrls: row.media_urls || [],
     lng: row.lng,
     lat: row.lat,
     createdAt: row.created_at,
@@ -30,7 +34,7 @@ const requireFeaturePermission = (actor, action, lang) => {
     }
 };
 
-const createFieldUpdate = async (actor, payload, lang) => {
+const createFieldUpdate = async (actor, payload, files, lang) => {
     const layer = await layerRepo.findByCode(payload.layerCode);
     if (!layer) { throw new Api404Error(t('map_layer_not_found', lang)); }
     if (!layer.is_editable) { throw new Api400Error(t('map_layer_not_editable', lang)); }
@@ -86,6 +90,7 @@ const createFieldUpdate = async (actor, payload, lang) => {
         fieldUpdate = await fieldUpdateRepo.create(client, {
             userId: actor.id, layerId: layer.id, featureId: feature.id, action,
             attributes, clientUuid: payload.clientUuid, note: payload.note,
+            mediaUrls: toMediaUrls(files),
             lng: payload.lng, lat: payload.lat,
         });
 
@@ -118,6 +123,22 @@ const createFieldUpdate = async (actor, payload, lang) => {
     };
 };
 
+// Báo cáo hiện trường toàn hệ thống (GET /admin/field-updates, MB-092) —
+// khác `syncSince` (bản ghi của chính user): trả kèm tên cán bộ + tên lớp
+// để ubnd_tinh/system_admin giám sát dữ liệu Sở NN&MT gửi lên.
+const adminListFieldUpdates = async (query = {}) => {
+    const { items, total } = await fieldUpdateRepo.findAllPaged(query);
+    return {
+        items: items.map((row) => ({
+            ...toFieldUpdateItem(row),
+            layerName: row.layer_name,
+            userId: row.user_id,
+            userName: row.user_name,
+        })),
+        total,
+    };
+};
+
 const syncSince = async (actor, since, limit = 500) => {
     const cappedLimit = Math.min(Number(limit) || 500, 1000);
     const rows = await fieldUpdateRepo.findSince(actor.id, since || null, cappedLimit + 1);
@@ -129,4 +150,4 @@ const syncSince = async (actor, since, limit = 500) => {
     };
 };
 
-module.exports = { createFieldUpdate, syncSince };
+module.exports = { createFieldUpdate, syncSince, adminListFieldUpdates };
