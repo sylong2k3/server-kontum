@@ -7,6 +7,8 @@ const geoserverClient = require("./src/utils/geoserver.client");
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
 const weatherJob = require("./src/jobs/weather.job");
+const fireRiskJob            = require("./src/jobs/fire-risk.job");
+const forestClassificationJob = require("./src/jobs/forest-classification.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const geoImportWorker       = require("./src/workers/geoImport.worker");
 const {
@@ -82,6 +84,8 @@ async function gracefulShutdown(signal) {
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
   weatherJob.stop();
+  fireRiskJob.stop();
+  forestClassificationJob.stop();
   imageProcessingWorker.stopWorker();
   geoImportWorker.stopWorker();
   closeWebSocketServer();
@@ -144,6 +148,8 @@ const initializeAndStartServer = async () => {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
       weatherJob.start();
+      fireRiskJob.start();
+      forestClassificationJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
     }
@@ -185,6 +191,8 @@ const initializeAndStartServer = async () => {
       tokenCleanupJob.start();
       notificationCleanupJob.start();
       weatherJob.start();
+      fireRiskJob.start();
+      forestClassificationJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
     }
