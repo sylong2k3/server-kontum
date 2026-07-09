@@ -1,6 +1,8 @@
 # 16 — Kế hoạch: Import file GIS vào PostGIS + GeoServer
 
-> **Mục tiêu:** Admin upload file dữ liệu không gian (Shapefile, GeoJSON, KML/KMZ, GeoTIFF, FileGDB) → hệ thống nạp vào PostGIS (`schema gis`), đăng ký vào `gis.layer_registry`, **tự publish lên GeoServer**, để Frontend (Mapbox/MapLibre) render layer **trực tiếp qua GeoServer** (WMS/WFS/WMTS/MVT).
+> ⚠️ **Cập nhật 07/2026 (migration 022):** đường raster GeoTIFF đã **tách khỏi** import-file. GeoTIFF nay upload vào kho viễn thám (`POST /remote-sensing/images` → MinIO) rồi publish lên GeoServer qua `POST /remote-sensing/images/:id/publish` (liên kết `layer_registry.remote_sensing_image_id`). Import-file chỉ còn nhận **vector**: `shapefile | geojson | kml | filegdb`. Các mô tả GeoTIFF trong tài liệu này (§3.1, §5.4, T6) là lịch sử thiết kế, không còn hiệu lực.
+
+> **Mục tiêu:** Admin upload file dữ liệu không gian vector (Shapefile, GeoJSON, KML/KMZ, FileGDB) → hệ thống nạp vào PostGIS (`schema gis`), đăng ký vào `gis.layer_registry`, **tự publish lên GeoServer**, để Frontend (Mapbox/MapLibre) render layer **trực tiếp qua GeoServer** (WMS/WFS/WMTS/MVT).
 >
 > Tài liệu này nối tiếp [12-geoserver-integration-design.md](./12-geoserver-integration-design.md) và [05-database-design.md](../architecture/05-database-design.md). Phạm vi: **đường import file → DB → GeoServer**. Render phía FE đã chốt ở §7 của tài liệu 12.
 
@@ -143,11 +145,11 @@ OGR trả `Polygon/MultiPolygon/Point/...`; registry CHECK enum `POINT/MULTIPOIN
 3. `ANALYZE gis.<table>`.
 4. Gọi `layerRepo.refreshStats()` để tính `bbox` + `feature_count` (đã có sẵn, reproject về 4326).
 
-### 5.4 Đường raster (GeoTIFF)
+### 5.4 Đường raster (GeoTIFF) — *đã chuyển sang module viễn thám (07/2026)*
 
-- KHÔNG vào PostGIS. Lưu file `.tif` vào **volume dùng chung với GeoServer** (đường dẫn `file://`), hoặc MinIO + sync (tùy hạ tầng — quyết định ở §7).
-- Gọi `geoserver.publishRasterLayer(layer)` với `layer.source_url` = đường dẫn file. Hàm này đã tạo coveragestore + coverage.
-- `geometry_type = 'RASTER'`, không tạo bảng PostGIS.
+- ~~Import GeoTIFF qua import-file~~ → thay bằng luồng: upload vào kho viễn thám (MinIO, source of truth) → `POST /remote-sensing/images/:id/publish` stream file ra `GEOSERVER_DATA_DIR` → `publishRasterLayer` tạo coveragestore + coverage.
+- Layer raster trong `layer_registry` có `remote_sensing_image_id` trỏ về bản ghi kho ảnh, `geometry_type = 'RASTER'`, `is_editable = false`.
+- Chi tiết API: xem [06-api-design.md](../architecture/06-api-design.md) mục "Publish ảnh viễn thám lên GeoServer".
 
 ### 5.5 Xử lý bất đồng bộ
 

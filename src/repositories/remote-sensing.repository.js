@@ -18,7 +18,7 @@ const { versionCondition } = require('../utils/optimistic-lock.util');
  * @param {Object} data
  * @returns {Promise<Object>} — bản ghi vừa tạo
  */
-const createImage = async (data) => {
+const createImage = async (data, exec = db) => {
     const {
         name, description, satellite, image_type, acquisition_date, acquisition_time,
         bbox, province_code, district_code, location_name,
@@ -60,7 +60,7 @@ const createImage = async (data) => {
             status, created_by, created_at, updated_at;
     `;
 
-    const { rows } = await db.query(sql, [
+    const { rows } = await exec.query(sql, [
         name, description || null, satellite, image_type, acquisition_date, acquisition_time || null,
         bboxWkt,
         province_code || null, district_code || null, location_name || null,
@@ -290,7 +290,7 @@ const softDeleteImage = async (id, deletedBy) => {
 /**
  * Tạo file record mới (sau khi upload lên MinIO thành công).
  */
-const createFile = async (data) => {
+const createFile = async (data, exec = db) => {
     const {
         image_id, bucket_name, object_key, original_name,
         file_role = 'primary', mime_type, file_size_bytes,
@@ -305,7 +305,7 @@ const createFile = async (data) => {
         ) VALUES ($1, $2, $3, $4, $5::raster.file_role, $6, $7, $8, $9, $10, $11::jsonb, $12)
         RETURNING *
     `;
-    const { rows } = await db.query(sql, [
+    const { rows } = await exec.query(sql, [
         image_id, bucket_name, object_key, original_name,
         file_role, mime_type || null, file_size_bytes || null,
         width_px || null, height_px || null, checksum_md5 || null,
@@ -371,14 +371,14 @@ const getObjectKeysByImageId = async (imageId) => {
 //  PROCESSING JOBS
 // ══════════════════════════════════════════════════════════════════════════════
 
-const createJob = async ({ image_id, file_id, job_type = 'full_pipeline', priority = 5 }) => {
+const createJob = async ({ image_id, file_id, job_type = 'full_pipeline', priority = 5 }, exec = db) => {
     const sql = `
         INSERT INTO raster.remote_sensing_processing_jobs
             (image_id, file_id, job_type, priority)
         VALUES ($1, $2, $3::raster.job_type, $4)
         RETURNING *
     `;
-    const { rows } = await db.query(sql, [image_id, file_id || null, job_type, priority]);
+    const { rows } = await exec.query(sql, [image_id, file_id || null, job_type, priority]);
     return rows[0];
 };
 

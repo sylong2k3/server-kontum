@@ -3,10 +3,11 @@
 /**
  * Upload Middleware cho file Raster / Viễn thám
  * Dùng multer với memory storage (buffer → pipe lên MinIO stream).
- * Giới hạn: 3 GB mỗi file.
  *
- * QUAN TRỌNG: Với file > ~500MB trên server RAM thấp, nên dùng
- * presigned PUT URL (client upload thẳng lên MinIO) thay vì qua Node.js.
+ * QUAN TRỌNG: memory storage nạp NGUYÊN file vào RAM. Để tránh OOM, đường
+ * multipart qua Node.js bị giới hạn ở RASTER_MULTIPART_MAX_MB (mặc định 300MB).
+ * File lớn hơn PHẢI dùng presigned PUT URL (client upload thẳng lên MinIO):
+ *   GET /remote-sensing/upload-url → PUT lên MinIO → POST /remote-sensing/upload-commit
  */
 
 const path    = require('path');
@@ -15,22 +16,13 @@ const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 
 const MB = 1024 * 1024;
-const GB = 1024 * MB;
 
-// Giới hạn file (bytes)
-const RASTER_MAX_SIZE = Number(process.env.UPLOAD_RASTER_MAX_MB || 3072) * MB;
+// Giới hạn cho đường multipart (in-memory). Mặc định 300MB — file lớn hơn dùng presigned.
+const RASTER_MULTIPART_MAX_SIZE = Number(process.env.UPLOAD_RASTER_MULTIPART_MAX_MB || 300) * MB;
 
 // ── Định nghĩa các loại file được phép ────────────────────────────────────────
 
-/** MIME types cho file raster GeoTIFF */
-const RASTER_MIME_TYPES = new Set([
-    'image/tiff',
-    'image/geotiff',
-    'application/octet-stream', // Một số client gửi GeoTIFF dưới dạng này
-    'image/x-tiff',
-]);
-
-/** Extension hợp lệ cho file raster */
+/** Extension hợp lệ cho file raster (nội dung thật được xác thực bằng magic-byte ở service) */
 const RASTER_EXTENSIONS = new Set([
     '.tif',
     '.tiff',
@@ -60,7 +52,9 @@ const JSON_MIME_TYPES = new Set([
 
 const isRasterFile = (file) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    return RASTER_MIME_TYPES.has(file.mimetype) || RASTER_EXTENSIONS.has(ext);
+    // Bắt buộc đúng extension GeoTIFF; nội dung TIFF thật được xác thực bằng
+    // magic-byte ở tầng service (isTiffBuffer) — MIME do client khai không đáng tin.
+    return RASTER_EXTENSIONS.has(ext);
 };
 
 const isThumbnailFile = (file) => {
@@ -76,13 +70,13 @@ const isJsonFile = (file) => {
 // ── Multer Instances ──────────────────────────────────────────────────────────
 
 /**
- * Uploader cho GeoTIFF/COG chính — giới hạn 3GB, memory storage.
+ * Uploader cho GeoTIFF/COG chính — giới hạn RASTER_MULTIPART_MAX_SIZE, memory storage.
  * Buffer được pipe thẳng lên MinIO sau khi multer parse xong.
  */
 const rasterUploader = multer({
     storage: multer.memoryStorage(),
     limits: {
-        fileSize: RASTER_MAX_SIZE,
+        fileSize: RASTER_MULTIPART_MAX_SIZE,
         files: 1,           // Mỗi request chỉ 1 file raster chính
     },
     fileFilter: (req, file, cb) => {
@@ -113,7 +107,7 @@ const rasterUploader = multer({
 const multiRasterUploader = multer({
     storage: multer.memoryStorage(),
     limits: {
-        fileSize: RASTER_MAX_SIZE, // Áp dụng cho file lớn nhất trong request
+        fileSize: RASTER_MULTIPART_MAX_SIZE, // Áp dụng cho file lớn nhất trong request
         files: 3,
     },
     fileFilter: (req, file, cb) => {
@@ -175,9 +169,9 @@ const handleRasterUploadError = (err, req, _res, next) => {
     if (err instanceof multer.MulterError) {
         switch (err.code) {
             case 'LIMIT_FILE_SIZE': {
-                const maxMB = Math.round(RASTER_MAX_SIZE / MB);
+                const maxMB = Math.round(RASTER_MULTIPART_MAX_SIZE / MB);
                 return next(new Api400Error(
-                    t('upload_file_too_large_limit', req.lang, { max: maxMB, gb: Math.round(maxMB / 1024) }),
+                    t('upload_raster_too_large_use_presigned', req.lang, { max: maxMB }),
                     ['FILE_TOO_LARGE'],
                 ));
             }
@@ -199,5 +193,5 @@ module.exports = {
     handleRasterUploadError,
     isRasterFile,
     isThumbnailFile,
-    RASTER_MAX_SIZE,
+    RASTER_MULTIPART_MAX_SIZE,
 };

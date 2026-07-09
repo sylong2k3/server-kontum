@@ -87,6 +87,10 @@ const publishVectorLayer = async (layer) => {
 
     return `${workspace}:${featureName}`;
 };
+const isAlreadyExistsError = (err) =>
+    err instanceof GeoServerError
+    && /already exists/i.test(`${err.message} ${err.responseBody || ''}`);
+
 const publishRasterLayer = async (layer, lang = 'vi') => {
     const config = assertGeoserverConfigured();
     const workspace = config.workspace;
@@ -97,38 +101,46 @@ const publishRasterLayer = async (layer, lang = 'vi') => {
         throw new Error(t('geoserver_raster_source_required', lang));
     }
 
-    // Tạo CoverageStore
-    await requestGeoserver(
-        `/rest/workspaces/${workspace}/coveragestores`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                coverageStore: {
-                    name: storeName,
-                    type: 'GeoTIFF',
-                    enabled: true,
-                    url: sourceUrl.startsWith('file://') ? sourceUrl : `file://${sourceUrl}`,
-                },
-            }),
-        }
-    );
+    // Tạo CoverageStore — store đã tồn tại (retry sau lần publish dở dang) thì bỏ qua
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    coverageStore: {
+                        name: storeName,
+                        type: 'GeoTIFF',
+                        enabled: true,
+                        url: sourceUrl.startsWith('file://') ? sourceUrl : `file://${sourceUrl}`,
+                    },
+                }),
+            }
+        );
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) { throw err; }
+    }
 
     // Publish coverage từ store
-    await requestGeoserver(
-        `/rest/workspaces/${workspace}/coveragestores/${storeName}/coverages`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                coverage: {
-                    name: storeName,
-                    title: layer.name_vi || storeName,
-                    enabled: true,
-                },
-            }),
-        }
-    );
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores/${storeName}/coverages`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    coverage: {
+                        name: storeName,
+                        title: layer.name_vi || storeName,
+                        enabled: true,
+                    },
+                }),
+            }
+        );
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) { throw err; }
+    }
 
     return `${workspace}:${storeName}`;
 };

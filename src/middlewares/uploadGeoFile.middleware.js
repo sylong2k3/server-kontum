@@ -1,9 +1,12 @@
 'use strict';
 
 /**
- * Upload Middleware cho file GIS (Shapefile, GeoJSON, KML/KMZ, GeoTIFF, FileGDB)
+ * Upload Middleware cho file GIS vector (Shapefile, GeoJSON, KML/KMZ, FileGDB)
  * Dùng multer disk storage — ogr2ogr cần đường dẫn file, không thể dùng memory buffer.
  * File được lưu vào thư mục tạm; worker/service xóa sau khi xử lý xong.
+ *
+ * Raster GeoTIFF không đi qua đây — upload vào kho viễn thám
+ * (POST /remote-sensing/images) rồi publish lên GeoServer.
  */
 
 const path   = require('path');
@@ -34,8 +37,6 @@ const ALLOWED_EXTENSIONS = new Set([
     '.json',
     '.kml',
     '.kmz',
-    '.tif',
-    '.tiff',
     '.gdb',
 ]);
 
@@ -49,16 +50,12 @@ const ALLOWED_MIME_TYPES = new Set([
     'application/vnd.google-earth.kmz',
     'text/xml',
     'application/xml',
-    'image/tiff',
-    'image/geotiff',
-    'image/x-tiff',
 ]);
 
 const SOURCE_FORMAT_EXTENSIONS = {
     shapefile: ['.zip'],
     geojson:   ['.geojson', '.json'],
     kml:       ['.kml', '.kmz', '.zip'],
-    geotiff:   ['.tif', '.tiff'],
     filegdb:   ['.zip', '.gdb'],
 };
 

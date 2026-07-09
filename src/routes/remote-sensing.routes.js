@@ -35,6 +35,13 @@ router.get(
     ctrl.getPresignedUploadUrl,
 );
 
+router.post(
+    '/upload-commit',
+    verifyToken,
+    requirePermission('remote_sensing', 'create'),
+    ctrl.commitPresignedUpload,
+);
+
 router.patch(
     '/images/:id',
     verifyToken,
@@ -59,6 +66,14 @@ router.post(
     verifyToken,
     requireRole('system_admin', 'so_nnmt'),
     ctrl.triggerProcess,
+);
+
+// Publish ảnh lên GeoServer (tạo layer WMS) — dùng chung quyền publish của map_layers
+router.post(
+    '/images/:id/publish',
+    verifyToken,
+    requirePermission('map_layers', 'publish'),
+    ctrl.publishImage,
 );
 
 module.exports = router;

@@ -26,7 +26,7 @@ const LAYER_COLUMNS = `
     geometry_type, epsg_code, geoserver_layer, geoserver_store, source_url,
     default_style, min_zoom, max_zoom, label_field, category, layer_kind,
     layer_group, data_year, source_dataset, source_layer_name, sort_order,
-    is_active, is_public, is_editable, layer_permissions,
+    is_active, is_public, is_editable, layer_permissions, remote_sensing_image_id,
     feature_count, last_updated_at, created_at, updated_at,
     CASE WHEN bbox IS NULL THEN NULL ELSE ST_AsGeoJSON(bbox)::json END AS bbox
 `;
@@ -284,11 +284,11 @@ const upsertLayerByCode = async (client, payload) => {
             default_style, min_zoom, max_zoom, label_field, category,
             layer_kind, layer_group, data_year, source_dataset, source_layer_name,
             sort_order, is_active, is_public, is_editable, layer_permissions,
-            source_url, created_by, updated_by
+            source_url, remote_sensing_image_id, created_by, updated_by
         ) VALUES (
             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
             $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-            $21,$22,$23,$24,$25,$26,$27,$27
+            $21,$22,$23,$24,$25,$26,$27,$28,$28
         )
         ON CONFLICT (code) DO UPDATE SET
             name_vi           = COALESCE(EXCLUDED.name_vi, gis.layer_registry.name_vi),
@@ -305,6 +305,7 @@ const upsertLayerByCode = async (client, payload) => {
             source_dataset    = COALESCE(EXCLUDED.source_dataset, gis.layer_registry.source_dataset),
             source_layer_name = COALESCE(EXCLUDED.source_layer_name, gis.layer_registry.source_layer_name),
             source_url        = COALESCE(EXCLUDED.source_url, gis.layer_registry.source_url),
+            remote_sensing_image_id = COALESCE(EXCLUDED.remote_sensing_image_id, gis.layer_registry.remote_sensing_image_id),
             is_active         = EXCLUDED.is_active,
             is_public         = EXCLUDED.is_public,
             is_editable       = EXCLUDED.is_editable,
@@ -338,6 +339,7 @@ const upsertLayerByCode = async (client, payload) => {
             payload.is_editable ?? true,
             payload.layer_permissions || {},
             payload.source_url || null,
+            payload.remote_sensing_image_id || null,
             payload.userId || null,
         ]
     );

@@ -3228,7 +3228,7 @@
           }
         },
         {
-          "name": "[Admin] Import file GIS (Shapefile/GeoJSON/KML/GeoTIFF)",
+          "name": "[Admin] Import file GIS vector (Shapefile/GeoJSON/KML/FileGDB)",
           "request": {
             "method": "POST",
             "header": [
@@ -3245,7 +3245,7 @@
                   "key": "file",
                   "type": "file",
                   "src": "/path/to/your/file.zip",
-                  "description": "File GIS: .zip (shapefile), .geojson, .kml, .kmz, .tif/.tiff, .gdb.zip"
+                  "description": "File GIS vector: .zip (shapefile/FileGDB/KMZ), .geojson, .json, .kml, .kmz"
                 },
                 {
                   "key": "code",
@@ -3263,7 +3263,7 @@
                   "key": "source_format",
                   "value": "shapefile",
                   "type": "text",
-                  "description": "shapefile | geojson | kml | geotiff | filegdb"
+                  "description": "shapefile | geojson | kml | filegdb"
                 },
                 {
                   "key": "import_mode",
@@ -3325,7 +3325,7 @@
                 }
               ]
             },
-            "description": "Upload file GIS vào PostGIS + auto-publish GeoServer. Trả 202 ngay với job_id. Poll GET /map/import-jobs/:jobId để theo dõi tiến độ. Cần quyền map_layers:import."
+            "description": "Upload file GIS vector vào PostGIS + auto-publish GeoServer. Trả 202 ngay với job_id. Poll GET /map/import-jobs/:jobId để theo dõi tiến độ. Cần quyền map_layers:import.\n\n⚠️ GeoTIFF KHÔNG import qua đây — upload vào kho viễn thám (POST /remote-sensing/images) rồi dùng POST /remote-sensing/images/:id/publish để đưa lên GeoServer."
           }
         },
         {
@@ -4416,7 +4416,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/remote-sensing/upload-url?fileName=sentinel2-large.tif&lang={{lang}}",
+              "raw": "{{baseUrl}}/remote-sensing/upload-url?file_name=sentinel2-large.tif&lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -4426,9 +4426,9 @@
               ],
               "query": [
                 {
-                  "key": "fileName",
+                  "key": "file_name",
                   "value": "sentinel2-large.tif",
-                  "description": "Tên file sẽ upload"
+                  "description": "GeoTIFF file name"
                 },
                 {
                   "key": "lang",
@@ -4436,7 +4436,7 @@
                 }
               ]
             },
-            "description": "Tạo presigned PUT URL để client upload file GeoTIFF lớn (>500MB) trực tiếp lên MinIO — tránh qua Node.js server.\n\nQuy trình:\n1. Gọi API này → nhận `uploadUrl` + `objectKey` + `uuid`\n2. Client PUT file thẳng lên `uploadUrl` (không cần header auth)\n3. Sau khi PUT thành công → gọi `POST /remote-sensing/images` với metadata + `objectKey`\n\nURL hết hạn sau 60 phút (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS).",
+            "description": "Tao presigned PUT URL de client upload file GeoTIFF lon (>500MB) truc tiep len MinIO, tranh di qua Node.js server.\n\nFlow chuan:\n1. Goi API nay de nhan `uploadUrl`, `objectKey`, `uuid`.\n2. Client PUT file thang len `uploadUrl` voi header `Content-Type: image/tiff` (khong gui Bearer token).\n3. Sau khi PUT thanh cong, goi `POST /remote-sensing/upload-commit` voi metadata + `object_key`.\n\nURL het han sau 60 phut (MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS).\n\nScript test tu luu `remoteUploadUrl`, `remoteObjectKey`, `remoteUploadUuid` vao collection variables.",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4454,7 +4454,78 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));"
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "if (json?.data?.uploadUrl) pm.collectionVariables.set('remoteUploadUrl', json.data.uploadUrl);",
+                  "if (json?.data?.objectKey) pm.collectionVariables.set('remoteObjectKey', json.data.objectKey);",
+                  "if (json?.data?.uuid) pm.collectionVariables.set('remoteUploadUuid', json.data.uuid);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[Admin] Commit presigned upload (sau PUT MinIO)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object_key\": \"{{remoteObjectKey}}\",\n  \"original_name\": \"sentinel2-large.tif\",\n  \"mime_type\": \"image/tiff\",\n  \"name\": \"Sentinel-2 Kon Tum 2024\",\n  \"satellite\": \"sentinel_2\",\n  \"image_type\": \"geotiff_raw\",\n  \"acquisition_date\": \"2024-06-01\",\n  \"bbox\": [\n    107,\n    14,\n    108,\n    15\n  ],\n  \"province_code\": \"62\",\n  \"cloud_percent\": 12.5,\n  \"resolution_m\": 10,\n  \"epsg_code\": 4326,\n  \"band_count\": 4,\n  \"is_public\": true,\n  \"description\": \"GeoTIFF upload via presigned PUT\",\n  \"extra_metadata\": {\n    \"source\": \"postman_presigned_put\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/upload-commit?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "upload-commit"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Hoan tat flow upload file lon sau khi client PUT GeoTIFF len MinIO.\n\nDieu kien truoc khi goi:\n- Da goi `GET /remote-sensing/upload-url`.\n- Da PUT file binary len `remoteUploadUrl` thanh cong.\n- Dung `object_key` chinh la `objectKey` nhan o buoc lay URL.\n\nBackend kiem tra object ton tai tren MinIO, lay size/etag, tao `raster.remote_sensing_images`, tao `raster.remote_sensing_files`, roi queue job `full_pipeline`.\n\nQuyen can: `remote_sensing.create`.\n\nNeu tra `OBJECT_NOT_FOUND`: file chua PUT thanh cong, sai `object_key`, sai bucket, hoac presigned URL da het han truoc khi upload.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "if (json?.data?.image?.id) pm.collectionVariables.set('remoteImageId', json.data.image.id);",
+                  "if (json?.data?.file?.id) pm.collectionVariables.set('remoteFileId', json.data.file.id);",
+                  "if (json?.data?.job_id) pm.collectionVariables.set('remoteJobId', json.data.job_id);"
                 ]
               }
             }
@@ -4917,6 +4988,70 @@
                 "type": "text/javascript",
                 "exec": [
                   "if (typeof pm !== 'undefined') pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[Admin] Publish ảnh lên GeoServer (WMS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept-Language",
+                "value": "{{lang}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"bien_dong_lop_phu_2024_2026\",\n  \"name_vi\": \"Biến động lớp phủ 2024-2026\",\n  \"is_public\": true,\n  \"layer_group\": \"vien_tham\",\n  \"data_year\": 2026\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/remote-sensing/images/{{remoteImageId}}/publish?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "remote-sensing",
+                "images",
+                "{{remoteImageId}}",
+                "publish"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "description": "Publish ảnh GeoTIFF trong kho viễn thám (MinIO) lên GeoServer để hiển thị qua WMS.\n\nLuồng: stream file từ MinIO (ưu tiên COG > file gốc) ra GEOSERVER_DATA_DIR → upsert gis.layer_registry (liên kết remote_sensing_image_id) → tạo CoverageStore + Coverage trên GeoServer.\n\nQuyền cần: map_layers:publish\n\nBody (JSON, mọi field tuỳ chọn — mặc định lấy từ metadata ảnh):\n- code: mã layer/coverage store, regex ^[a-z][a-z0-9_]{1,59}$ (mặc định rs_img_{id})\n- name_vi, description_vi: tên/mô tả layer\n- category (mặc định remote_sensing), layer_group, data_year (mặc định năm chụp)\n- is_public: mặc định theo is_public của ảnh\n\nResponse: data.geoserver_layer (vd \"kontum:bien_dong_lop_phu_2024_2026\") — dùng làm tham số layers trong URL WMS GetMap.\nGọi lại lần 2 (re-publish): ghi đè file trên đĩa + truncate tile cache, data.republished = true.\n\nYêu cầu server: env GEOSERVER_DATA_DIR trỏ tới thư mục GeoServer đọc được.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (typeof pm !== 'undefined') pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "if (typeof pm !== 'undefined') pm.test('Có geoserver_layer', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.data).to.have.property('geoserver_layer');",
+                  "});"
                 ]
               }
             }
@@ -5836,9 +5971,26 @@
           "name": "RGB Composite",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "url": {"raw": "{{baseUrl}}/satellite/rgb", "host": ["{{baseUrl}}"], "path": ["satellite","rgb"]},
-            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"},
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/satellite/rgb",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "satellite",
+                "rgb"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"
+            },
             "description": "Tạo ảnh composite True Color từ GEE. Trả tile URL + số ảnh dùng."
           }
         },
@@ -5846,9 +5998,26 @@
           "name": "NDVI",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "url": {"raw": "{{baseUrl}}/satellite/ndvi", "host": ["{{baseUrl}}"], "path": ["satellite","ndvi"]},
-            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50,\n  \"ndviMinThresh\": 0.3\n}"},
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/satellite/ndvi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "satellite",
+                "ndvi"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50,\n  \"ndviMinThresh\": 0.3\n}"
+            },
             "description": "Tính NDVI + diện tích thực vật (ha)."
           }
         },
@@ -5856,9 +6025,26 @@
           "name": "Heatmap (LST)",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "url": {"raw": "{{baseUrl}}/satellite/heat-map", "host": ["{{baseUrl}}"], "path": ["satellite","heat-map"]},
-            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-03-01\",\n  \"endDate\": \"2024-05-31\"\n}"},
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/satellite/heat-map",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "satellite",
+                "heat-map"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2024-03-01\",\n  \"endDate\": \"2024-05-31\"\n}"
+            },
             "description": "Bản đồ nhiệt MODIS LST (nhiệt độ bề mặt đất, °C)."
           }
         },
@@ -5866,9 +6052,26 @@
           "name": "Phân loại lớp phủ (7 lớp)",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "url": {"raw": "{{baseUrl}}/satellite/classified", "host": ["{{baseUrl}}"], "path": ["satellite","classified"]},
-            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"},
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/satellite/classified",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "satellite",
+                "classified"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2024-01-01\",\n  \"endDate\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"
+            },
             "description": "Phân loại ngưỡng 7 lớp nhanh: Nước, Đô thị, Đất trống, Nông nghiệp, Trảng cỏ, Rừng trồng, Rừng tự nhiên."
           }
         },
@@ -5876,9 +6079,26 @@
           "name": "So sánh thay đổi rừng",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "url": {"raw": "{{baseUrl}}/satellite/compare", "host": ["{{baseUrl}}"], "path": ["satellite","compare"]},
-            "body": {"mode": "raw", "raw": "{\n  \"startDate\": \"2022-01-01\",\n  \"endDate\": \"2022-12-31\",\n  \"startDate2\": \"2024-01-01\",\n  \"endDate2\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"},
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/satellite/compare",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "satellite",
+                "compare"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2022-01-01\",\n  \"endDate\": \"2022-12-31\",\n  \"startDate2\": \"2024-01-01\",\n  \"endDate2\": \"2024-12-31\",\n  \"cloudCover\": 50\n}"
+            },
             "description": "Phát hiện thay đổi rừng giữa 2 giai đoạn. Trả về tile ảnh + diện tích mất/tăng rừng (ha)."
           }
         }
@@ -5891,7 +6111,22 @@
           "name": "[Public] Phân loại mới nhất",
           "request": {
             "method": "GET",
-            "url": {"raw": "{{baseUrl}}/forest-classification/latest?lang={{lang}}", "host": ["{{baseUrl}}"], "path": ["forest-classification","latest"], "query": [{"key":"lang","value":"{{lang}}"}]},
+            "url": {
+              "raw": "{{baseUrl}}/forest-classification/latest?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forest-classification",
+                "latest"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
             "description": "Lấy kết quả phân loại lớp phủ rừng 11 lớp mới nhất + diện tích theo huyện."
           }
         },
@@ -5899,7 +6134,30 @@
           "name": "[Admin] Lịch sử phân loại",
           "request": {
             "method": "GET",
-            "url": {"raw": "{{baseUrl}}/forest-classification/history?page=1&limit=24&lang={{lang}}", "host": ["{{baseUrl}}"], "path": ["forest-classification","history"], "query": [{"key":"page","value":"1"},{"key":"limit","value":"24"},{"key":"lang","value":"{{lang}}"}]},
+            "url": {
+              "raw": "{{baseUrl}}/forest-classification/history?page=1&limit=24&lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forest-classification",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "24"
+                },
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
             "description": "Lịch sử các lần phân loại (phân trang). Quyền: forest_classification.manage."
           }
         },
@@ -5907,9 +6165,32 @@
           "name": "[Admin] Kích hoạt phân loại thủ công",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "url": {"raw": "{{baseUrl}}/forest-classification/refresh?lang={{lang}}", "host": ["{{baseUrl}}"], "path": ["forest-classification","refresh"], "query": [{"key":"lang","value":"{{lang}}"}]},
-            "body": {"mode": "raw", "raw": "{\n  \"year\": 2024,\n  \"month\": 6\n}"},
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forest-classification/refresh?lang={{lang}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forest-classification",
+                "refresh"
+              ],
+              "query": [
+                {
+                  "key": "lang",
+                  "value": "{{lang}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"year\": 2024,\n  \"month\": 6\n}"
+            },
             "description": "Kích hoạt phân loại RF 11 lớp ngay lập tức. GEE tính ~10-20 phút. Quyền: forest_classification.manage."
           }
         }

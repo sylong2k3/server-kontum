@@ -1,13 +1,25 @@
+const fs   = require('fs');
+const path = require('path');
 const { Readable }   = require('stream');
-const repo    = require('../repositories/remote-sensing.repository');
-const minio   = require('./minio.service');
+const { pipeline }   = require('stream/promises');
+const db        = require('../configs/database');
+const repo      = require('../repositories/remote-sensing.repository');
+const layerRepo = require('../repositories/map-layer.repository');
+const minio     = require('./minio.service');
+const geoserver = require('../utils/geoserver.client');
 const { Api404Error, Api403Error, Api400Error, Api409Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
+const { isTiffBuffer, TIFF_MAGIC_LENGTH } = require('../utils/geotiff.util');
 const { v4: uuidv4 } = require('uuid');
 
 const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, user, lang }) => {
     const imageUuid    = uuidv4();
     const uploadedKeys = [];
+
+    // Xác thực nội dung thật sự là GeoTIFF (không tin MIME/extension do client khai)
+    if (!isTiffBuffer(rasterFile.buffer)) {
+        throw new Api400Error(t('remote_sensing_not_geotiff', lang), ['NOT_GEOTIFF']);
+    }
 
     const rasterObjectKey = minio.buildObjectKey(imageUuid, rasterFile.originalname, 'raster');
     const rasterStream    = Readable.from(rasterFile.buffer);
@@ -58,12 +70,17 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
     }
 
     let imageRecord, rasterFileRecord, job;
+    const client = await db.pool.connect();
     try {
+        // Toàn bộ insert (image + files + job) nằm trong 1 transaction —
+        // lỗi giữa chừng sẽ ROLLBACK, tránh để lại image "mồ côi" không có file/job.
+        await client.query('BEGIN');
+
         // 4a. Tạo image record
         imageRecord = await repo.createImage({
             ...metadata,
             created_by: user.id,
-        });
+        }, client);
 
         rasterFileRecord = await repo.createFile({
             image_id:        imageRecord.id,
@@ -75,7 +92,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
             file_size_bytes: rasterFile.size,
             extra_info:      { etag: rasterEtag },
             uploaded_by:     user.id,
-        });
+        }, client);
         if (thumbnailObjectKey) {
             await repo.createFile({
                 image_id:        imageRecord.id,
@@ -86,7 +103,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
                 mime_type:       thumbnailFile.mimetype || 'image/png',
                 file_size_bytes: thumbnailFile.size,
                 uploaded_by:     user.id,
-            });
+            }, client);
         }
 
         if (metaJsonObjectKey) {
@@ -99,7 +116,7 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
                 mime_type:       'application/json',
                 file_size_bytes: metaJsonFile.size,
                 uploaded_by:     user.id,
-            });
+            }, client);
         }
 
         // 4e. Tạo processing job
@@ -108,10 +125,12 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
             file_id:  rasterFileRecord.id,
             job_type: 'full_pipeline',
             priority: 5,
-        });
+        }, client);
 
+        await client.query('COMMIT');
     } catch (err) {
-        // ⚠ Rollback: xóa tất cả objects đã upload lên MinIO
+        await client.query('ROLLBACK').catch(() => { /* connection có thể đã hỏng */ });
+        // ⚠ DB đã rollback → xóa tất cả objects đã upload lên MinIO cho khớp
         console.error(t('remote_sensing_db_insert_failed_rollback', lang), err.message);
         for (const { objectKey, bucket } of uploadedKeys) {
             try {
@@ -122,6 +141,8 @@ const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, 
             }
         }
         throw err;
+    } finally {
+        client.release();
     }
 
     return { image: imageRecord, file: rasterFileRecord, job };
@@ -140,6 +161,75 @@ const getPresignedUploadUrl = async ({ fileName, user, lang }) => {
     const objectKey   = minio.buildObjectKey(imageUuid, fileName, 'raster');
     const result      = await minio.getPresignedUploadUrl(objectKey);
     return { ...result, uuid: imageUuid };
+};
+
+// Key hợp lệ phải đúng dạng do getPresignedUploadUrl cấp: raster/YYYY/MM/<uuid>/<tên file>.
+// uuid ngẫu nhiên chỉ trả về cho chính người xin URL → ràng buộc này chặn client
+// commit key trỏ tới object của người khác hoặc namespace khác (thumbnails/, metadata/…).
+const RASTER_OBJECT_KEY_RE =
+    /^raster\/\d{4}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[a-z0-9._-]+$/i;
+
+const commitPresignedUpload = async ({ data, user, lang }) => {
+    // `bucket` do client gửi bị bỏ qua — luôn dùng bucket viễn thám cố định.
+    const { object_key, bucket: _ignoredBucket, original_name, mime_type, ...metadata } = data;
+    const bucketName = minio.BUCKET_REMOTE_SENSING;
+
+    if (!RASTER_OBJECT_KEY_RE.test(object_key)) {
+        throw new Api400Error(t('remote_sensing_upload_object_key_invalid', lang), ['INVALID_OBJECT_KEY']);
+    }
+
+    const exists = await minio.objectExists(object_key, bucketName);
+    if (!exists) {
+        throw new Api400Error(t('remote_sensing_upload_object_missing', lang), ['OBJECT_NOT_FOUND']);
+    }
+
+    // Xác thực object client vừa PUT thật sự là GeoTIFF (đọc vài byte đầu, không tải nguyên file).
+    // Đây là chốt chặn cho presigned PUT — vốn không ràng buộc được Content-Type phía MinIO.
+    const head = await minio.getObjectHead(object_key, bucketName, TIFF_MAGIC_LENGTH);
+    if (!isTiffBuffer(head)) {
+        throw new Api400Error(t('remote_sensing_not_geotiff', lang), ['NOT_GEOTIFF']);
+    }
+
+    const objectMeta = await minio.getObjectMeta(object_key, bucketName);
+
+    let imageRecord, rasterFileRecord, job;
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        imageRecord = await repo.createImage({
+            ...metadata,
+            created_by: user.id,
+        }, client);
+
+        rasterFileRecord = await repo.createFile({
+            image_id:        imageRecord.id,
+            bucket_name:     bucketName,
+            object_key,
+            original_name:   original_name || path.basename(object_key),
+            file_role:       'primary',
+            mime_type:       mime_type || objectMeta.contentType || 'image/tiff',
+            file_size_bytes: objectMeta.size,
+            extra_info:      { etag: objectMeta.etag, uploaded_via: 'presigned_put' },
+            uploaded_by:     user.id,
+        }, client);
+
+        job = await repo.createJob({
+            image_id: imageRecord.id,
+            file_id:  rasterFileRecord.id,
+            job_type: 'full_pipeline',
+            priority: 5,
+        }, client);
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => { /* connection có thể đã hỏng */ });
+        throw err;
+    } finally {
+        client.release();
+    }
+
+    return { image: imageRecord, file: rasterFileRecord, job };
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -391,6 +481,97 @@ const getLayersForWebGIS = async (filters, lang) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  PUBLISH LÊN GEOSERVER
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Publish ảnh trong kho viễn thám (MinIO) lên GeoServer để hiển thị qua WMS:
+ *   1. Lấy file raster (ưu tiên COG > primary) từ MinIO, stream ra GEOSERVER_DATA_DIR
+ *   2. Upsert vào gis.layer_registry (liên kết remote_sensing_image_id)
+ *   3. Tạo CoverageStore + Coverage trên GeoServer
+ *
+ * Publish lại cùng ảnh (hoặc đổi file) sẽ ghi đè file trên đĩa và xóa tile cache.
+ */
+const publishImageToGeoServer = async (idOrUuid, options, user, lang) => {
+    const image = await repo.findImageById(idOrUuid);
+    if (!image) { throw new Api404Error(t('remote_sensing_not_found', lang)); }
+
+    const files      = await repo.findFilesByImageId(image.id);
+    const rasterFile = files.find((f) => f.file_role === 'cog')
+                    || files.find((f) => f.file_role === 'primary');
+    if (!rasterFile) { throw new Api404Error(t('remote_sensing_publish_no_raster', lang)); }
+
+    const destDir = process.env.GEOSERVER_DATA_DIR;
+    if (!destDir) { throw new Api400Error(t('map_geo_raster_dir_missing', lang), ['RASTER_DIR_MISSING']); }
+    fs.mkdirSync(destDir, { recursive: true });
+
+    // Tên file cố định theo code → publish lại chỉ ghi đè, GeoServer store không đổi URL
+    const code     = options.code || `rs_img_${image.id}`;
+    const destFile = path.join(destDir, `${code}.tif`);
+    const tmpFile  = `${destFile}.tmp`;
+
+    // Ghi ra file tạm rồi rename (atomic) — tránh GeoServer đọc phải file dở nếu
+    // stream lỗi giữa chừng; dọn file tạm khi thất bại.
+    try {
+        const objectStream = await minio.getObjectStream(rasterFile.object_key, rasterFile.bucket_name);
+        await pipeline(objectStream, fs.createWriteStream(tmpFile));
+        fs.renameSync(tmpFile, destFile);
+    } catch (err) {
+        try { fs.unlinkSync(tmpFile); } catch { /* file tạm chưa tạo hoặc đã dọn */ }
+        throw err;
+    }
+
+    const layerRow = await layerRepo.upsertLayerByCode(null, {
+        code,
+        name_vi:        options.name_vi || image.name,
+        description_vi: options.description_vi || image.description || null,
+        table_name:     code,
+        geometry_type:  'RASTER',
+        epsg_code:      image.epsg_code || 4326,
+        category:       options.category || 'remote_sensing',
+        layer_kind:     'overlay',
+        layer_group:    options.layer_group || null,
+        data_year:      options.data_year
+            || (image.acquisition_date ? new Date(image.acquisition_date).getFullYear() : null),
+        source_dataset: 'remote_sensing',
+        is_active:      true,
+        is_public:      options.is_public ?? image.is_public ?? false,
+        is_editable:    false,
+        source_url:     `file://${destFile}`,
+        remote_sensing_image_id: image.id,
+        userId:         user?.id || null,
+    });
+
+    // Layer đã publish trước đó → file vừa được ghi đè, chỉ cần xóa tile cache
+    if (layerRow.geoserver_layer) {
+        try {
+            await geoserver.truncateGwcLayer(layerRow.geoserver_layer);
+        } catch { /* GWC chưa có cache cho layer này — bỏ qua */ }
+        return { layer: layerRow, geoserver_layer: layerRow.geoserver_layer, republished: true };
+    }
+
+    const geoserverLayerName = await geoserver.publishRasterLayer(layerRow, lang);
+
+    // markPublished tách khỏi publish bằng lời gọi mạng nên không thể gói chung 1 DB
+    // transaction. Nếu ghi DB lỗi, gỡ layer vừa tạo trên GeoServer (compensating) để
+    // hai bên không lệch nhau; lần publish lại sẽ tạo lại sạch sẽ.
+    let published;
+    try {
+        published = await layerRepo.markPublished(null, {
+            code:           layerRow.code,
+            geoserverLayer: geoserverLayerName,
+            geoserverStore: code,
+            updatedBy:      user?.id || null,
+        });
+    } catch (markErr) {
+        try { await geoserver.unpublishLayer(geoserverLayerName); } catch { /* best-effort */ }
+        throw markErr;
+    }
+
+    return { layer: published || layerRow, geoserver_layer: geoserverLayerName, republished: false };
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  TRIGGER JOB
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -424,12 +605,31 @@ const getStatistics = async (idOrUuid, user, lang) => {
     }
 
     const stats = await repo.findStatsByImageId(image.id);
-    return { image: { id: image.id, name: image.name, imageType: image.image_type }, statistics: stats };
+    const statistics = stats.map((s) => ({
+        ...s,
+        histogram: s.histogram || { buckets: [], counts: [] },
+    }));
+
+    return {
+        image: { id: image.id, name: image.name, imageType: image.image_type },
+        statistics,
+        charts: {
+            histograms: statistics.map((s) => ({
+                bandIndex: s.band_index,
+                bandName:  s.band_name || `Band ${s.band_index}`,
+                labels:    s.histogram?.buckets || [],
+                values:    s.histogram?.counts || [],
+                type:      'bar',
+                title:     `Histogram - ${s.band_name || `Band ${s.band_index}`}`,
+            })),
+        },
+    };
 };
 
 module.exports = {
     uploadImage,
     getPresignedUploadUrl,
+    commitPresignedUpload,
     listImages,
     getImageDetail,
     updateImage,
@@ -437,6 +637,7 @@ module.exports = {
     getDownloadUrl,
     getCogUrl,
     getLayersForWebGIS,
+    publishImageToGeoServer,
     triggerProcessingJob,
     getStatistics,
 };

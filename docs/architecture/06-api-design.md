@@ -144,7 +144,7 @@
 
 | Method | Endpoint | Quyền | Mô tả |
 |--------|----------|-------|-------|
-| POST | `/layers/import-file` | `map_layers.import` | Upload file GIS (multipart `file`). Nạp vào PostGIS qua `ogr2ogr`, đăng ký `layer_registry`, auto-publish GeoServer. Trả **202** + `job_id`. |
+| POST | `/layers/import-file` | `map_layers.import` | Upload file GIS **vector** (multipart `file`). Nạp vào PostGIS qua `ogr2ogr`, đăng ký `layer_registry`, auto-publish GeoServer. Trả **202** + `job_id`. Raster GeoTIFF **không** import qua đây — xem mục Viễn thám bên dưới. |
 | GET | `/import-jobs/:jobId` | `map_layers.import` | Poll tiến độ job (`status`, `progress`, `imported_count`, `error_log`). |
 | GET | `/layers/:code/import-jobs` | `map_layers.import` | Lịch sử import của một layer. |
 
@@ -152,10 +152,10 @@
 
 | Field | Kiểu | Bắt buộc | Ghi chú |
 |-------|------|----------|---------|
-| `file` | File | ✅ | `.zip` (shapefile/KMZ/GDB), `.geojson`, `.json`, `.kml`, `.tif/.tiff` |
+| `file` | File | ✅ | `.zip` (shapefile/KMZ/GDB), `.geojson`, `.json`, `.kml`, `.kmz` |
 | `code` | text | ✅ | Mã layer (tạo mới hoặc re-import nếu trùng) |
 | `name_vi` | text | ✅ (tạo mới) | Tên hiển thị tiếng Việt |
-| `source_format` | text | ✅ | `shapefile` \| `geojson` \| `kml` \| `geotiff` \| `filegdb` |
+| `source_format` | text | ✅ | `shapefile` \| `geojson` \| `kml` \| `filegdb` |
 | `import_mode` | text | — | `overwrite` (mặc định) \| `append` |
 | `srid_input` | int | — | SRID nguồn nếu file thiếu CRS (mặc định 4326) |
 | `source_layer_name` | text | — | Layer con trong FileGDB/KML nhiều layer |
@@ -174,6 +174,26 @@
 > Luồng render FE sau import: `GET /map/layers` → FE nhận `geoserver_layer` → build URL WMS/WFS/WMTS/MVT → render trực tiếp trên GeoServer. Node không proxy tile.
 
 > WMS/WFS/WMTS/MVT không đi qua Node.js. Frontend gọi trực tiếp GeoServer public URL cho layer công khai/chỉ đọc.
+
+### Publish ảnh viễn thám lên GeoServer — `/api/v1/remote-sensing` *(từ migration 022)*
+
+Raster GeoTIFF theo luồng **upload 1 lần vào kho viễn thám (MinIO) → publish lên GeoServer**, không import qua `/map/layers/import-file` nữa:
+
+| Method | Endpoint | Quyền | Mô tả |
+|--------|----------|-------|-------|
+| POST | `/images` | `remote_sensing.create` | Upload GeoTIFF (multipart `raster_file` + `thumbnail`/`metadata_json` tuỳ chọn) vào MinIO, tạo record kho ảnh. |
+| POST | `/images/:id/publish` | `map_layers.publish` | Stream file từ MinIO ra `GEOSERVER_DATA_DIR`, upsert `gis.layer_registry` (cột liên kết `remote_sensing_image_id`), tạo CoverageStore + Coverage trên GeoServer. Gọi lại = ghi đè file + truncate tile cache. |
+
+**Body cho `POST /images/:id/publish`** (JSON, mọi field tuỳ chọn — mặc định lấy từ metadata ảnh):
+
+| Field | Kiểu | Ghi chú |
+|-------|------|---------|
+| `code` | text | Mã layer/coverage store, regex `^[a-z][a-z0-9_]{1,59}$`. Mặc định `rs_img_{id}` |
+| `name_vi`, `description_vi` | text | Mặc định lấy tên/mô tả ảnh |
+| `category`, `layer_group`, `data_year` | text/int | Mặc định `remote_sensing` / null / năm chụp |
+| `is_public` | bool | Mặc định theo `is_public` của ảnh |
+
+Response trả `data.geoserver_layer` (vd `kontum:bien_dong_lop_phu_2024_2026`) — FE dùng làm `layers` trong URL WMS GetMap như mọi layer khác.
 
 ### Map APIs — `/api/v1/map-apis` *(admin)* CRUD + cấp `api_key`, `scope`.
 

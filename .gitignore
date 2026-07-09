@@ -15,3 +15,6 @@ ACCOUNTS.md
 
 package-lock.json
 pnpm-lock.yaml
+
+# Claude Code local tooling config
+.claude/

@@ -75,6 +75,17 @@ const createImageSchema = Joi.object({
 });
 
 /**
+ * POST /api/v1/remote-sensing/upload-commit
+ * Hoàn tất flow presigned PUT: verify object đã có trên MinIO rồi tạo DB record.
+ */
+const commitUploadSchema = createImageSchema.keys({
+    object_key:    Joi.string().trim().max(1024).required(),
+    // bucket cố định phía server (BUCKET_REMOTE_SENSING) — không cho client chỉ định.
+    original_name: Joi.string().trim().max(500).optional(),
+    mime_type:     Joi.string().trim().max(255).default('image/tiff'),
+});
+
+/**
  * GET /api/v1/remote-sensing/images
  * Query params cho danh sách ảnh
  */
@@ -178,6 +189,21 @@ const triggerProcessSchema = Joi.object({
     priority: Joi.number().integer().min(1).max(10).default(5),
 });
 
+/**
+ * POST /api/v1/remote-sensing/images/:id/publish
+ * Publish ảnh lên GeoServer — mọi field đều tuỳ chọn, mặc định lấy từ record ảnh.
+ * code phải là identifier hợp lệ (làm tên coverage store + tên file trên đĩa).
+ */
+const publishImageSchema = Joi.object({
+    code:           Joi.string().pattern(/^[a-z][a-z0-9_]{1,59}$/).optional(),
+    name_vi:        Joi.string().trim().min(1).max(200).optional(),
+    description_vi: Joi.string().max(5000).allow('', null).optional(),
+    category:       Joi.string().max(60).allow('', null).optional(),
+    layer_group:    Joi.string().max(80).allow('', null).optional(),
+    data_year:      Joi.number().integer().min(1900).max(2100).optional(),
+    is_public:      Joi.boolean().optional(),
+});
+
 // ── Validate ID param ─────────────────────────────────────────────────────────
 const idParamSchema = Joi.object({
     id: Joi.alternatives().try(
@@ -188,12 +214,14 @@ const idParamSchema = Joi.object({
 
 module.exports = {
     createImageSchema,
+    commitUploadSchema,
     listImagesSchema,
     updateImageSchema,
     deleteImageSchema,
     downloadSchema,
     layersQuerySchema,
     triggerProcessSchema,
+    publishImageSchema,
     idParamSchema,
     SATELLITE_TYPES,
     IMAGE_TYPES,

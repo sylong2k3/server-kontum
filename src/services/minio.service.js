@@ -135,6 +135,21 @@ const getObjectStream = async (objectKey, bucket) => {
     const bucketName = bucket || BUCKET_REMOTE_SENSING;
     return client.getObject(bucketName, objectKey);
 };
+/**
+ * Đọc `length` byte đầu tiên của object (dùng để kiểm tra magic-byte mà không
+ * tải nguyên file). Trả về Buffer có thể ngắn hơn `length` nếu object nhỏ.
+ */
+const getObjectHead = async (objectKey, bucket, length) => {
+    const client     = getClient();
+    const bucketName = bucket || BUCKET_REMOTE_SENSING;
+    const stream     = await client.getPartialObject(bucketName, objectKey, 0, length);
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        stream.on('data',  (chunk) => chunks.push(chunk));
+        stream.on('end',   () => resolve(Buffer.concat(chunks)));
+        stream.on('error', reject);
+    });
+};
 
 module.exports = {
     buildObjectKey,
@@ -148,5 +163,6 @@ module.exports = {
     getObjectMeta,
     downloadToBuffer,
     getObjectStream,
+    getObjectHead,
     BUCKET_REMOTE_SENSING,
 };

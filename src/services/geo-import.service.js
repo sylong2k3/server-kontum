@@ -2,34 +2,26 @@
 
 /**
  * geo-import.service.js
- * Điều phối luồng import file GIS (Shapefile, GeoJSON, KML/KMZ, GeoTIFF, FileGDB):
- *   Upload file → tạo import job → ogr2ogr (vector) / copy file (raster)
- *   → upsert layer_registry → refreshStats → auto-publish GeoServer
+ * Điều phối luồng import file GIS vector (Shapefile, GeoJSON, KML/KMZ, FileGDB):
+ *   Upload file → tạo import job → ogr2ogr → upsert layer_registry
+ *   → refreshStats → auto-publish GeoServer
+ *
+ * Raster GeoTIFF không đi qua đây — upload vào kho viễn thám
+ * (POST /remote-sensing/images) rồi publish qua /remote-sensing/images/:id/publish.
  *
  * Tách khỏi map.service.js để giữ SRP.
  */
 
-const fs   = require('fs');
-const path = require('path');
+const fs = require('fs');
 
 const db        = require('../configs/database');
 const ogr       = require('../utils/ogr.util');
 const geoserver = require('../utils/geoserver.client');
 const layerRepo = require('../repositories/map-layer.repository');
 const { geoserverConfig } = require('../configs/geoserver');
-const { Api400Error, Api404Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 
 const GEO_IMPORT_SYNC_MAX_BYTES = Number(process.env.GEO_IMPORT_SYNC_MAX_BYTES || 5 * 1024 * 1024); // 5 MB
-
-// ── Raster storage ────────────────────────────────────────────────────────────
-
-const getRasterDestDir = (lang) => {
-    const dir = process.env.GEOSERVER_DATA_DIR;
-    if (!dir) { throw new Api400Error(t('map_geo_raster_dir_missing', lang), ['RASTER_DIR_MISSING']); }
-    return dir;
-};
-
 
 const safeUnlink = (filePath) => {
     if (!filePath) { return; }
@@ -67,7 +59,7 @@ const enqueueImport = async ({ file, payload, user, lang }) => {
             source_dataset: payload.source_dataset || null,
             is_active:      true,
             is_public:      payload.is_public ?? false,
-            is_editable:    payload.source_format !== 'geotiff',
+            is_editable:    true,
             userId,
         });
 
@@ -149,79 +141,48 @@ const runImportJob = async (jobId, lang = 'vi') => {
     try {
         await updateProgress(5, 'processing');
 
-        let geometryType, epsgCode, featureCount;
-
-        // ── Vector (shapefile, geojson, kml, filegdb) ────────────────────────
-        if (payload.source_format !== 'geotiff') {
-            // 1. Inspect
-            await updateProgress(10);
-            let inspectResult;
-            try {
-                inspectResult = await ogr.inspect(filePath, info.source_layer_name || null, lang);
-            } catch (err) {
-                throw new Error(`${t('map_geo_inspect_failed', lang)}: ${err.message}`);
-            }
-
-            geometryType = inspectResult.geometryType;
-            epsgCode     = inspectResult.epsgCode;
-            featureCount = inspectResult.featureCount;
-
-            // 2. ogr2ogr → PostGIS
-            await updateProgress(20);
-            try {
-                await ogr.loadToPostgis({
-                    filePath,
-                    schema:           payload.schema_name || 'gis',
-                    table:            tableName,
-                    sridInput:        payload.srid_input || epsgCode || 4326,
-                    mode:             payload.import_mode || 'overwrite',
-                    sourceLayerName:  info.source_layer_name || null,
-                    onProgress: async (pct, msg) => {
-                        await updateProgress(20 + Math.round(pct * 0.5));
-                    },
-                    lang,
-                });
-            } catch (err) {
-                throw new Error(`${t('map_geo_ogr_failed', lang)}: ${err.message}`);
-            }
-
-            await updateProgress(70);
-
-            // 3. Upsert layer_registry + refreshStats
-            const layerRow = await _upsertAndRefresh({
-                code, tableName, payload,
-                geometryType, epsgCode, featureCount,
-                sourceUrl: null,
-                userId,
-            });
-
-            // 4. Cập nhật layer_id trong job
-            await _finalizeJob(jobId, layerRow, featureCount, code, 'vector', payload.auto_publish, lang);
+        // 1. Inspect
+        await updateProgress(10);
+        let inspectResult;
+        try {
+            inspectResult = await ogr.inspect(filePath, info.source_layer_name || null, lang);
+        } catch (err) {
+            throw new Error(`${t('map_geo_inspect_failed', lang)}: ${err.message}`);
         }
 
-        // ── Raster (GeoTIFF) ──────────────────────────────────────────────────
-        else {
-            await updateProgress(20);
-            const destDir  = getRasterDestDir(lang);
-            const destFile = path.join(destDir, `${code}_${Date.now()}${path.extname(filePath)}`);
-            fs.copyFileSync(filePath, destFile);
+        const { geometryType, epsgCode, featureCount } = inspectResult;
 
-            geometryType = 'RASTER';
-            epsgCode     = payload.epsg_code || 4326;
-            featureCount = 0;
-
-            const sourceUrl = `file://${destFile}`;
-            await updateProgress(60);
-
-            const layerRow = await _upsertAndRefresh({
-                code, tableName: code, payload,
-                geometryType, epsgCode, featureCount,
-                sourceUrl,
-                userId,
+        // 2. ogr2ogr → PostGIS
+        await updateProgress(20);
+        try {
+            await ogr.loadToPostgis({
+                filePath,
+                schema:           payload.schema_name || 'gis',
+                table:            tableName,
+                sridInput:        payload.srid_input || epsgCode || 4326,
+                mode:             payload.import_mode || 'overwrite',
+                sourceLayerName:  info.source_layer_name || null,
+                onProgress: async (pct, msg) => {
+                    await updateProgress(20 + Math.round(pct * 0.5));
+                },
+                lang,
             });
-
-            await _finalizeJob(jobId, layerRow, 0, code, 'raster', payload.auto_publish, lang);
+        } catch (err) {
+            throw new Error(`${t('map_geo_ogr_failed', lang)}: ${err.message}`);
         }
+
+        await updateProgress(70);
+
+        // 3. Upsert layer_registry + refreshStats
+        const layerRow = await _upsertAndRefresh({
+            code, tableName, payload,
+            geometryType, epsgCode, featureCount,
+            sourceUrl: null,
+            userId,
+        });
+
+        // 4. Cập nhật layer_id trong job
+        await _finalizeJob(jobId, layerRow, featureCount, code, payload.auto_publish, lang);
 
         safeUnlink(filePath);
     } catch (err) {
@@ -283,7 +244,7 @@ const _upsertAndRefresh = async ({ code, tableName, payload, geometryType, epsgC
     }
 };
 
-const _finalizeJob = async (jobId, layerRow, featureCount, code, kind, autoPublish, lang = 'vi') => {
+const _finalizeJob = async (jobId, layerRow, featureCount, code, autoPublish, lang = 'vi') => {
     const client = await db.pool.connect();
     try {
         await layerRepo.updateImportJob(client, jobId, {
@@ -303,12 +264,7 @@ const _finalizeJob = async (jobId, layerRow, featureCount, code, kind, autoPubli
     if (autoPublish && layerRow.is_active) {
         if (!layerRow.geoserver_layer) {
             try {
-                let geoserverLayerName;
-                if (kind === 'raster') {
-                    geoserverLayerName = await geoserver.publishRasterLayer(layerRow);
-                } else {
-                    geoserverLayerName = await geoserver.publishVectorLayer(layerRow);
-                }
+                const geoserverLayerName = await geoserver.publishVectorLayer(layerRow);
                 const pubClient = await db.pool.connect();
                 try {
                     await layerRepo.markPublished(pubClient, {

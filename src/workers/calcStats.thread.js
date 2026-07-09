@@ -17,6 +17,36 @@ const { workerData, parentPort } = require('worker_threads');
         const image     = await tiff.getImage();
         const bandCount = image.getSamplesPerPixel();
         const stats     = [];
+        const HISTOGRAM_BIN_COUNT = 64;
+
+        const round4 = (value) => Math.round(value * 10000) / 10000;
+
+        const buildHistogram = (data, min, max) => {
+            if (!Number.isFinite(min) || !Number.isFinite(max)) { return { buckets: [], counts: [] }; }
+            if (min === max) {
+                let count = 0;
+                for (let i = 0; i < data.length; i++) {
+                    const v = data[i];
+                    if (v !== null && v !== undefined && !Number.isNaN(v) && Number.isFinite(v)) { count++; }
+                }
+                return { buckets: [round4(min)], counts: [count] };
+            }
+
+            const counts = Array(HISTOGRAM_BIN_COUNT).fill(0);
+            const step   = (max - min) / HISTOGRAM_BIN_COUNT;
+
+            for (let i = 0; i < data.length; i++) {
+                const v = data[i];
+                if (v === null || v === undefined || Number.isNaN(v) || !Number.isFinite(v)) { continue; }
+                const idx = Math.min(HISTOGRAM_BIN_COUNT - 1, Math.floor((v - min) / step));
+                counts[idx]++;
+            }
+
+            return {
+                buckets: Array.from({ length: HISTOGRAM_BIN_COUNT }, (_, i) => round4(min + step * i)),
+                counts,
+            };
+        };
 
         for (let b = 1; b <= bandCount; b++) {
             try {
@@ -42,17 +72,19 @@ const { workerData, parentPort } = require('worker_threads');
                     continue;
                 }
 
-                const mean = sum / validCount;
-                const std  = Math.sqrt(Math.abs(sumSq / validCount - mean * mean));
+                const mean      = sum / validCount;
+                const std       = Math.sqrt(Math.abs(sumSq / validCount - mean * mean));
+                const histogram = buildHistogram(data, min, max);
 
                 stats.push({
                     band_index:   b,
-                    min:          Math.round(min  * 10000) / 10000,
-                    max:          Math.round(max  * 10000) / 10000,
-                    mean:         Math.round(mean * 10000) / 10000,
-                    std:          Math.round(std  * 10000) / 10000,
+                    min:          round4(min),
+                    max:          round4(max),
+                    mean:         round4(mean),
+                    std:          round4(std),
                     valid_pixels: validCount,
                     total_pixels: total,
+                    histogram,
                 });
             } catch (bandErr) {
                 console.warn(`[calcStats.thread] Band ${b} error:`, bandErr.message);

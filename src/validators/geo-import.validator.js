@@ -11,7 +11,9 @@ const geoImportPayload = Joi.object({
     name_en:           Joi.string().max(200).allow('', null),
     description_vi:    Joi.string().allow('', null),
     table_name:        identifier.max(120),
-    source_format:     Joi.string().valid('shapefile', 'geojson', 'kml', 'geotiff', 'filegdb').required(),
+    // GeoTIFF không import qua đây — upload vào kho viễn thám rồi dùng
+    // POST /remote-sensing/images/:id/publish để đưa lên GeoServer
+    source_format:     Joi.string().valid('shapefile', 'geojson', 'kml', 'filegdb').required(),
     import_mode:       Joi.string().valid('append', 'overwrite').default('overwrite'),
     srid_input:        Joi.number().integer().min(1).default(4326),
     source_layer_name: Joi.string().max(160).allow('', null),

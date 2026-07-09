@@ -11,9 +11,9 @@
 
 const svc = require('../services/remote-sensing.service');
 const {
-    createImageSchema, listImagesSchema, updateImageSchema,
+    createImageSchema, commitUploadSchema, listImagesSchema, updateImageSchema,
     deleteImageSchema, downloadSchema, layersQuerySchema,
-    triggerProcessSchema,
+    triggerProcessSchema, publishImageSchema,
 } = require('../validators/remote-sensing.validator');
 const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
@@ -291,6 +291,25 @@ const getStatistics = async (req, res, next) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  POST /api/v1/remote-sensing/images/:id/publish (đưa ảnh lên GeoServer/WMS)
+// ══════════════════════════════════════════════════════════════════════════════
+const publishImage = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const options = validate(publishImageSchema, req.body || {}, req.lang);
+        const result  = await svc.publishImageToGeoServer(id, options, req.user, req.lang);
+
+        res.json({
+            success: true,
+            message: t('remote_sensing_publish_success', req.lang),
+            data:    result,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  GET /api/v1/remote-sensing/upload-url (presigned PUT cho client)
 // ══════════════════════════════════════════════════════════════════════════════
 const getPresignedUploadUrl = async (req, res, next) => {
@@ -320,6 +339,32 @@ const getPresignedUploadUrl = async (req, res, next) => {
     }
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  POST /api/v1/remote-sensing/upload-commit (tạo DB record sau presigned PUT)
+// ══════════════════════════════════════════════════════════════════════════════
+const commitPresignedUpload = async (req, res, next) => {
+    try {
+        const data = validate(commitUploadSchema, req.body, req.lang);
+        const result = await svc.commitPresignedUpload({
+            data,
+            user: req.user,
+            lang: req.lang,
+        });
+
+        res.status(201).json({
+            success: true,
+            message: t('remote_sensing_upload_commit_success', req.lang),
+            data: {
+                image:  result.image,
+                file:   result.file,
+                job_id: result.job?.id,
+            },
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     uploadImage,
     listImages,
@@ -329,7 +374,9 @@ module.exports = {
     getDownloadUrl,
     getCogUrl,
     getLayers,
+    publishImage,
     triggerProcess,
     getStatistics,
     getPresignedUploadUrl,
+    commitPresignedUpload,
 };

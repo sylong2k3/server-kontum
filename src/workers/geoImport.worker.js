@@ -24,7 +24,7 @@ const JOB_BATCH_SIZE = Number(process.env.GEO_WORKER_BATCH_SIZE || 2);
 const WORKER_LANG    = process.env.APP_LANG || process.env.LANG || 'vi';
 
 // Format geo file (phân biệt với remote-sensing jobs)
-const GEO_FORMATS = ['shapefile', 'geojson', 'kml', 'geotiff', 'filegdb'];
+const GEO_FORMATS = ['shapefile', 'geojson', 'kml', 'filegdb'];
 
 let cronJob    = null;
 let isRunning  = false;

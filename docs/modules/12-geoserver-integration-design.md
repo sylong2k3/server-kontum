@@ -257,6 +257,7 @@ Các REST endpoint GeoServer dùng (nội bộ):
 | DELETE | `/api/v1/map/layers/:code/publish` | Admin gỡ publish khỏi GeoServer + clear metadata |
 | PATCH | `/api/v1/map/layers/:code/active` | Admin bật/tắt layer, đồng bộ `gis.layer_registry.is_active` và GeoServer `enabled` |
 | POST | `/api/v1/map/rasters/:coverageStore/harvest` | Harvest GeoTIFF mới vào ImageMosaic + truncate GWC nếu cần |
+| POST | `/api/v1/remote-sensing/images/:id/publish` | Publish ảnh GeoTIFF từ kho viễn thám (MinIO) → `GEOSERVER_DATA_DIR` → CoverageStore + Coverage. Layer liên kết ngược qua `layer_registry.remote_sensing_image_id` *(migration 022)* |
 
 **Nguyên tắc:**
 - Node.js không expose `/api/v1/map/wms`, `/api/v1/map/wfs`, `/api/v1/map/wmts`.
