@@ -81,9 +81,9 @@ const start = () => {
         return;
     }
 
-    analysisTask = cron.schedule(ANALYSIS_CRON, runDailyAnalysis);
-    pollTask     = cron.schedule(POLL_CRON,     runPollExports);
-    cleanupTask  = cron.schedule(CLEANUP_CRON,  runCleanup);
+    analysisTask = cron.schedule(ANALYSIS_CRON, runDailyAnalysis, { missedExecutionTolerance: 30000 });
+    pollTask     = cron.schedule(POLL_CRON,     runPollExports,   { missedExecutionTolerance: 30000 });
+    cleanupTask  = cron.schedule(CLEANUP_CRON,  runCleanup,       { missedExecutionTolerance: 30000 });
 
     console.log(`  ✓ Fire risk analysis job scheduled (${ANALYSIS_CRON})`);
     console.log(`  ✓ Fire risk export poll job scheduled (${POLL_CRON})`);

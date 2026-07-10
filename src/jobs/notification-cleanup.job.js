@@ -29,7 +29,7 @@ const start = () => {
         console.warn(`[NOTIFICATION CLEANUP] Invalid cron expression "${CLEANUP_CRON}" — job not started`);
         return;
     }
-    task = cron.schedule(CLEANUP_CRON, runCleanup);
+    task = cron.schedule(CLEANUP_CRON, runCleanup, { missedExecutionTolerance: 30000 });
     console.log(`  ✓ Notification cleanup job scheduled (${CLEANUP_CRON})`);
 };
 

@@ -52,7 +52,7 @@ const start = () => {
         console.warn(`[WEATHER REFRESH] Invalid cron expression "${WEATHER_CRON}" — job not started`);
         return;
     }
-    task = cron.schedule(WEATHER_CRON, runRefresh);
+    task = cron.schedule(WEATHER_CRON, runRefresh, { missedExecutionTolerance: 30000 });
     console.log(`  ✓ Weather refresh job scheduled (${WEATHER_CRON})`);
     // Làm nóng cache ngay khi khởi động (không chặn startup).
     runRefresh();

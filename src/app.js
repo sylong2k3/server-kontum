@@ -19,6 +19,16 @@ initPassport();
 const app = express();
 app.disable("x-powered-by");
 
+// Chặn sớm các request dò quét file nhạy cảm (.env, .git, path traversal)
+// trước khi tới router, tránh lộ thông tin và giảm rác log lỗi 404.
+const BLOCKED_PATH_PATTERN = /(^|\/)\.env(\.|$|\?)|\.git(\/|$)|\.\.\//i;
+app.use((req, res, next) => {
+  if (BLOCKED_PATH_PATTERN.test(req.originalUrl)) {
+    return res.status(403).end();
+  }
+  next();
+});
+
 const trustProxy = process.env.TRUST_PROXY;
 if (trustProxy === "true") {
   app.set("trust proxy", true);

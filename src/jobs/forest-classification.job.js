@@ -66,8 +66,8 @@ const start = () => {
         return;
     }
 
-    analysisTask = cron.schedule(ANALYSIS_CRON, runMonthlyAnalysis);
-    pollTask     = cron.schedule(POLL_CRON,     runPollExports);
+    analysisTask = cron.schedule(ANALYSIS_CRON, runMonthlyAnalysis, { missedExecutionTolerance: 30000 });
+    pollTask     = cron.schedule(POLL_CRON,     runPollExports,     { missedExecutionTolerance: 30000 });
 
     console.log(`  ✓ Forest classification job scheduled (${ANALYSIS_CRON})`);
     console.log(`  ✓ Forest classification export poll scheduled (${POLL_CRON})`);
