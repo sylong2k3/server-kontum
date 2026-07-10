@@ -17,7 +17,16 @@ const { t } = require('./utils/i18n.util');
 initPassport();
 
 const app = express();
-app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
+const trustProxy = process.env.TRUST_PROXY;
+if (trustProxy === "true") {
+  app.set("trust proxy", true);
+} else if (/^\d+$/.test(trustProxy || "")) {
+  app.set("trust proxy", Number(trustProxy));
+} else if (trustProxy) {
+  app.set("trust proxy", trustProxy.split(",").map((value) => value.trim()).filter(Boolean));
+}
 
 const corsOrigins = process.env.CORS_ORIGINS || "*";
 let allowedOrigins = corsOrigins
@@ -68,8 +77,9 @@ app.use(passport.initialize());
 app.use(cookieParser());
 app.use(localeMiddleware);
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+const bodyLimit = process.env.REQUEST_BODY_LIMIT || "2mb";
+app.use(express.json({ limit: bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: bodyLimit, parameterLimit: 1000 }));
 app.use("/uploads", express.static("public/uploads"));
 app.use(compression({
     filter: (req, res) => {
@@ -114,8 +124,23 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const expensiveLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: parseInt(process.env.EXPENSIVE_RATE_LIMIT_MAX, 10) || 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many expensive requests.", errors: ["TOO_MANY_REQUESTS"] },
+});
+
 app.use("/api/", limiter);
 app.use("/api/v1/auth", authLimiter);
+app.use([
+  "/api/v1/remote-sensing",
+  "/api/v1/satellite",
+  "/api/v1/spatial",
+  "/api/v1/fire-risk",
+  "/api/v1/forest-classification",
+], expensiveLimiter);
 
 app.get('/health', (req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });

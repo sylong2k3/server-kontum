@@ -2,6 +2,9 @@ const WebSocket = require('ws');
 const TokenManager = require('../utils/tokenManager.util');
 
 const clients = new Set();
+const MAX_CHANNELS = parseInt(process.env.WS_MAX_CHANNELS, 10) || 20;
+const MAX_MESSAGES_PER_MINUTE = parseInt(process.env.WS_MAX_MESSAGES_PER_MINUTE, 10) || 60;
+const MAX_CHANNEL_LENGTH = 100;
 let wss = null;
 let upgradeHandler = null;
 
@@ -33,7 +36,10 @@ function setupSocketState(ws, req) {
 
     ws._wsState = {
         userId,
+        role: req._wsUser?.role || null,
         channels: new Set(),
+        messageCount: 0,
+        messageWindowStartedAt: Date.now(),
     };
 
     clients.add(ws);
@@ -45,16 +51,32 @@ function setupSocketState(ws, req) {
 
     ws.on('message', (rawPayload) => {
         try {
+            const now = Date.now();
+            if (now - ws._wsState.messageWindowStartedAt >= 60_000) {
+                ws._wsState.messageWindowStartedAt = now;
+                ws._wsState.messageCount = 0;
+            }
+            ws._wsState.messageCount += 1;
+            if (ws._wsState.messageCount > MAX_MESSAGES_PER_MINUTE) {
+                ws.close(1008, 'Message rate exceeded');
+                return;
+            }
+
             const payload = Buffer.isBuffer(rawPayload)
                 ? rawPayload.toString('utf8')
                 : String(rawPayload);
             const message = JSON.parse(payload);
 
             if (message.action === 'subscribe' && Array.isArray(message.channels)) {
-                message.channels
+                const requested = message.channels
                     .map((ch) => String(ch).trim())
-                    .filter(Boolean)
-                    .forEach((ch) => ws._wsState.channels.add(ch));
+                    .filter((ch) => ch && ch.length <= MAX_CHANNEL_LENGTH)
+                    .filter((ch) => !ch.startsWith('role:') || ch === `role:${ws._wsState.role}`);
+
+                for (const channel of requested) {
+                    if (ws._wsState.channels.size >= MAX_CHANNELS) { break; }
+                    ws._wsState.channels.add(channel);
+                }
 
                 safelySend(ws, createMessage('subscribed', {
                     channels: Array.from(ws._wsState.channels),
@@ -76,7 +98,10 @@ function initWebSocketServer(server, options = {}) {
 
     if (wss) {return;}
 
-    wss = new WebSocket.Server({ noServer: true });
+    wss = new WebSocket.Server({
+        noServer: true,
+        maxPayload: parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 64 * 1024,
+    });
 
     upgradeHandler = async (req, socket, head) => {
         const requestUrl = new URL(req.url, `http://${req.headers.host}`);
@@ -86,18 +111,31 @@ function initWebSocketServer(server, options = {}) {
             return;
         }
 
-        const token =
-            (req.headers.authorization && req.headers.authorization.split(' ')[1]) ||
-            requestUrl.searchParams.get('token');
+        const allowedOrigins = (process.env.CORS_ORIGINS || '')
+            .split(',')
+            .map((origin) => origin.trim())
+            .filter((origin) => origin && origin !== '*');
+        const origin = req.headers.origin;
+        if (origin && allowedOrigins.length && !allowedOrigins.includes(origin)) {
+            socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+            socket.destroy();
+            return;
+        }
 
-        if (token) {
-            try {
-                req._wsUser = TokenManager.verifyAccessToken(token);
-            } catch (_) {
-                socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-                socket.destroy();
-                return;
-            }
+        const authorization = req.headers.authorization || '';
+        const [scheme, token] = authorization.split(' ');
+        if (scheme !== 'Bearer' || !token) {
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+        }
+
+        try {
+            req._wsUser = TokenManager.verifyAccessToken(token);
+        } catch (_) {
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
         }
 
         wss.handleUpgrade(req, socket, head, (ws) => {

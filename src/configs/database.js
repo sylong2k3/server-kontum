@@ -35,7 +35,8 @@ const query = async (text, params) => {
     } catch (err) {
         const duration = Date.now() - start;
         const shortSql = text.replace(/\s+/g, ' ').substring(0, 150);
-        console.error(`[DB ERROR] ${duration}ms | ${err.message} | ${shortSql}`);
+        const detail = err.message || err.errors?.map((e) => e.message).join('; ') || err.code || String(err);
+        console.error(`[DB ERROR] ${duration}ms | code=${err.code || '-'} | ${detail} | ${shortSql}`);
         throw err;
     }
 };

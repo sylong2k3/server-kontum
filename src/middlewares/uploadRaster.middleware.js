@@ -17,8 +17,9 @@ const { t } = require('../utils/i18n.util');
 
 const MB = 1024 * 1024;
 
-// Giới hạn cho đường multipart (in-memory). Mặc định 300MB — file lớn hơn dùng presigned.
-const RASTER_MULTIPART_MAX_SIZE = Number(process.env.UPLOAD_RASTER_MULTIPART_MAX_MB || 300) * MB;
+// Giới hạn cho đường multipart (in-memory). Mặc định 100MB — file lớn hơn dùng presigned.
+const RASTER_MULTIPART_MAX_SIZE = Number(process.env.UPLOAD_RASTER_MULTIPART_MAX_MB || 100) * MB;
+const MULTIPART_FIELD_MAX_SIZE = Number(process.env.UPLOAD_FIELD_MAX_MB || 1) * MB;
 
 // ── Định nghĩa các loại file được phép ────────────────────────────────────────
 
@@ -78,6 +79,9 @@ const rasterUploader = multer({
     limits: {
         fileSize: RASTER_MULTIPART_MAX_SIZE,
         files: 1,           // Mỗi request chỉ 1 file raster chính
+        fields: 20,
+        parts: 21,
+        fieldSize: MULTIPART_FIELD_MAX_SIZE,
     },
     fileFilter: (req, file, cb) => {
         if (isRasterFile(file)) {
@@ -109,6 +113,9 @@ const multiRasterUploader = multer({
     limits: {
         fileSize: RASTER_MULTIPART_MAX_SIZE, // Áp dụng cho file lớn nhất trong request
         files: 3,
+        fields: 20,
+        parts: 23,
+        fieldSize: MULTIPART_FIELD_MAX_SIZE,
     },
     fileFilter: (req, file, cb) => {
         if (isRasterFile(file) || isThumbnailFile(file) || isJsonFile(file)) {
@@ -176,7 +183,11 @@ const handleRasterUploadError = (err, req, _res, next) => {
                 ));
             }
             case 'LIMIT_FILE_COUNT':
-                return next(new Api400Error(t('upload_too_many_files_limit', req.lang), ['TOO_MANY_FILES']));
+            case 'LIMIT_FIELD_COUNT':
+            case 'LIMIT_PART_COUNT':
+                return next(new Api400Error(t('upload_too_many_files_limit', req.lang), ['TOO_MANY_MULTIPART_PARTS']));
+            case 'LIMIT_FIELD_VALUE':
+                return next(new Api400Error(t('invalid_data', req.lang), ['FIELD_TOO_LARGE']));
             case 'LIMIT_UNEXPECTED_FILE':
                 return next(new Api400Error(t('upload_invalid_field', req.lang, { field: err.field }), ['UNEXPECTED_FIELD']));
             default:

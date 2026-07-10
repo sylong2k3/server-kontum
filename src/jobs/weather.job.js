@@ -11,17 +11,38 @@ const CACHE_GRACE_DAYS = parseInt(process.env.WEATHER_CACHE_GRACE_DAYS, 10) || 7
 
 let task = null;
 
+let isRunning = false;
+
 const runRefresh = async () => {
+    if (isRunning) {
+        console.warn('[WEATHER REFRESH] Skipped: previous run still active');
+        return;
+    }
+
+    isRunning = true;
     try {
-        const result = await weatherService.refreshCache({ lang: 'vi' });
-        const deleted = await weatherRepository.deleteExpired(CACHE_GRACE_DAYS);
+        let result;
+        try {
+            result = await weatherService.refreshCache({ lang: 'vi' });
+        } catch (err) {
+            console.error('[WEATHER REFRESH] Failed:', err.message);
+            return;
+        }
+
+        let deleted = null;
+        try {
+            deleted = await weatherRepository.deleteExpired(CACHE_GRACE_DAYS);
+        } catch (err) {
+            console.error('[WEATHER REFRESH] Cache purge failed (ignored):', err.message);
+        }
+
         const errs = result.errors.length ? ` errors=[${result.errors.join('; ')}]` : '';
         console.log(
             `[WEATHER REFRESH] point=${result.point} windGrid=${result.windGrid} ` +
-            `purged=${deleted}${errs}`
+            `purged=${deleted === null ? 'n/a' : deleted}${errs}`
         );
-    } catch (err) {
-        console.error('[WEATHER REFRESH] Failed:', err.message);
+    } finally {
+        isRunning = false;
     }
 };
 

@@ -29,30 +29,29 @@ const GEO_FORMATS = ['shapefile', 'geojson', 'kml', 'filegdb'];
 let cronJob    = null;
 let isRunning  = false;
 
-// ── Poll pending jobs ─────────────────────────────────────────────────────────
+// ── Poll + claim pending jobs ────────────────────────────────────────────────
+// SELECT ... FOR UPDATE SKIP LOCKED and the status flip must happen in the
+// same statement — otherwise the row lock is released as soon as the SELECT's
+// implicit transaction ends, and two worker instances can both pick up and
+// process the same 'pending' job before either UPDATE lands.
 
-const fetchPendingJobs = async () => {
-    const placeholders = GEO_FORMATS.map((_, i) => `$${i + 1}`).join(', ');
+const claimPendingJobs = async () => {
+    const placeholders = GEO_FORMATS.map((_, i) => `$${i + 2}`).join(', ');
     const { rows } = await db.query(
-        `SELECT id, source_info
-         FROM gis.layer_import_jobs
-         WHERE status = 'pending'
-           AND source_format IN (${placeholders})
-         ORDER BY created_at ASC
-         LIMIT $${GEO_FORMATS.length + 1}
-         FOR UPDATE SKIP LOCKED`,
-        [...GEO_FORMATS, JOB_BATCH_SIZE]
-    );
-    return rows;
-};
-
-const markProcessing = async (jobId) => {
-    await db.query(
         `UPDATE gis.layer_import_jobs
          SET status = 'processing', started_at = NOW()
-         WHERE id = $1 AND status = 'pending'`,
-        [jobId]
+         WHERE id IN (
+             SELECT id FROM gis.layer_import_jobs
+             WHERE status = 'pending'
+               AND source_format IN (${placeholders})
+             ORDER BY created_at ASC
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED
+         )
+         RETURNING id, source_info`,
+        [JOB_BATCH_SIZE, ...GEO_FORMATS]
     );
+    return rows;
 };
 
 // ── Worker tick ───────────────────────────────────────────────────────────────
@@ -63,7 +62,7 @@ const tick = async () => {
 
     let jobs;
     try {
-        jobs = await fetchPendingJobs();
+        jobs = await claimPendingJobs();
     } catch (err) {
         console.error(t('geo_worker_query_failed', WORKER_LANG, { workerId: WORKER_ID }), err.message);
         isRunning = false;
@@ -80,7 +79,6 @@ const tick = async () => {
     await Promise.allSettled(
         jobs.map(async (job) => {
             try {
-                await markProcessing(job.id);
                 await geoImportService.runImportJob(job.id, WORKER_LANG);
                 console.log(t('geo_worker_job_completed', WORKER_LANG, { workerId: WORKER_ID, id: job.id }));
             } catch (err) {

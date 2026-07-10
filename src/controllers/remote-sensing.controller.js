@@ -1,13 +1,4 @@
-'use strict';
 
-/**
- * Remote Sensing Controller
- * Nhận HTTP request → validate → gọi service → trả response chuẩn.
- *
- * Response format:
- *   Success: { success: true,  message: "...", data: {...}, meta?: {...} }
- *   Error:   { success: false, message: "...", error_code: "..." }
- */
 
 const svc = require('../services/remote-sensing.service');
 const {
