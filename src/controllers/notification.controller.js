@@ -1,4 +1,5 @@
 const notificationService = require('../services/notification.service');
+const pushProvider = require('../utils/pushProvider.util');
 const { OK, CREATED, OK_LIST } = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
 const { buildActor } = require('../utils/actor.util');
@@ -58,6 +59,10 @@ const sendNotification = async (req, res) => {
     CREATED(res, t('notification_sent', req.lang), { id: notification.id });
 };
 
+const getFirebaseStatus = async (req, res) => {
+    OK(res, t('get_success', req.lang), pushProvider.getStatus());
+};
+
 module.exports = {
     listNotifications,
     getUnreadCount,
@@ -67,4 +72,5 @@ module.exports = {
     registerDevice,
     unregisterDevice,
     sendNotification,
+    getFirebaseStatus,
 };

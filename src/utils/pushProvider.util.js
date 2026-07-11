@@ -82,6 +82,25 @@ const init = () => {
 
 const isAvailable = () => init();
 
+const getStatus = () => {
+    const configured = isAvailable();
+    const credentialSource = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64
+        ? 'service_account_base64'
+        : process.env.FIREBASE_SERVICE_ACCOUNT
+            ? 'service_account_file'
+            : process.env.GOOGLE_APPLICATION_CREDENTIALS
+                ? 'application_default'
+                : null;
+
+    return {
+        enabled: !isExplicitlyDisabled(),
+        configured,
+        initialized,
+        credentialSource,
+        projectId: configured ? admin.app().options.projectId || null : null,
+    };
+};
+
 /**
  * Gửi push tới một danh sách token thiết bị.
  * @returns {Promise<{ successCount, failureCount, invalidTokens: string[] }>}
@@ -186,6 +205,7 @@ const _isInvalidTokenError = (error) => {
 
 module.exports = {
     isAvailable,
+    getStatus,
     sendToTokens,
     sendToTopic,
     subscribeToTopic,

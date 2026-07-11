@@ -22,6 +22,13 @@ router.use(enforcePasswordChange);
 router.post('/devices', validate(registerDeviceSchema), asyncHandler(notificationController.registerDevice));
 router.delete('/devices', validate(unregisterDeviceSchema), asyncHandler(notificationController.unregisterDevice));
 
+// Kiểm tra Firebase Admin đã khởi tạo từ cấu hình nội bộ; không gọi mạng.
+router.get(
+    '/firebase/status',
+    requirePermission('notifications', 'send'),
+    asyncHandler(notificationController.getFirebaseStatus)
+);
+
 // ── Thông báo của chính người dùng ──────────────────────────────────────────
 router.get('/', validate(listNotificationsSchema, 'query'), asyncHandler(notificationController.listNotifications));
 router.get('/unread-count', asyncHandler(notificationController.getUnreadCount));
