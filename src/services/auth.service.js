@@ -127,8 +127,6 @@ const login = async ({ email, password }, context = {}) => {
         throw new Api403Error(t('email_not_verified', context.lang));
     }
 
-    await userRepository.updateLoginSuccess(user.id, context.ipAddress);
-
     const tokens = generateTokenPair({
         userId: user.id,
         email: user.email,
@@ -136,14 +134,17 @@ const login = async ({ email, password }, context = {}) => {
     });
 
     const refreshTokenHash = hashToken(tokens.refreshToken);
-    await tokenRepository.saveRefreshToken({
-        userId: user.id,
-        tokenHash: refreshTokenHash,
-        deviceInfo: _buildDeviceInfo(context),
-        expiresAt: tokens.refreshExpiresAt,
-    });
 
-    await _logActivity(user.id, 'login', 'success', context);
+    await Promise.all([
+        userRepository.updateLoginSuccess(user.id, context.ipAddress),
+        tokenRepository.saveRefreshToken({
+            userId: user.id,
+            tokenHash: refreshTokenHash,
+            deviceInfo: _buildDeviceInfo(context),
+            expiresAt: tokens.refreshExpiresAt,
+        }),
+        _logActivity(user.id, 'login', 'success', context),
+    ]);
 
     return {
         user: _sanitizeUser(user, context.lang),

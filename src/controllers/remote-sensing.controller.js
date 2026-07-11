@@ -8,6 +8,7 @@ const {
 } = require('../validators/remote-sensing.validator');
 const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
+const { OK_LIST } = require('../core/success.response');
 
 // ── Helper validation ─────────────────────────────────────────────────────────
 const validate = (schema, data, lang = 'vi', options = {}) => {
@@ -90,16 +91,10 @@ const listImages = async (req, res, next) => {
         const filters = validate(listImagesSchema, req.query, req.lang);
         const result  = await svc.listImages(filters, req.user, req.lang);
 
-        res.json({
-            success: true,
-            message: t('remote_sensing_list_success', req.lang),
-            data:    result.rows,
-            meta: {
-                total:       result.total,
-                page:        result.page,
-                limit:       result.limit,
-                total_pages: Math.ceil(result.total / result.limit),
-            },
+        OK_LIST(res, t('remote_sensing_list_success', req.lang), result.rows, {
+            page:  result.page,
+            limit: result.limit,
+            total: result.total,
         });
     } catch (err) {
         next(err);

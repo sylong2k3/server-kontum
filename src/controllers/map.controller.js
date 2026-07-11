@@ -5,7 +5,7 @@ const geoImportService = require('../services/geo-import.service');
 const geoserver        = require('../utils/geoserver.client');
 const schemas          = require('../validators/map-layer.validator');
 const { geoImportPayload } = require('../validators/geo-import.validator');
-const { OK, CREATED }  = require('../core/success.response');
+const { OK, OK_LIST, CREATED }  = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
 
 const validate = (schema, source, lang = 'vi') => {
@@ -23,8 +23,8 @@ const validate = (schema, source, lang = 'vi') => {
 
 const listLayers = async (req, res) => {
     const query = validate(schemas.listLayersQuery, req.query, req.lang);
-    const result = await mapService.listLayers(req.user, { page: query.page, limit: query.limit, filter: query });
-    OK(res, t('map_layer_list_success', req.lang), result);
+    const { items, page, limit, total } = await mapService.listLayers(req.user, { page: query.page, limit: query.limit, filter: query });
+    OK_LIST(res, t('map_layer_list_success', req.lang), items, { page, limit, total });
 };
 
 const getLayer = async (req, res) => {

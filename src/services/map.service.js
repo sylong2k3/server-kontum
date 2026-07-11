@@ -36,7 +36,7 @@ const listLayers = async (user, { page = 1, limit = 100, filter = {} } = {}) => 
         layerRepo.findAll({ isAdmin: isAdmin(user), limit, offset, filter }),
         layerRepo.countAll({ isAdmin: isAdmin(user), filter }),
     ]);
-    return { items: rows, pagination: { page, limit, total, total_pages: Math.ceil(total / limit) } };
+    return { items: rows, page, limit, total };
 };
 
 const getLayer = async (code, user, lang) => requireReadableLayer(code, user, lang);
