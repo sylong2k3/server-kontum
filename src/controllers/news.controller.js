@@ -11,6 +11,14 @@ const listNews = async (req, res) => {
     OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
 };
 
+const listPublishedNews = async (req, res) => {
+    const { page, limit, q, category, lang, sortBy, sortOrder } = req.query;
+    const { items, total } = await newsService.listNews(null, {
+        page, limit, q, status: 'published', category, lang, sortBy, sortOrder,
+    });
+    OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
+};
+
 const getNewsBySlug = async (req, res) => {
     const lang = req.query.lang || req.lang;
     const news = await newsService.getNewsBySlug(buildActor(req), req.params.slug, { lang });
@@ -55,4 +63,4 @@ const updateNewsFull = async (req, res) => {
     OK(res, result.message, result.news);
 };
 
-module.exports = { listNews, getNewsBySlug, getAdminNewsById, createNews, updateNewsMeta, upsertNewsTranslation, deleteNews, updateNewsFull };
+module.exports = { listNews, listPublishedNews, getNewsBySlug, getAdminNewsById, createNews, updateNewsMeta, upsertNewsTranslation, deleteNews, updateNewsFull };

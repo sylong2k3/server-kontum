@@ -24,7 +24,7 @@ const adminRouter = Router();
 
 // ─── Public endpoints: /api/v1/news ───────────────────────────────────────────
 
-publicRouter.get('/', optionalAuth, validate(listNewsSchema, 'query'), asyncHandler(newsController.listNews));
+publicRouter.get('/', validate(listNewsSchema, 'query'), asyncHandler(newsController.listPublishedNews));
 
 // GET /news/:slug/comments — public list comments (only approved comments unless admin)
 publicRouter.get(

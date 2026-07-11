@@ -2,7 +2,7 @@
   "info": {
     "name": "API Quản lý GIS Kon Tum",
     "_postman_id": "b1f4e2a0-0000-4000-8000-kontumgisapi01",
-    "description": "Collection cho server-kontum: Auth, Users, Notifications, News, Documents.\n\nBiến dùng chung:\n- baseUrl: http://localhost:3005/api/v1\n- accessToken / refreshToken: tự lưu sau khi gọi Login hoặc Refresh.\n- expectedUpdatedAt: giá trị updatedAt lấy từ API detail trước khi gọi update News/Document để chống ghi đè đồng thời.\n\nĐa số endpoint cần header Authorization: Bearer {{accessToken}} (đã cấu hình sẵn ở mức collection).",
+    "description": "Collection đầy đủ cho server-kontum; đồng bộ toàn bộ router mount dưới /api/v1.\n\nBiến dùng chung: baseUrl, accessToken, refreshToken và các ID/path mẫu. Authorization Bearer cấu hình ở mức collection.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -161,6 +161,36 @@
       "value": "ranh_gioi_rung",
       "type": "string",
       "description": "Mã lớp GIS ranh giới rừng."
+    },
+    {
+      "key": "resourceId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "weatherType",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "tileZ",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "tileX",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "tileY",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "satelliteResultId",
+      "value": "1",
+      "type": "string"
     }
   ],
   "item": [
@@ -1521,7 +1551,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/news/{{newsId}}/comments?page=1&limit=20&lang={{lang}}",
+              "raw": "{{baseUrl}}/news/{{newsSlug}}/comments?page=1&limit=20&lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1559,7 +1589,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/news/{{newsId}}/comments?lang={{lang}}",
+              "raw": "{{baseUrl}}/news/{{newsSlug}}/comments?lang={{lang}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -6193,6 +6223,321 @@
             },
             "description": "Kích hoạt phân loại RF 11 lớp ngay lập tức. GEE tính ~10-20 phút. Quyền: forest_classification.manage."
           }
+        }
+      ]
+    },
+    {
+      "name": "Routes đồng bộ bổ sung",
+      "description": "Endpoint đồng bộ từ src/routes.",
+      "item": [
+        {
+          "name": "auth",
+          "item": [
+            {
+              "name": "GET /auth/google/callback",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/auth/google/callback",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "auth",
+                    "google",
+                    "callback"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "news",
+          "item": [
+            {
+              "name": "DELETE /news/:slug/comments/:commentId",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/news/{{newsSlug}}/comments/{{commentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "news",
+                    "{{newsSlug}}",
+                    "comments",
+                    "{{commentId}}"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "admin / news",
+          "item": [
+            {
+              "name": "GET /admin/news",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/news",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "news"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "admin / comments",
+          "item": [
+            {
+              "name": "GET /admin/comments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/comments",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "comments"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /admin/comments/news/:newsId",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/comments/news/{{newsId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "comments",
+                    "news",
+                    "{{newsId}}"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "admin / pdf-maps",
+          "item": [
+            {
+              "name": "PUT /admin/pdf-maps/:id/translations/:lang",
+              "request": {
+                "method": "PUT",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/pdf-maps/{{resourceId}}/translations/{{lang}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "pdf-maps",
+                    "{{resourceId}}",
+                    "translations",
+                    "{{lang}}"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "weather",
+          "item": [
+            {
+              "name": "GET /weather/tiles/:type/:z/:x/:y",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/weather/tiles/{{weatherType}}/{{tileZ}}/{{tileX}}/{{tileY}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "weather",
+                    "tiles",
+                    "{{weatherType}}",
+                    "{{tileZ}}",
+                    "{{tileX}}",
+                    "{{tileY}}"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "admin / field-updates",
+          "item": [
+            {
+              "name": "GET /admin/field-updates",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/field-updates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "field-updates"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "satellite",
+          "item": [
+            {
+              "name": "GET /satellite/tiles/:resultId/:z/:x/:y",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/satellite/tiles/{{satelliteResultId}}/{{tileZ}}/{{tileX}}/{{tileY}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "satellite",
+                    "tiles",
+                    "{{satelliteResultId}}",
+                    "{{tileZ}}",
+                    "{{tileX}}",
+                    "{{tileY}}"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /satellite/publish",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/satellite/publish",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "satellite",
+                    "publish"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "forest-classification",
+          "item": [
+            {
+              "name": "POST /forest-classification/query",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/forest-classification/query",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "forest-classification",
+                    "query"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /forest-classification/snapshot/:id",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/forest-classification/snapshot/{{resourceId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "forest-classification",
+                    "snapshot",
+                    "{{resourceId}}"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /forest-classification/logs",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/forest-classification/logs",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "forest-classification",
+                    "logs"
+                  ]
+                },
+                "description": "Đồng bộ từ Express router."
+              },
+              "response": []
+            }
+          ]
         }
       ]
     }
