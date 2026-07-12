@@ -34,6 +34,15 @@ const listAllComments = async (req, res) => {
     OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
 };
 
+const getCommentById = async (req, res) => {
+    const result = await commentService.getCommentById(
+        buildActor(req),
+        Number(req.params.id),
+        { lang: req.lang }
+    );
+    OK(res, t('get_detail_success', req.lang), result.comment);
+};
+
 const approveComment = async (req, res) => {
     const result = await commentService.approveComment(
         buildActor(req),
@@ -60,6 +69,7 @@ module.exports = {
     createComment,
     listComments,
     listAllComments,
+    getCommentById,
     approveComment,
     deleteComment,
 };

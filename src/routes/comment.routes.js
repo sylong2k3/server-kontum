@@ -17,7 +17,7 @@ adminRouter.get(
     '/',
     verifyToken,
     enforcePasswordChange,
-    requirePermission('comments', 'approve'),
+    requirePermission('comments', 'read'),
     validate(listAllCommentsQuerySchema, 'query'),
     asyncHandler(commentController.listAllComments)
 );
@@ -27,10 +27,20 @@ adminRouter.get(
     '/news/:newsId',
     verifyToken,
     enforcePasswordChange,
-    requirePermission('comments', 'approve'),
+    requirePermission('comments', 'read'),
     validate(newsIdParamsSchema, 'params'),
     validate(listAllCommentsQuerySchema, 'query'),
     asyncHandler(commentController.listAllComments)
+);
+
+// GET /admin/comments/:id — moderator xem chi tiết một bình luận
+adminRouter.get(
+    '/:id',
+    verifyToken,
+    enforcePasswordChange,
+    requirePermission('comments', 'read'),
+    validate(commentIdParamsSchema, 'params'),
+    asyncHandler(commentController.getCommentById)
 );
 
 // PATCH /admin/comments/:id/approve — duyệt hoặc từ chối bình luận (chỉ dành cho admin/so_nnmt)

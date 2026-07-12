@@ -68,7 +68,7 @@ const listComments = async (actor, slug, { page = 1, limit = 20 }, context = {})
 
 // Danh sách bình luận toàn hệ thống cho moderator duyệt (lọc theo trạng thái duyệt nếu có).
 const listAllComments = async (actor, { page = 1, limit = 20, approved, newsId } = {}, context = {}) => {
-    if (!can(actor, 'approve')) {
+    if (!can(actor, 'read')) {
         throw new Api403Error(t('no_permission', context.lang));
     }
 
@@ -83,6 +83,19 @@ const listAllComments = async (actor, { page = 1, limit = 20, approved, newsId }
     ]);
 
     return { items, total };
+};
+
+const getCommentById = async (actor, id, context = {}) => {
+    if (!can(actor, 'read')) {
+        throw new Api403Error(t('no_permission', context.lang));
+    }
+
+    const comment = await commentRepository.findById(id);
+    if (!comment) {
+        throw new Api404Error(t('comment_not_found', context.lang));
+    }
+
+    return { comment };
 };
 
 const approveComment = async (actor, id, payload, context = {}) => {
@@ -131,6 +144,7 @@ module.exports = {
     createComment,
     listComments,
     listAllComments,
+    getCommentById,
     approveComment,
     deleteComment,
 };
