@@ -53,10 +53,7 @@ const listDocuments = async (actor, { page = 1, limit = 20, q, docType, isPublic
     const filter = { q, docType, isPublic, sortBy, sortOrder };
     const offset = (Number(page) - 1) * Number(limit);
 
-    const [items, total] = await Promise.all([
-        documentRepository.findAll({ limit: Number(limit), offset, filter, publicOnly, lang: resolvedLang }),
-        documentRepository.countAll({ filter, publicOnly, lang: resolvedLang }),
-    ]);
+    const { items, total } = await documentRepository.findAll({ limit: Number(limit), offset, filter, publicOnly, lang: resolvedLang });
 
     return { items: items.map(toPublicItem), total };
 };

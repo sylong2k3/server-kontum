@@ -107,7 +107,8 @@ const listForUser = async ({ userId, roleCode, limit = 20, offset = 0, filter = 
         `SELECT n.id, n.user_id, n.audience, n.audience_role, n.channel, n.type,
                 n.title, n.body, n.data, n.expires_at, n.created_at,
                 (r.read_at IS NOT NULL) AS is_read,
-                r.read_at
+                r.read_at,
+                COUNT(*) OVER()::int AS total_count
          FROM core.notifications n
          LEFT JOIN core.notification_reads r
                 ON r.notification_id = n.id AND r.user_id = $1
@@ -116,7 +117,15 @@ const listForUser = async ({ userId, roleCode, limit = 20, offset = 0, filter = 
          LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
         params
     );
-    return rows;
+
+    if (rows.length === 0) {
+        const total = offset > 0 ? await countForUser({ userId, roleCode, filter }) : 0;
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 /** Đếm tổng số thông báo (cho phân trang). */

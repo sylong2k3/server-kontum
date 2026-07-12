@@ -99,7 +99,8 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
     params.push(limit, offset);
 
     const result = await db.query(
-        `SELECT ${SELECT_COLUMNS}
+        `SELECT ${SELECT_COLUMNS},
+            COUNT(*) OVER()::int AS total_count
          FROM cms.pdf_maps m
          ${translationJoin(lang, fbLang)}
          LEFT JOIN auth.users u ON u.id = m.uploaded_by
@@ -109,7 +110,15 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
     );
-    return result.rows;
+
+    if (result.rows.length === 0) {
+        const total = offset > 0 ? await countAll({ filter, publicOnly, lang }) : 0;
+        return { items: [], total };
+    }
+
+    const total = result.rows[0].total_count;
+    const items = result.rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {

@@ -64,10 +64,7 @@ const listPdfMaps = async (actor, {
     const filter = { q, theme, year, yearFrom, yearTo, isPublic, sortBy, sortOrder };
     const offset = (Number(page) - 1) * Number(limit);
 
-    const [items, total] = await Promise.all([
-        pdfMapRepository.findAll({ limit: Number(limit), offset, filter, publicOnly, lang: resolvedLang }),
-        pdfMapRepository.countAll({ filter, publicOnly, lang: resolvedLang }),
-    ]);
+    const { items, total } = await pdfMapRepository.findAll({ limit: Number(limit), offset, filter, publicOnly, lang: resolvedLang });
 
     return { items: items.map(toPublicItem), total };
 };

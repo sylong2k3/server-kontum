@@ -60,19 +60,32 @@ const list = async ({ limit = 50, offset = 0, layer_id = null, is_active = null 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     params.push(limit, offset);
-    const [{ rows }, { rows: cnt }] = await Promise.all([
-        db.query(
-            `SELECT ${PUBLIC_COLUMNS}
-             FROM gis.map_apis a
-             JOIN gis.layer_registry l ON l.id = a.layer_id
-             ${whereSql}
-             ORDER BY a.created_at DESC
-             LIMIT $${params.length - 1} OFFSET $${params.length}`,
-            params,
-        ),
-        db.query(`SELECT COUNT(*)::int AS total FROM gis.map_apis a ${whereSql}`, params.slice(0, params.length - 2)),
-    ]);
-    return { items: rows, total: cnt[0].total };
+    const { rows } = await db.query(
+        `SELECT ${PUBLIC_COLUMNS}, COUNT(*) OVER()::int AS total_count
+         FROM gis.map_apis a
+         JOIN gis.layer_registry l ON l.id = a.layer_id
+         ${whereSql}
+         ORDER BY a.created_at DESC
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
+    );
+
+    if (rows.length === 0) {
+        let total = 0;
+        if (offset > 0) {
+            const countParams = params.slice(0, params.length - 2);
+            const { rows: cnt } = await db.query(
+                `SELECT COUNT(*)::int AS total FROM gis.map_apis a JOIN gis.layer_registry l ON l.id = a.layer_id ${whereSql}`,
+                countParams,
+            );
+            total = cnt[0].total;
+        }
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const update = async (id, fields) => {

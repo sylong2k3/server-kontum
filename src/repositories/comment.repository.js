@@ -40,13 +40,26 @@ const findAllByNewsId = async ({ newsId, limit, offset, approvedOnly }) => {
     const offsetIdx = idx++;
 
     const { rows } = await db.query(
-        `${COMMENT_SELECT}
+        `SELECT c.id, c.news_id AS "newsId", c.user_id AS "userId", c.content,
+                c.is_approved AS "isApproved", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+                u.full_name AS "userName", u.avatar_url AS "userAvatar",
+                COUNT(*) OVER()::int AS "totalCount"
+         FROM cms.comments c
+         LEFT JOIN auth.users u ON c.user_id = u.id
          WHERE ${conditions.join(' AND ')}
          ORDER BY c.created_at DESC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         params
     );
-    return rows;
+
+    if (rows.length === 0) {
+        const total = offset > 0 ? await countAllByNewsId({ newsId, approvedOnly }) : 0;
+        return { items: [], total };
+    }
+
+    const total = rows[0].totalCount;
+    const items = rows.map(({ totalCount, ...row }) => row);
+    return { items, total };
 };
 
 const countAllByNewsId = async ({ newsId, approvedOnly }) => {
@@ -68,21 +81,6 @@ const countAllByNewsId = async ({ newsId, approvedOnly }) => {
 
 // ─── Admin: list toàn hệ thống cho moderation ──────────────────────────────────
 
-const ADMIN_COMMENT_SELECT = `
-    SELECT c.id, c.news_id AS "newsId", c.user_id AS "userId", c.content,
-           c.is_approved AS "isApproved", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
-           u.full_name AS "userName", u.avatar_url AS "userAvatar",
-           nt.title AS "newsTitle", nt.slug AS "newsSlug"
-    FROM cms.comments c
-    LEFT JOIN auth.users u ON c.user_id = u.id
-    LEFT JOIN LATERAL (
-        SELECT title, slug FROM cms.news_translations t
-        WHERE t.news_id = c.news_id
-        ORDER BY (t.lang = 'vi') DESC
-        LIMIT 1
-    ) nt ON true
-`;
-
 const buildAdminWhere = ({ approved, newsId } = {}, startIdx = 1) => {
     const conditions = ['c.deleted_at IS NULL'];
     const params = [];
@@ -102,13 +100,33 @@ const findAll = async ({ limit, offset, approved, newsId }) => {
     const { where, params, idx } = buildAdminWhere({ approved, newsId });
     params.push(limit, offset);
     const { rows } = await db.query(
-        `${ADMIN_COMMENT_SELECT}
+        `SELECT c.id, c.news_id AS "newsId", c.user_id AS "userId", c.content,
+                c.is_approved AS "isApproved", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+                u.full_name AS "userName", u.avatar_url AS "userAvatar",
+                nt.title AS "newsTitle", nt.slug AS "newsSlug",
+                COUNT(*) OVER()::int AS "totalCount"
+         FROM cms.comments c
+         LEFT JOIN auth.users u ON c.user_id = u.id
+         LEFT JOIN LATERAL (
+             SELECT title, slug FROM cms.news_translations t
+             WHERE t.news_id = c.news_id
+             ORDER BY (t.lang = 'vi') DESC
+             LIMIT 1
+         ) nt ON true
          WHERE ${where}
          ORDER BY c.created_at DESC
          LIMIT $${idx} OFFSET $${idx + 1}`,
         params
     );
-    return rows;
+
+    if (rows.length === 0) {
+        const total = offset > 0 ? await countAll({ approved, newsId }) : 0;
+        return { items: [], total };
+    }
+
+    const total = rows[0].totalCount;
+    const items = rows.map(({ totalCount, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ approved, newsId }) => {

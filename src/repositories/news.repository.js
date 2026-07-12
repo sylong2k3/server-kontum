@@ -81,6 +81,8 @@ const translationJoin = (reqLangParam = '$1', fbLangParam = '$2') => `
 
 // ─── Public find/list ─────────────────────────────────────────────────────────
 
+// Trả về { items, total } bằng 1 round-trip duy nhất (COUNT(*) OVER() thay vì
+// query đếm riêng) — tránh 2 query song song cùng giành connection từ pool.
 const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = 'vi' }) => {
     const fbLang = lang === 'vi' ? 'en' : 'vi';
     const { where, params } = buildWhere({ ...filter, publicOnly }, 3);
@@ -95,7 +97,8 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
             nt_eff.title, nt_eff.slug, nt_eff.summary,
             nt_eff.effective_lang AS lang,
             nt_eff.fallback_used,
-            u.full_name AS author_name
+            u.full_name AS author_name,
+            COUNT(*) OVER()::int AS total_count
          FROM cms.news n
          ${translationJoin('$1', '$2')}
          LEFT JOIN auth.users u ON u.id = n.author_id
@@ -105,7 +108,17 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
          LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
         queryParams
     );
-    return result.rows;
+
+    if (result.rows.length === 0) {
+        // OFFSET vượt quá số dòng khớp điều kiện -> total_count không xuất hiện ở dòng nào.
+        // Chỉ rơi vào nhánh này khi trang yêu cầu vượt quá dữ liệu thật (hiếm gặp).
+        const total = offset > 0 ? await countAll({ filter, publicOnly, lang }) : 0;
+        return { items: [], total };
+    }
+
+    const total = result.rows[0].total_count;
+    const items = result.rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {

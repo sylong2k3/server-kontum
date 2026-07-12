@@ -138,18 +138,30 @@ const listCompleted = async ({ page = 1, limit = 24 } = {}) => {
     const { rows } = await db.query(
         `SELECT id, year, month, status, trigger, oob_accuracy, s2_image_count,
                 ls_image_count, duration_ms, province_summary, computed_at, published_at,
-                geoserver_layer
+                geoserver_layer,
+                COUNT(*) OVER()::int AS total_count
          FROM forest.forest_snapshots
          WHERE status IN ('completed','published')
          ORDER BY year DESC, month DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset],
     );
-    const { rows: cnt } = await db.query(
-        `SELECT COUNT(*) AS total FROM forest.forest_snapshots
-         WHERE status IN ('completed','published')`,
-    );
-    return { items: rows, total: parseInt(cnt[0].total, 10) };
+
+    if (rows.length === 0) {
+        let total = 0;
+        if (offset > 0) {
+            const { rows: cnt } = await db.query(
+                `SELECT COUNT(*)::int AS total FROM forest.forest_snapshots
+                 WHERE status IN ('completed','published')`,
+            );
+            total = cnt[0].total;
+        }
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 /**
@@ -167,7 +179,8 @@ const listAll = async ({ page = 1, limit = 24, status = null } = {}) => {
                 oob_accuracy, s2_image_count, ls_image_count, duration_ms,
                 province_summary, geoserver_layer,
                 error_message, computed_at, published_at,
-                created_at, updated_at
+                created_at, updated_at,
+                COUNT(*) OVER()::int AS total_count
          FROM forest.forest_snapshots
          ${where}
          ORDER BY year DESC, month DESC, created_at DESC
@@ -175,14 +188,23 @@ const listAll = async ({ page = 1, limit = 24, status = null } = {}) => {
         params,
     );
 
-    const cntParams = status ? [status] : [];
-    const cntWhere  = status ? 'WHERE status = $1' : '';
-    const { rows: cnt } = await db.query(
-        `SELECT COUNT(*) AS total FROM forest.forest_snapshots ${cntWhere}`,
-        cntParams,
-    );
+    if (rows.length === 0) {
+        let total = 0;
+        if (offset > 0) {
+            const cntParams = status ? [status] : [];
+            const cntWhere  = status ? 'WHERE status = $1' : '';
+            const { rows: cnt } = await db.query(
+                `SELECT COUNT(*)::int AS total FROM forest.forest_snapshots ${cntWhere}`,
+                cntParams,
+            );
+            total = cnt[0].total;
+        }
+        return { items: [], total };
+    }
 
-    return { items: rows, total: parseInt(cnt[0].total, 10) };
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const listExporting = async () => {

@@ -113,20 +113,13 @@ const listNotifications = async (actor, {
     const offset = (page - 1) * limit;
     const filter = { channel, type, audience, isRead: onlyUnread ? false : isRead, sortBy, sortOrder };
 
-    const [items, total] = await Promise.all([
-        notificationRepository.listForUser({
-            userId: actor.id,
-            roleCode: actor.role,
-            limit,
-            offset,
-            filter,
-        }),
-        notificationRepository.countForUser({
-            userId: actor.id,
-            roleCode: actor.role,
-            filter,
-        }),
-    ]);
+    const { items, total } = await notificationRepository.listForUser({
+        userId: actor.id,
+        roleCode: actor.role,
+        limit,
+        offset,
+        filter,
+    });
 
     return { items: items.map(_toClientPayload), total };
 };

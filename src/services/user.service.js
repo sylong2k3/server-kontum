@@ -66,10 +66,7 @@ const listUsers = async (filter, actor) => {
         }
         if (!filter.roleCode) {effectiveFilter.roleCodes = SO_NNMT_ALLOWED_ROLES;}
     }
-    const [items, total] = await Promise.all([
-        userRepository.findAll(effectiveFilter),
-        userRepository.countAll(effectiveFilter),
-    ]);
+    const { items, total } = await userRepository.findAll(effectiveFilter);
     return { items: items.map(_sanitize), total };
 };
 

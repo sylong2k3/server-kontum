@@ -76,21 +76,16 @@ const findAllPaged = async ({ page = 1, limit = 20, layerCode, userId, action, f
         where.push(`fu.created_at <= $${params.length}`);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const offset = (page - 1) * limit;
+    const countParams = params.slice();
+    params.push(limit, offset);
 
-    const countResult = await db.query(
-        `SELECT COUNT(*)::int AS total
-         FROM field.field_updates fu
-         JOIN gis.layer_registry l ON l.id = fu.layer_id
-         ${whereSql}`,
-        params
-    );
-
-    params.push(limit, (page - 1) * limit);
     const { rows } = await db.query(
         `SELECT fu.id, fu.layer_id, l.code AS layer_code, l.name_vi AS layer_name,
                 fu.feature_id, fu.action, fu.attributes, fu.client_uuid, fu.note,
                 fu.media_urls, fu.lng, fu.lat, fu.created_at,
-                fu.user_id, u.full_name AS user_name
+                fu.user_id, u.full_name AS user_name,
+                COUNT(*) OVER()::int AS total_count
          FROM field.field_updates fu
          JOIN gis.layer_registry l ON l.id = fu.layer_id
          LEFT JOIN auth.users u ON u.id = fu.user_id
@@ -100,7 +95,24 @@ const findAllPaged = async ({ page = 1, limit = 20, layerCode, userId, action, f
         params
     );
 
-    return { items: rows, total: countResult.rows[0].total };
+    if (rows.length === 0) {
+        let total = 0;
+        if (offset > 0) {
+            const countResult = await db.query(
+                `SELECT COUNT(*)::int AS total
+                 FROM field.field_updates fu
+                 JOIN gis.layer_registry l ON l.id = fu.layer_id
+                 ${whereSql}`,
+                countParams
+            );
+            total = countResult.rows[0].total;
+        }
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 module.exports = { create, findDuplicateByClientUuid, findSince, findAllPaged };

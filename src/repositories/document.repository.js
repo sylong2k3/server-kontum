@@ -82,7 +82,8 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
             dt_eff.title, dt_eff.description,
             dt_eff.effective_lang AS lang,
             dt_eff.fallback_used,
-            u.full_name AS uploaded_by_name
+            u.full_name AS uploaded_by_name,
+            COUNT(*) OVER()::int AS total_count
          FROM cms.documents d
          ${translationJoin('$1', '$2')}
          LEFT JOIN auth.users u ON u.id = d.uploaded_by
@@ -92,7 +93,15 @@ const findAll = async ({ limit, offset, filter = {}, publicOnly = true, lang = '
          LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
         queryParams
     );
-    return result.rows;
+
+    if (result.rows.length === 0) {
+        const total = offset > 0 ? await countAll({ filter, publicOnly, lang }) : 0;
+        return { items: [], total };
+    }
+
+    const total = result.rows[0].total_count;
+    const items = result.rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {

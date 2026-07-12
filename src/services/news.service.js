@@ -84,10 +84,7 @@ const listNews = async (actor, { page = 1, limit = 20, q, status, category, lang
     const filter = { q, status, category: categoryFilter, sortBy, sortOrder };
     const offset = (Number(page) - 1) * Number(limit);
 
-    const [items, total] = await Promise.all([
-        newsRepository.findAll({ limit: Number(limit), offset, filter, publicOnly, lang: resolvedLang }),
-        newsRepository.countAll({ filter, publicOnly, lang: resolvedLang }),
-    ]);
+    const { items, total } = await newsRepository.findAll({ limit: Number(limit), offset, filter, publicOnly, lang: resolvedLang });
 
     return { items: items.map(toPublicItem), total };
 };

@@ -147,18 +147,30 @@ const listCompleted = async ({ page = 1, limit = 30 } = {}) => {
     const offset = (page - 1) * limit;
     const { rows } = await db.query(
         `SELECT id, analysis_date, status, s2_coverage_ratio,
-                province_summary, computed_at, published_at, geoserver_layer
+                province_summary, computed_at, published_at, geoserver_layer,
+                COUNT(*) OVER()::int AS total_count
          FROM fire.fire_risk_snapshots
          WHERE status IN ('completed','published')
          ORDER BY analysis_date DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset],
     );
-    const { rows: cnt } = await db.query(
-        `SELECT COUNT(*) AS total FROM fire.fire_risk_snapshots
-         WHERE status IN ('completed','published')`,
-    );
-    return { items: rows, total: parseInt(cnt[0].total, 10) };
+
+    if (rows.length === 0) {
+        let total = 0;
+        if (offset > 0) {
+            const { rows: cnt } = await db.query(
+                `SELECT COUNT(*)::int AS total FROM fire.fire_risk_snapshots
+                 WHERE status IN ('completed','published')`,
+            );
+            total = cnt[0].total;
+        }
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 /**

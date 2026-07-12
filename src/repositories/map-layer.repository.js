@@ -69,14 +69,23 @@ const findAll = async ({ isAdmin = false, limit = 100, offset = 0, filter = {} }
     const where = buildLayerWhere({ isAdmin, filter }, params);
     params.push(limit, offset);
     const { rows } = await db.query(
-        `SELECT ${LAYER_COLUMNS}
+        `SELECT ${LAYER_COLUMNS},
+            COUNT(*) OVER()::int AS total_count
          FROM gis.layer_registry
          WHERE ${where.join(' AND ')}
          ORDER BY sort_order ASC, name_vi ASC
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
     );
-    return rows;
+
+    if (rows.length === 0) {
+        const total = offset > 0 ? await countAll({ isAdmin, filter }) : 0;
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ isAdmin = false, filter = {} } = {}) => {
@@ -253,11 +262,26 @@ const findImportJobById = async (id) => {
 };
 
 const listImportJobs = async (layerId, { limit = 50, offset = 0 } = {}) => {
-    const [{ rows }, { rows: cnt }] = await Promise.all([
-        db.query('SELECT * FROM gis.layer_import_jobs WHERE layer_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [layerId, limit, offset]),
-        db.query('SELECT COUNT(*)::int AS total FROM gis.layer_import_jobs WHERE layer_id = $1', [layerId]),
-    ]);
-    return { items: rows, pagination: { limit, offset, total: cnt[0].total } };
+    const { rows } = await db.query(
+        `SELECT *, COUNT(*) OVER()::int AS total_count
+         FROM gis.layer_import_jobs
+         WHERE layer_id = $1
+         ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+        [layerId, limit, offset]
+    );
+
+    if (rows.length === 0) {
+        let total = 0;
+        if (offset > 0) {
+            const { rows: cnt } = await db.query('SELECT COUNT(*)::int AS total FROM gis.layer_import_jobs WHERE layer_id = $1', [layerId]);
+            total = cnt[0].total;
+        }
+        return { items: [], pagination: { limit, offset, total } };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, pagination: { limit, offset, total } };
 };
 
 const insertEditHistory = async (client, { layerId, action, source = 'api', importJobId, featureId, oldData, newData, geometryChanged, changedBy }) => {

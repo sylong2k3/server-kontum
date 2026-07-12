@@ -149,7 +149,8 @@ const _normalizeSort = (sortBy = 'created_at', sortOrder = 'DESC') => ({
 });
 
 const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC' } = {}) => {
-    const { where, params, nextIdx } = _buildUserFilter({ roleCode, roleCodes, isActive, email });
+    const filter = { roleCode, roleCodes, isActive, email };
+    const { where, params, nextIdx } = _buildUserFilter(filter);
     const offset = (page - 1) * limit;
     const { sortColumn, sortDirection } = _normalizeSort(sortBy, sortOrder);
     params.push(limit, offset);
@@ -158,7 +159,8 @@ const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, limit =
         `SELECT u.id, u.email, u.full_name, u.phone, u.avatar_url,
                 u.role_id, r.code AS role, r.name_vi AS role_name_vi, r.name_en AS role_name_en,
                 u.is_active, u.email_verified, u.last_login_at,
-                u.must_change_password, u.created_at, u.updated_at
+                u.must_change_password, u.created_at, u.updated_at,
+                COUNT(*) OVER()::int AS total_count
          FROM auth.users u
          INNER JOIN auth.roles r ON u.role_id = r.id
          ${where}
@@ -166,7 +168,15 @@ const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, limit =
          LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
         params
     );
-    return rows;
+
+    if (rows.length === 0) {
+        const total = offset > 0 ? await countAll(filter) : 0;
+        return { items: [], total };
+    }
+
+    const total = rows[0].total_count;
+    const items = rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ roleCode, roleCodes, isActive, email } = {}) => {

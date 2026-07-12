@@ -152,10 +152,7 @@ const listFeedback = async (actor, query = {}, context = {}) => {
         to: query.to,
     };
 
-    const [items, total] = await Promise.all([
-        feedbackRepository.findAll({ limit, offset, filter }),
-        feedbackRepository.countAll({ filter }),
-    ]);
+    const { items, total } = await feedbackRepository.findAll({ limit, offset, filter });
 
     return { items: items.map(toFeedbackItem), total };
 };
@@ -176,10 +173,7 @@ const listMine = async (actor, query = {}, context = {}) => {
         to: query.to,
     };
 
-    const [items, total] = await Promise.all([
-        feedbackRepository.findAll({ limit, offset, filter }),
-        feedbackRepository.countAll({ filter }),
-    ]);
+    const { items, total } = await feedbackRepository.findAll({ limit, offset, filter });
 
     return { items: items.map(toFeedbackItem), total };
 };

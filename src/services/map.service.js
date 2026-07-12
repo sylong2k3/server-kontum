@@ -32,11 +32,8 @@ const requireReadableLayer = async (code, user, lang) => {
 
 const listLayers = async (user, { page = 1, limit = 100, filter = {} } = {}) => {
     const offset = (page - 1) * limit;
-    const [rows, total] = await Promise.all([
-        layerRepo.findAll({ isAdmin: isAdmin(user), limit, offset, filter }),
-        layerRepo.countAll({ isAdmin: isAdmin(user), filter }),
-    ]);
-    return { items: rows, page, limit, total };
+    const { items, total } = await layerRepo.findAll({ isAdmin: isAdmin(user), limit, offset, filter });
+    return { items, page, limit, total };
 };
 
 const getLayer = async (code, user, lang) => requireReadableLayer(code, user, lang);

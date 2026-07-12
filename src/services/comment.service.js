@@ -58,10 +58,7 @@ const listComments = async (actor, slug, { page = 1, limit = 20 }, context = {})
     const news = await resolveNewsForComments(actor, slug, context);
     const newsId = news.id;
 
-    const [items, total] = await Promise.all([
-        commentRepository.findAllByNewsId({ newsId, limit: limitNum, offset, approvedOnly }),
-        commentRepository.countAllByNewsId({ newsId, approvedOnly }),
-    ]);
+    const { items, total } = await commentRepository.findAllByNewsId({ newsId, limit: limitNum, offset, approvedOnly });
 
     return { items, total };
 };
@@ -77,10 +74,7 @@ const listAllComments = async (actor, { page = 1, limit = 20, approved, newsId }
 
     const filter = { approved, newsId: newsId ? Number(newsId) : undefined };
 
-    const [items, total] = await Promise.all([
-        commentRepository.findAll({ limit: limitNum, offset, ...filter }),
-        commentRepository.countAll(filter),
-    ]);
+    const { items, total } = await commentRepository.findAll({ limit: limitNum, offset, ...filter });
 
     return { items, total };
 };

@@ -119,7 +119,8 @@ const findAll = async ({ limit, offset, filter = {}, sortBy, sortOrder }) => {
     params.push(limit, offset);
 
     const result = await db.query(
-        `SELECT ${selectFeedback}
+        `SELECT ${selectFeedback},
+            COUNT(*) OVER()::int AS total_count
          FROM field.feedback f
          ${joinUsers}
          WHERE ${where}
@@ -127,7 +128,15 @@ const findAll = async ({ limit, offset, filter = {}, sortBy, sortOrder }) => {
          LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
     );
-    return result.rows;
+
+    if (result.rows.length === 0) {
+        const total = offset > 0 ? await countAll({ filter }) : 0;
+        return { items: [], total };
+    }
+
+    const total = result.rows[0].total_count;
+    const items = result.rows.map(({ total_count, ...row }) => row);
+    return { items, total };
 };
 
 const countAll = async ({ filter = {} }) => {
