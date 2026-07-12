@@ -155,9 +155,10 @@ const markAllAsRead = async (actor, context = {}) => {
 };
 
 const deleteNotification = async (actor, notificationId, context = {}) => {
-    const deleted = await notificationRepository.deletePersonal({
+    const deleted = await notificationRepository.deleteForUser({
         notificationId,
         userId: actor.id,
+        roleCode: actor.role,
     });
     if (!deleted) {
         throw new Api404Error(t('notification_not_found', context.lang));

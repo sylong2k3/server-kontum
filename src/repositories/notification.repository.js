@@ -47,6 +47,7 @@ const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
 const _buildVisibleNotificationFilter = ({ userId, roleCode, filter = {} }) => {
     const conditions = [
         '(n.expires_at IS NULL OR n.expires_at > NOW())',
+        'r.dismissed_at IS NULL',
         `(
                  n.user_id = $1
                  OR (n.user_id IS NULL AND n.audience = 'all')
@@ -158,8 +159,11 @@ const isVisibleToUser = async ({ notificationId, userId, roleCode }) => {
     const { rows } = await db.query(
         `SELECT 1
          FROM core.notifications n
+         LEFT JOIN core.notification_reads r
+                ON r.notification_id = n.id AND r.user_id = $2
          WHERE n.id = $1
            AND (n.expires_at IS NULL OR n.expires_at > NOW())
+           AND r.dismissed_at IS NULL
            AND (
                 n.user_id = $2
                 OR (n.user_id IS NULL AND n.audience = 'all')
@@ -198,13 +202,40 @@ const markAllRead = async ({ userId, roleCode }) => {
     return rowCount;
 };
 
-/** Xóa thông báo cá nhân của chính user (không cho xóa broadcast của người khác). */
-const deletePersonal = async ({ notificationId, userId }) => {
-    const { rowCount } = await db.query(
+/**
+ * Xóa thông báo của user.
+ * - Thông báo cá nhân (user_id = actor.id): xóa hẳn bản ghi.
+ * - Thông báo broadcast (audience 'all'/'role') mà user đang thấy: ẩn riêng
+ *   cho user đó (dismissed_at), không xóa bản ghi dùng chung.
+ */
+const deleteForUser = async ({ notificationId, userId, roleCode }) => {
+    const { rowCount: personalCount } = await db.query(
         `DELETE FROM core.notifications WHERE id = $1 AND user_id = $2`,
         [notificationId, userId]
     );
-    return rowCount > 0;
+    if (personalCount > 0) {
+        return true;
+    }
+
+    const { rowCount: dismissCount } = await db.query(
+        `INSERT INTO core.notification_reads (notification_id, user_id, dismissed_at)
+         SELECT n.id, $2, NOW()
+         FROM core.notifications n
+         LEFT JOIN core.notification_reads r
+                ON r.notification_id = n.id AND r.user_id = $2
+         WHERE n.id = $1
+           AND (n.expires_at IS NULL OR n.expires_at > NOW())
+           AND n.user_id IS NULL
+           AND r.dismissed_at IS NULL
+           AND (
+                (n.audience = 'all')
+                OR (n.audience = 'role' AND n.audience_role = $3)
+           )
+         ON CONFLICT (notification_id, user_id)
+         DO UPDATE SET dismissed_at = NOW()`,
+        [notificationId, userId, roleCode]
+    );
+    return dismissCount > 0;
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -295,7 +326,7 @@ module.exports = {
     isVisibleToUser,
     markRead,
     markAllRead,
-    deletePersonal,
+    deleteForUser,
 
     upsertDeviceToken,
     removeDeviceToken,
