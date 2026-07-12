@@ -113,6 +113,7 @@ const publishRasterLayer = async (layer, lang = 'vi') => {
                         name: storeName,
                         type: 'GeoTIFF',
                         enabled: true,
+                        workspace: { name: workspace },
                         url: sourceUrl.startsWith('file://') ? sourceUrl : `file://${sourceUrl}`,
                     },
                 }),
