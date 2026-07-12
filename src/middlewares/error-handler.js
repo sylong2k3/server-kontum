@@ -3,9 +3,11 @@ const { t } = require('../utils/i18n.util');
 const multer = require('multer');
 
 const notFoundHandler = (req, res, next) => {
-    const error = new Error(`Route ${req.method} ${req.originalUrl} not found`);
-    error.status = 404;
-    next(error);
+    return res.status(404).json({
+        success: false,
+        message: `Route ${req.method} ${req.originalUrl} not found`,
+        errors: ['NOT_FOUND'],
+    });
 };
 
 const errorHandler = (err, req, res, next) => {
@@ -93,14 +95,7 @@ const errorHandler = (err, req, res, next) => {
         });
     }
 
-    const pgError = PG_ERROR_MAP[err.code];
-    if (pgError) {
-        return res.status(pgError.status).json({
-            success: false,
-            message: pgError.status === 409 ? t('email_in_use', req.lang) : t('invalid_data', req.lang),
-            errors: [pgError.error],
-        });
-    }
+
 
     const statusCode = err.status || err.statusCode || 500;
     console.error('[ERROR]', {

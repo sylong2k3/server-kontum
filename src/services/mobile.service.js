@@ -113,7 +113,9 @@ const createFieldUpdate = async (actor, payload, files, lang) => {
     }
 
     // refreshStats chạy ngoài transaction — tránh full-scan kéo dài lock-hold
-    layerRepo.refreshStats(null, layer.id).catch(() => {});
+    layerRepo.refreshStats(null, layer.id).catch((err) => {
+        console.error(`refreshStats failed for layer ${layer.id} (${layer.code}) after field-update:`, err.message);
+    });
 
     return {
         message: t('mobile_field_update_created_success', lang),
