@@ -85,10 +85,12 @@ function computeLST(region, analysisEnd) {
     const startDate = endDate.advance(-cfg.FEATURE_WINDOW_DAYS, 'day');
     const fbStart   = startDate.advance(-cfg.LST_FALLBACK_DAYS, 'day');
 
+    // ImageCollection → mean() to Image, THEN scale/offset.
+    // Order matters: `.multiply()` doesn't exist on ImageCollection.
     const makeLst = (col) => col
         .select('LST_Day_1km')
+        .mean()
         .multiply(cfg.LST_SCALE_FACTOR)
-        .reduce(ee.Reducer.mean())
         .subtract(cfg.LST_KELVIN_OFFSET)
         .rename('LST_C');
 
