@@ -10,9 +10,11 @@
  * GDAL (convert COG): khi server có GDAL, uncomment phần GDAL bên dưới.
  *
  * Luồng:
- *   Poll DB → lấy job pending → download GeoTIFF buffer từ MinIO
- *   → sharp thumbnail → upload thumbnail → geotiff stats
- *   → upsert statistics → update job completed → update image completed
+ *   Poll DB → lấy job pending → download GeoTIFF về file tạm trên đĩa (stream,
+ *   không nạp nguyên vào RAM — an toàn với file vài GB)
+ *   → sharp thumbnail (đọc từ đĩa) → upload thumbnail
+ *   → geotiff stats (worker thread đọc trực tiếp từ đĩa)
+ *   → upsert statistics → update job completed → update image completed → xoá file tạm
  */
 
 const sharp          = require('sharp');
@@ -29,12 +31,24 @@ const ws      = require('../realtime/websocket.server');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const WORKER_ID         = `worker-${os.hostname()}-${process.pid}`;
-const POLL_INTERVAL     = process.env.WORKER_POLL_CRON || '*/30 * * * * *'; // mỗi 30 giây
+const POLL_INTERVAL     = process.env.WORKER_POLL_CRON || '*/60 * * * * *'; // mỗi 60 giây
 const JOB_BATCH_SIZE    = Number(process.env.WORKER_BATCH_SIZE || 3);
 const THUMBNAIL_WIDTH   = Number(process.env.WORKER_THUMB_WIDTH  || 800);
 const THUMBNAIL_HEIGHT  = Number(process.env.WORKER_THUMB_HEIGHT || 600);
 const THUMBNAIL_FORMAT  = 'png';
 const WORKER_LANG       = process.env.WORKER_LANG || 'vi';
+
+// Giới hạn RAM cho worker thread tính thống kê — nếu file quá lớn khiến thread
+// vượt ngưỡng này, chỉ thread đó bị kill (bắt được ở sự kiện 'error'), KHÔNG
+// làm crash toàn bộ server như khi xử lý trực tiếp trên main thread.
+const STATS_WORKER_MAX_OLD_MB = Number(process.env.WORKER_STATS_MAX_OLD_MB || 1536);
+
+const RASTER_TEMP_DIR = process.env.RASTER_WORKER_TEMP_DIR
+    || path.join(os.tmpdir(), 'kontum_raster_processing');
+
+if (!fs.existsSync(RASTER_TEMP_DIR)) {
+    fs.mkdirSync(RASTER_TEMP_DIR, { recursive: true });
+}
 
 // Flag để tránh chạy đồng thời
 let isRunning = false;
@@ -44,14 +58,15 @@ let isRunning = false;
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Tạo thumbnail từ buffer GeoTIFF/TIFF.
- * sharp hỗ trợ TIFF nên không cần GDAL.
+ * Tạo thumbnail từ file GeoTIFF/TIFF trên đĩa.
+ * Đọc từ path (không phải buffer) để sharp/libvips xử lý theo kiểu streaming/tiled,
+ * tránh phải nạp nguyên file vào RAM trước khi giải nén — quan trọng với file vài GB.
  *
- * @param {Buffer} inputBuffer — Buffer GeoTIFF
- * @returns {Promise<Buffer>}  — Buffer PNG thumbnail
+ * @param {string} filePath — đường dẫn file GeoTIFF trên đĩa
+ * @returns {Promise<Buffer>} — Buffer PNG thumbnail (nhỏ, an toàn để giữ trong RAM)
  */
-const generateThumbnail = async (inputBuffer) => {
-    return sharp(inputBuffer, { limitInputPixels: false })
+const generateThumbnail = async (filePath) => {
+    return sharp(filePath, { limitInputPixels: false })
         .resize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, {
             fit:    'inside',
             withoutEnlargement: true,
@@ -65,22 +80,19 @@ const generateThumbnail = async (inputBuffer) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Tính thống kê pixel từ GeoTIFF buffer cho tất cả bands.
- * Dùng geotiff.js — pure JS, không cần GDAL.
+ * Tính thống kê pixel từ GeoTIFF cho tất cả bands.
+ * Dùng geotiff.js — pure JS, không cần GDAL. Worker thread đọc trực tiếp từ
+ * file trên đĩa (geotiff.fromFile đọc theo range/lazy) nên không cần truyền
+ * cả file vào RAM/transferList.
  *
- * @param {Buffer} inputBuffer
+ * @param {string} filePath
  * @returns {Promise<Array<{band_index, min, max, mean, std, valid_pixels, total_pixels}>>}
  */
 // Chạy calcStatistics trong worker_threads để không block event loop
-const calcStatistics = (inputBuffer) => new Promise((resolve, reject) => {
-    const arrayBuffer = inputBuffer.buffer.slice(
-        inputBuffer.byteOffset,
-        inputBuffer.byteOffset + inputBuffer.byteLength,
-    );
-
+const calcStatistics = (filePath) => new Promise((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, 'calcStats.thread.js'), {
-        workerData: { bufferData: arrayBuffer },
-        transferList: [arrayBuffer], // zero-copy transfer
+        workerData: { filePath },
+        resourceLimits: { maxOldGenerationSizeMb: STATS_WORKER_MAX_OLD_MB },
     });
 
     worker.once('message', ({ stats, error }) => {
@@ -100,7 +112,7 @@ const processJob = async (job) => {
     await repo.updateJobStatus(job.id, 'processing', { worker_id: WORKER_ID, progress: 0 });
     await repo.updateImage(job.image_id, { status: 'processing' }, null);
 
-    let inputBuffer = null;
+    let tempFilePath = null;
 
     try {
         // ── Bước 1: Lấy danh sách files của ảnh ─────────────────────────────
@@ -111,13 +123,16 @@ const processJob = async (job) => {
             throw new Error(t('remote_sensing_primary_file_not_found', WORKER_LANG));
         }
 
-        // ── Bước 2: Download buffer từ MinIO ─────────────────────────────────
+        // ── Bước 2: Download về file tạm trên đĩa (streaming) ────────────────
+        // Không dùng downloadToBuffer nữa — với file vài GB, nạp nguyên vào RAM
+        // gần như chắc chắn làm server OOM/đơ. Stream thẳng xuống đĩa, sharp và
+        // geotiff.js đọc lại theo path (tiled/lazy), giữ RAM ổn định bất kể kích thước file.
         console.info(t('worker_downloading_from_minio', WORKER_LANG, { objectKey: primaryFile.object_key }));
 
-        // CẢNH BÁO: downloadToBuffer nạp toàn bộ file vào RAM.
-        // Với file > 500MB trên server RAM thấp, cần xử lý theo chunk.
-        inputBuffer = await minio.downloadToBuffer(primaryFile.object_key, primaryFile.bucket_name);
-        console.info(`[Worker] Downloaded ${(inputBuffer.length / 1024 / 1024).toFixed(1)} MB`);
+        tempFilePath = path.join(RASTER_TEMP_DIR, `job-${job.id}-${Date.now()}${path.extname(primaryFile.original_name) || '.tif'}`);
+        await minio.downloadToFile(primaryFile.object_key, primaryFile.bucket_name, tempFilePath);
+        const { size: downloadedBytes } = await fs.promises.stat(tempFilePath);
+        console.info(`[Worker] Downloaded ${(downloadedBytes / 1024 / 1024).toFixed(1)} MB → ${tempFilePath}`);
 
         await repo.updateJobStatus(job.id, 'processing', { progress: 30 });
 
@@ -128,7 +143,7 @@ const processJob = async (job) => {
         if (!hasThumbnail || job.job_type === 'gen_thumbnail' || job.job_type === 'full_pipeline') {
             try {
                 console.info(t('worker_thumbnail_creating', WORKER_LANG));
-                const thumbBuffer    = await generateThumbnail(inputBuffer);
+                const thumbBuffer    = await generateThumbnail(tempFilePath);
                 const thumbObjectKey = minio.buildObjectKey(
                     `job-${job.id}`,
                     `thumbnail_${primaryFile.original_name.replace(/\.[^.]+$/, '')}.${THUMBNAIL_FORMAT}`,
@@ -166,7 +181,7 @@ const processJob = async (job) => {
         if (job.job_type === 'calc_statistics' || job.job_type === 'full_pipeline') {
             try {
                 console.info(t('worker_stats_calculating', WORKER_LANG));
-                statsArr = await calcStatistics(inputBuffer);
+                statsArr = await calcStatistics(tempFilePath);
 
                 for (const s of statsArr) {
                     await repo.upsertStatistics(job.image_id, primaryFile.id, s);
@@ -240,8 +255,10 @@ const processJob = async (job) => {
             await repo.updateJobStatus(job.id, 'pending', {});
         }
     } finally {
-        // Giải phóng RAM
-        inputBuffer = null;
+        // Xoá file tạm trên đĩa
+        if (tempFilePath) {
+            fs.promises.unlink(tempFilePath).catch(() => { /* đã xoá hoặc không tồn tại */ });
+        }
     }
 };
 

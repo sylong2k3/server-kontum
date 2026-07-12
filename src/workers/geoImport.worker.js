@@ -19,7 +19,7 @@ const geoImportService = require('../services/geo-import.service');
 const { t } = require('../utils/i18n.util');
 
 const WORKER_ID      = `geo-worker-${os.hostname()}-${process.pid}`;
-const POLL_INTERVAL  = process.env.GEO_WORKER_POLL_CRON || '*/15 * * * * *';
+const POLL_INTERVAL  = process.env.GEO_WORKER_POLL_CRON || '*/30 * * * * *';
 const JOB_BATCH_SIZE = Number(process.env.GEO_WORKER_BATCH_SIZE || 2);
 const WORKER_LANG    = process.env.APP_LANG || process.env.LANG || 'vi';
 

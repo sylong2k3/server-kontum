@@ -3,7 +3,8 @@
 /**
  * Worker thread — tính thống kê band GeoTIFF.
  * Chạy trong thread riêng để không block event loop chính.
- * Nhận: { bufferData: ArrayBuffer }
+ * Nhận: { filePath: string } — đọc trực tiếp từ đĩa (geotiff.fromFile đọc theo
+ * range/lazy, không cần nạp nguyên file vào RAM) để an toàn với file vài GB.
  * Trả: { stats: Array } hoặc { error: string }
  */
 
@@ -11,9 +12,9 @@ const { workerData, parentPort } = require('worker_threads');
 
 (async () => {
     try {
-        const { fromArrayBuffer } = await import('geotiff');
+        const { fromFile } = await import('geotiff');
 
-        const tiff      = await fromArrayBuffer(workerData.bufferData);
+        const tiff      = await fromFile(workerData.filePath);
         const image     = await tiff.getImage();
         const bandCount = image.getSamplesPerPixel();
         const stats     = [];

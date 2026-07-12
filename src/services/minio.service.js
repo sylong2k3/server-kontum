@@ -1,5 +1,7 @@
 
+const fs = require('fs');
 const { PassThrough } = require('stream');
+const { pipeline } = require('stream/promises');
 const { getClient, BUCKET_REMOTE_SENSING } = require('../configs/minioClient');
 
 const PRESIGNED_DOWNLOAD_EXPIRE = Number(process.env.MINIO_PRESIGNED_EXPIRE_SECONDS) || 900;
@@ -136,6 +138,17 @@ const getObjectStream = async (objectKey, bucket) => {
     return client.getObject(bucketName, objectKey);
 };
 /**
+ * Tải object xuống 1 file trên đĩa (streaming) thay vì nạp nguyên vào RAM.
+ * Dùng cho file lớn (GeoTIFF hàng trăm MB - vài GB) để tránh OOM.
+ */
+const downloadToFile = async (objectKey, bucket, destPath) => {
+    const client     = getClient();
+    const bucketName = bucket || BUCKET_REMOTE_SENSING;
+    const stream     = await client.getObject(bucketName, objectKey);
+    await pipeline(stream, fs.createWriteStream(destPath));
+    return destPath;
+};
+/**
  * Đọc `length` byte đầu tiên của object (dùng để kiểm tra magic-byte mà không
  * tải nguyên file). Trả về Buffer có thể ngắn hơn `length` nếu object nhỏ.
  */
@@ -162,6 +175,7 @@ module.exports = {
     objectExists,
     getObjectMeta,
     downloadToBuffer,
+    downloadToFile,
     getObjectStream,
     getObjectHead,
     BUCKET_REMOTE_SENSING,

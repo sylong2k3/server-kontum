@@ -12,6 +12,10 @@ const { t } = require('../utils/i18n.util');
 const { isTiffBuffer, TIFF_MAGIC_LENGTH } = require('../utils/geotiff.util');
 const { v4: uuidv4 } = require('uuid');
 
+// Giới hạn kích thước cho ảnh raster nhận qua presigned PUT (mặc định 2GB).
+// Vượt ngưỡng này bị từ chối tường minh thay vì để worker OOM khi xử lý.
+const RASTER_PRESIGNED_MAX_BYTES = Number(process.env.RASTER_MAX_FILE_SIZE_MB || 2048) * 1024 * 1024;
+
 const uploadImage = async ({ metadata, rasterFile, thumbnailFile, metaJsonFile, user, lang }) => {
     const imageUuid    = uuidv4();
     const uploadedKeys = [];
@@ -191,6 +195,12 @@ const commitPresignedUpload = async ({ data, user, lang }) => {
     }
 
     const objectMeta = await minio.getObjectMeta(object_key, bucketName);
+
+    if (objectMeta.size > RASTER_PRESIGNED_MAX_BYTES) {
+        await minio.removeObject(object_key, bucketName).catch(() => { /* best-effort cleanup */ });
+        const maxMB = Math.round(RASTER_PRESIGNED_MAX_BYTES / (1024 * 1024));
+        throw new Api400Error(t('remote_sensing_file_too_large', lang, { maxMB }), ['FILE_TOO_LARGE']);
+    }
 
     let imageRecord, rasterFileRecord, job;
     const client = await db.pool.connect();
