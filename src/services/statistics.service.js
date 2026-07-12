@@ -85,11 +85,22 @@ const getAdministrativeUnits = async ({ level = 'district' } = {}) => {
     }));
 };
 
+// Vai trò nào xem dashboard "vận hành" (chi tiết theo huyện + việc cần xử lý)
+// thay vì "điều hành" (tổng quan cấp tỉnh, dùng để báo cáo/ra quyết định).
+const OPERATIONAL_ROLES = ['so_nnmt'];
+const scopeForRole = (role) => (OPERATIONAL_ROLES.includes(role) ? 'operational' : 'executive');
+
 // ══════════════════════════════════════════════════════════════════════════════
-//  US-063 — Dashboard điều hành (cache TTL)
+//  US-063 — Dashboard điều hành (cache TTL), nội dung khác nhau theo vai trò:
+//  - executive (system_admin, ubnd_tinh): tổng quan toàn tỉnh — top/low 5 huyện,
+//    tổng phản ánh theo trạng thái. Dùng để báo cáo/ra quyết định.
+//  - operational (so_nnmt): chi tiết toàn bộ huyện (không rút gọn top/low) +
+//    danh sách phản ánh đang chờ xử lý (new/in_progress, ưu tiên cao trước).
+//    Dùng để điều phối xử lý hiện trường.
 // ══════════════════════════════════════════════════════════════════════════════
-const getDashboard = async ({ lang, force = false } = {}) => {
-    const cacheKey = 'dashboard:executive';
+const getDashboard = async ({ lang, force = false, role } = {}) => {
+    const scope = scopeForRole(role);
+    const cacheKey = `dashboard:${scope}`;
     if (!force) {
         const cached = await repo.getCache(cacheKey);
         if (cached) {
@@ -100,23 +111,22 @@ const getDashboard = async ({ lang, force = false } = {}) => {
     const years = await repo.getAvailableYears();
     const latestYear = years[0] || null;
 
-    const [districts, provinceSummary, feedbackRows] = await Promise.all([
+    const [districts, provinceSummary, feedbackRows, pendingFeedback] = await Promise.all([
         latestYear ? repo.getLandcoverByDistrict({ year: latestYear, forestType: 'total' }) : Promise.resolve([]),
         latestYear ? repo.getProvinceSummary(latestYear) : Promise.resolve([]),
         repo.getFeedbackCounts(),
+        scope === 'operational' ? repo.getPendingFeedback(10) : Promise.resolve([]),
     ]);
 
-    // Top 5 huyện che phủ cao nhất
-    const topCoverage = districts
-        .map((d) => ({ unitCode: d.unit_code, name: d.name_vi, coveragePct: round(d.coverage_pct), forestAreaHa: round(d.area_ha) }))
-        .sort((a, b) => (b.coveragePct || 0) - (a.coveragePct || 0))
-        .slice(0, 5);
-
-    // Top 5 huyện che phủ thấp nhất (nguy cơ / cần chú ý)
-    const lowCoverage = districts
-        .map((d) => ({ unitCode: d.unit_code, name: d.name_vi, coveragePct: round(d.coverage_pct) }))
-        .sort((a, b) => (a.coveragePct || 0) - (b.coveragePct || 0))
-        .slice(0, 5);
+    const districtItems = districts
+        .map((d) => ({
+            unitCode:     d.unit_code,
+            name:         d.name_vi,
+            coveragePct:  round(d.coverage_pct),
+            forestAreaHa: round(d.area_ha),
+            changePct:    round(d.change_pct),
+        }))
+        .sort((a, b) => (a.coveragePct || 0) - (b.coveragePct || 0));
 
     const provByType = {};
     provinceSummary.forEach((p) => { provByType[p.forest_type] = round(p.area_ha); });
@@ -127,20 +137,39 @@ const getDashboard = async ({ lang, force = false } = {}) => {
 
     const provinceCoverage = provinceSummary.find((p) => p.forest_type === 'total');
 
+    const forest = {
+        provinceCoveragePct: provinceCoverage ? round(provinceCoverage.coverage_pct) : null,
+        totalForestHa:       provByType.total ?? null,
+        naturalForestHa:     provByType.natural ?? null,
+        plantedForestHa:     provByType.planted ?? null,
+    };
+
+    if (scope === 'operational') {
+        forest.districts = districtItems; // toàn bộ huyện, sắp theo che phủ tăng dần (huyện nguy cơ trước)
+    } else {
+        forest.topCoverageDistricts = [...districtItems].reverse().slice(0, 5);
+        forest.lowCoverageDistricts = districtItems.slice(0, 5);
+    }
+
+    const feedback = { total: feedbackTotal, byStatus: feedbackByStatus };
+    if (scope === 'operational') {
+        feedback.pending = pendingFeedback.map((f) => ({
+            id:        f.id,
+            category:  f.category,
+            title:     f.title,
+            status:    f.status,
+            priority:  f.priority,
+            lng:       f.lng,
+            lat:       f.lat,
+            createdAt: f.created_at,
+        }));
+    }
+
     const payload = {
+        scope,
         year: latestYear,
-        forest: {
-            provinceCoveragePct: provinceCoverage ? round(provinceCoverage.coverage_pct) : null,
-            totalForestHa:       provByType.total ?? null,
-            naturalForestHa:     provByType.natural ?? null,
-            plantedForestHa:     provByType.planted ?? null,
-            topCoverageDistricts: topCoverage,
-            lowCoverageDistricts: lowCoverage,
-        },
-        feedback: {
-            total:    feedbackTotal,
-            byStatus: feedbackByStatus,
-        },
+        forest,
+        feedback,
         // Cảnh báo cháy: EP-06 chưa hiện thực — để placeholder cho FE.
         fireAlerts: { available: false, note: 'EP-06 (fire risk) chưa triển khai' },
     };

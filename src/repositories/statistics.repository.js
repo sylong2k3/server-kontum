@@ -108,6 +108,19 @@ const getFeedbackCounts = async () => {
     return rows;
 };
 
+// Phản ánh cần xử lý (new/in_progress), ưu tiên cao trước — dashboard vận hành (so_nnmt).
+const getPendingFeedback = async (limit = 10) => {
+    const { rows } = await db.query(
+        `SELECT id, category, title, status, priority, lng, lat, created_at
+         FROM   field.feedback
+         WHERE  deleted_at IS NULL AND status IN ('new', 'in_progress')
+         ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at ASC
+         LIMIT $1`,
+        [limit],
+    );
+    return rows;
+};
+
 module.exports = {
     listAdministrativeUnits,
     findUnitByCode,
@@ -117,4 +130,5 @@ module.exports = {
     getCache,
     setCache,
     getFeedbackCounts,
+    getPendingFeedback,
 };

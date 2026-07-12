@@ -22,7 +22,11 @@ const getLandcover = async (req, res) => {
 
 // GET /api/v1/stats/dashboard?force=true
 const getDashboard = async (req, res) => {
-    const data = await svc.getDashboard({ lang: req.lang, force: req.query.force === 'true' });
+    const data = await svc.getDashboard({
+        lang:  req.lang,
+        force: req.query.force === 'true',
+        role:  req.user?.role,
+    });
     return OK(res, t('stats_dashboard_success', req.lang), data);
 };
 
