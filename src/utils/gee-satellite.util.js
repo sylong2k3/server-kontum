@@ -37,16 +37,26 @@ function eeEval(eeObject, timeoutMs = DEFAULT_TIMEOUT_MS) {
 /**
  * Get GEE map tile info for display on Leaflet / MapboxGL.
  * Returns { mapId, token, tileUrl } where tileUrl has {z}/{x}/{y} placeholders.
+ *
+ * Applies eeImage.visualize(vizParams) client-side (returns an RGB ee.Image),
+ * then passes that to ee.data.getMapId. This avoids the SDK trying to CSV-encode
+ * numeric arrays/values ("csv.split is not a function") when raw viz params are
+ * passed to getMapId.
  * → JS value
  */
 function getEeMapId(eeImage, vizParams = {}) {
+    // If viz params provided, bake them into an RGB image via ee.Image.visualize().
+    const visImage = vizParams && Object.keys(vizParams).length > 0
+        ? eeImage.visualize(vizParams)
+        : eeImage;
+
     return new Promise((resolve, reject) => {
         const timer = setTimeout(
             () => reject(new Error('GEE getMapId timeout')),
             DEFAULT_TIMEOUT_MS,
         );
         ee.data.getMapId(
-            { image: eeImage, ...vizParams },
+            { image: visImage },
             (mapInfo, err) => {
                 clearTimeout(timer);
                 if (err) { reject(new Error(String(err))); return; }
@@ -191,14 +201,25 @@ function makeComposite(year, startMonth, endMonth, region) {
         collection = collection.merge(s2);
     }
 
-    const bands = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2'];
-    return collection
-        .map((img) => img.select(bands).clamp(0, 1).toFloat()
-            .copyProperties(img, ['system:time_start']))
-        .median()
-        .select(bands)
-        .clip(bounds)
-        .toFloat();
+    const bands  = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2'];
+    const mapped = collection.map((img) =>
+        img.select(bands).clamp(0, 1).toFloat()
+            .copyProperties(img, ['system:time_start']));
+
+    // Fallback: masked constant image with correct band schema.
+    // Prevents "Band pattern 'blue' was applied to an Image with no bands" when
+    // the merged collection is empty (e.g. seasonal window in the future).
+    const fallback = ee.Image.constant([0.12, 0.10, 0.08, 0.40, 0.20, 0.12])
+        .rename(bands)
+        .updateMask(ee.Image.constant(0));
+
+    const composite = ee.Image(ee.Algorithms.If(
+        mapped.size().gt(0),
+        mapped.median(),
+        fallback,
+    ));
+
+    return composite.select(bands).clip(bounds).toFloat();
 }
 
 // ── Spectral indices ──────────────────────────────────────────────────────────

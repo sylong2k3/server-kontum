@@ -64,7 +64,28 @@ function normalizeParams(raw) {
         startDate2:  raw.startDate2  || null,
         endDate2:    raw.endDate2    || null,
         geometry:    raw.geometry    || null,
+        ndviMinThresh: raw.ndviMinThresh != null ? Number(raw.ndviMinThresh) : null,
     };
+}
+
+// Validate required date params per image type. Throws a 400 BusinessLogicError
+// with a clear message rather than letting the GEE server complain later with
+// "Parameter 'start' is required and may not be null".
+function validateParams(imageType, params) {
+    const missing = [];
+    if (!params.startDate) missing.push('startDate');
+    if (!params.endDate)   missing.push('endDate');
+    if (imageType === 'compare') {
+        if (!params.startDate2) missing.push('startDate2');
+        if (!params.endDate2)   missing.push('endDate2');
+    }
+    if (missing.length) {
+        throw new BusinessLogicError(
+            `Thiếu tham số bắt buộc: ${missing.join(', ')}.`,
+            ['MISSING_REQUIRED_PARAM'],
+            StatusCodes.BAD_REQUEST,
+        );
+    }
 }
 
 function hashParams(params) {
@@ -116,6 +137,20 @@ function buildCollection(region, startDate, endDate, collection, cloudCover) {
     return col;
 }
 
+// Throw a clear 400 when the merged collection has zero images. Otherwise
+// downstream calls (.median → .select → visualize) fail deep in GEE with
+// cryptic messages like "no bands" or "Parameter 'start' is required".
+function assertNonEmpty(imgCount, startDate, endDate, cloudCover) {
+    if (imgCount > 0) return;
+    throw new BusinessLogicError(
+        `Không tìm thấy ảnh vệ tinh nào trong ${startDate} → ${endDate} ` +
+        `với ngưỡng mây ≤ ${cloudCover}%. Hãy mở rộng khoảng thời gian hoặc ` +
+        `tăng ngưỡng mây.`,
+        ['EMPTY_COLLECTION'],
+        StatusCodes.BAD_REQUEST,
+    );
+}
+
 // ── Area stats helper ─────────────────────────────────────────────────────────
 
 async function computeAreaStats(classImage, region, nClasses, scale = 100) {
@@ -147,6 +182,7 @@ async function buildRgb(params, region) {
         params.collection, params.cloudCover);
     const imgCount  = await eeEval(col.size());
     dbgTime('RGB', `collection size=${imgCount}`, t0);
+    assertNonEmpty(imgCount, params.startDate, params.endDate, params.cloudCover);
     const eeImage   = col.select(['red', 'green', 'blue']).median().clip(region);
     const vizParams = { bands: ['red', 'green', 'blue'], min: 0, max: 0.3 };
     dbgTime('RGB', 'done', t0);
@@ -167,6 +203,7 @@ async function buildNdvi(params, region) {
         params.collection, params.cloudCover);
     const imgCount  = await eeEval(col.size());
     dbgTime('NDVI', `collection size=${imgCount}`, t0);
+    assertNonEmpty(imgCount, params.startDate, params.endDate, params.cloudCover);
     const composite = col.median().clip(region);
     const eeImage   = composite.normalizedDifference(['nir', 'red']).rename('NDVI');
     const vizParams = { bands: ['NDVI'], min: -0.2, max: 0.8,
@@ -250,6 +287,7 @@ async function buildClassified(params, region) {
         params.collection, params.cloudCover);
     const imgCount  = await eeEval(col.size());
     dbgTime('CLASSIFIED', `collection size=${imgCount}`, t0);
+    assertNonEmpty(imgCount, params.startDate, params.endDate, params.cloudCover);
     const composite = col.median().clip(region);
     const indices   = addIndices(composite, '');
     const ndvi = indices.select('NDVI'); const ndwi = indices.select('NDWI');
@@ -290,12 +328,18 @@ async function buildClassified(params, region) {
 async function buildCompare(params, region) {
     const t0 = Date.now();
     dbg('COMPARE', `start — period1=${params.startDate}→${params.endDate}  period2=${params.startDate2}→${params.endDate2}`);
-    const buildNdviImg = (sd, ed) =>
-        buildCollection(region, sd, ed, params.collection, params.cloudCover)
-            .median().clip(region).normalizedDifference(['nir', 'red']).rename('NDVI');
 
-    const ndvi1 = buildNdviImg(params.startDate, params.endDate);
-    const ndvi2 = buildNdviImg(params.startDate2, params.endDate2);
+    const col1 = buildCollection(region, params.startDate,  params.endDate,
+        params.collection, params.cloudCover);
+    const col2 = buildCollection(region, params.startDate2, params.endDate2,
+        params.collection, params.cloudCover);
+    const [n1, n2] = await Promise.all([eeEval(col1.size()), eeEval(col2.size())]);
+    dbgTime('COMPARE', `sizes period1=${n1} period2=${n2}`, t0);
+    assertNonEmpty(n1, params.startDate,  params.endDate,  params.cloudCover);
+    assertNonEmpty(n2, params.startDate2, params.endDate2, params.cloudCover);
+
+    const ndvi1 = col1.median().clip(region).normalizedDifference(['nir', 'red']).rename('NDVI');
+    const ndvi2 = col2.median().clip(region).normalizedDifference(['nir', 'red']).rename('NDVI');
     const FOREST = 0.5;
     dbg('COMPARE', `forest NDVI threshold=${FOREST} — detecting loss/gain/other`);
 
@@ -358,6 +402,7 @@ async function processRequest(imageType, rawParams) {
     }
 
     const params = normalizeParams({ ...rawParams, imageType: normalType });
+    validateParams(normalType, params);
     const hash   = hashParams(params);
     dbg('PROCESS', `cache hash=${hash.slice(0, 12)}…`);
 
