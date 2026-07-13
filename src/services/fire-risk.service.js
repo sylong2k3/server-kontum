@@ -95,6 +95,10 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCas
         return {
             unitCode:          p.ADM2_CODE  || null,
             name:              p.ADM2_NAME  || p.ADM1_NAME || null,
+            // Polygon huyện: reduceRegions giữ nguyên geometry của mỗi feature
+            // đầu vào. Đây là mảnh khoá để client vẽ được feature lên bản đồ
+            // (không còn null → không còn fallback lat/lng = 0,0).
+            geometry:          feat.geometry || null,
             riskLevelDist:     levelDist,
             blendCaseHa: {
                 withInput:    Math.round((blendHist['1'] || 0) * pixelHa * 100) / 100,
@@ -265,6 +269,10 @@ async function publishRaster(analysisDate, gcsPath) {
 function buildFeaturesFromStats(snapshotId, districtStats) {
     const rows = [];
     for (const d of districtStats) {
+        // Polygon huyện dùng chung cho tất cả level của district đó — client sẽ
+        // filter theo minRiskLevel và vẫn có đủ geometry để render vùng huyện.
+        // JSON.stringify vì repo.replaceFeatures chạy ST_GeomFromGeoJSON($9) khi $9 là text.
+        const geoJsonText = d.geometry ? JSON.stringify(d.geometry) : null;
         for (let l = 1; l <= 5; l++) {
             const areaHa = d.riskLevelDist[l] || 0;
             if (areaHa <= 0) continue;
@@ -276,7 +284,7 @@ function buildFeaturesFromStats(snapshotId, districtStats) {
                 p_nesterov_mean: d.pNesterovMean,
                 ndvi_mean:       null,
                 properties:      { s2Coverage: d.s2Coverage },
-                geojson:         null,
+                geojson:         geoJsonText,
             });
         }
     }

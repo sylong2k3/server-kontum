@@ -86,8 +86,18 @@ function getKonTumRegion() {
     return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
 }
 
+/**
+ * Districts (huyện) của Kon Tum lấy từ FAO/GAUL/2015/level2.
+ * Trả về 8 features với các thuộc tính ADM0_NAME, ADM1_NAME, ADM2_NAME, ADM2_CODE.
+ *
+ * Cần cho reduceRegions() ở fire-risk / forest-classification: mỗi feature giữ
+ * nguyên geometry huyện — sau khi evaluate() thì client có polygon để render
+ * (khắc phục tình trạng client fallback lat/lng về 0,0 khi features.geometry=null).
+ */
 function getKonTumDistricts() {
-    return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
+    return ee.FeatureCollection('FAO/GAUL/2015/level2')
+        .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
+        .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
 }
 
 // ── Local Kon Tum boundary polygon ────────────────────────────────────────────
