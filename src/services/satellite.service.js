@@ -534,18 +534,27 @@ async function processRequest(imageType, rawParams) {
     // Cache hit.
     const cached = await repo.getByHash(hash);
     if (cached) {
-        dbgTime('PROCESS', `cache HIT id=${cached.id}`, t0);
-        return {
-            resultId:    cached.id,
-            tileUrl:     buildProxyUrl(cached.id),
-            geeTileUrl:  cached.tile_url,
-            geoserverLayer: cached.geoserver_layer || null,
-            downloadUrl: cached.metadata?.downloadUrl || null,
-            stats:       cached.stats,
-            legend:      cached.legend,
-            metadata:    cached.metadata,
-            cached:      true,
-        };
+        // Bypass stale classified cache entries computed with an old class schema.
+        const expectedClasses = fcCfg.CLASS_NAMES.length;
+        const isStaleClassified = normalType === 'classified'
+            && (cached.metadata?.classCount !== expectedClasses
+                || !Array.isArray(cached.stats?.areaByClass)
+                || cached.stats.areaByClass.length !== expectedClasses);
+        if (!isStaleClassified) {
+            dbgTime('PROCESS', `cache HIT id=${cached.id}`, t0);
+            return {
+                resultId:    cached.id,
+                tileUrl:     buildProxyUrl(cached.id),
+                geeTileUrl:  cached.tile_url,
+                geoserverLayer: cached.geoserver_layer || null,
+                downloadUrl: cached.metadata?.downloadUrl || null,
+                stats:       cached.stats,
+                legend:      cached.legend,
+                metadata:    cached.metadata,
+                cached:      true,
+            };
+        }
+        dbg('PROCESS', `classified cache STALE (${cached.stats?.areaByClass?.length ?? 0} classes ≠ ${expectedClasses}) — recomputing`);
     }
 
     dbg('PROCESS', 'cache MISS — computing via GEE');
