@@ -226,7 +226,7 @@ function buildDatasetLabel(featureImage, thresholdLabel, year, region) {
  *                       pixels near ground-truth features so Dataset/Threshold
  *                       samples don't overlap with the independent input pool.
  */
-function sampleFromLabel(featureImage, labelImage, nSamples, regionGeom, seed, exclusionMask) {
+function sampleFromLabel(featureImage, labelImage, nSamples, regionGeom, seed, exclusionMask, scaleM) {
     let bands = featureImage.addBands(labelImage.rename('class').toInt16());
     if (exclusionMask) {
         bands = bands.updateMask(exclusionMask);
@@ -237,7 +237,7 @@ function sampleFromLabel(featureImage, labelImage, nSamples, regionGeom, seed, e
         classValues: ee.List.sequence(0, cfg.CLASS_NAMES.length - 1),
         classPoints: ee.List.repeat(nSamples, cfg.CLASS_NAMES.length),
         region:      regionGeom,
-        scale:       cfg.SAMPLE_SCALE_M,
+        scale:       scaleM || cfg.SAMPLE_SCALE_M,
         seed,
         geometries:  true,
         tileScale:   16,
@@ -314,22 +314,37 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         // Use for on-demand tile generation where metadata is not critical.
         skipStats = false,
         logger,
+        // Lite mode is for /satellite/classified on-demand: same 11-class
+        // essence but a much lighter graph so getMapId returns in seconds
+        // instead of hitting GEE "Please try again" at ~200 s.
+        //   • skip Dynamic World + ESA WorldCover + JRC GSW dataset labels
+        //   • fewer samples per class, coarser sample scale
+        //   • fewer RF trees
+        // Threshold pseudo-labels still exercise all 11 classes.
+        liteMode = false,
     } = opts;
     const rfSeed  = seed ?? year;
     const hasGT   = Boolean(groundTruthAssetId);
-    const total   = cfg.SAMPLES_PER_CLASS;
+    const total   = liteMode ? cfg.LITE_SAMPLES_PER_CLASS : cfg.SAMPLES_PER_CLASS;
+    const useDatasetLabels = !liteMode || cfg.LITE_USE_DATASET_LABELS;
 
     // Local logger nếu caller không truyền — mọi bước sau đây đều được đánh dấu.
-    const log = logger || makeStageLogger('FOREST-CLS-RF', { correlationId: year });
+    const log = logger || makeStageLogger(
+        liteMode ? 'FOREST-CLS-RF-LITE' : 'FOREST-CLS-RF',
+        { correlationId: year },
+    );
 
     // ── Quotas per source ────────────────────────────────────────────────
+    // Lite mode: khi bỏ dataset labels, quota Dataset gộp vào Threshold.
     const inputQuota     = hasGT ? Math.round(total * 0.5) : 0;
-    const datasetQuota   = hasGT ? Math.round(total * 0.3) : Math.round(total * 0.6);
+    const datasetQuota   = useDatasetLabels
+        ? (hasGT ? Math.round(total * 0.3) : Math.round(total * 0.6))
+        : 0;
     const thresholdQuota = total - inputQuota - datasetQuota;
     const inputTestQuota = Math.max(minFieldTest, Math.round(total * 0.2));
 
-    log.mark('RF quotas',
-        `hasGT=${hasGT} input=${inputQuota} dataset=${datasetQuota} threshold=${thresholdQuota} inputTest=${inputTestQuota}`);
+    log.mark(liteMode ? 'RF quotas (LITE)' : 'RF quotas',
+        `hasGT=${hasGT} input=${inputQuota} dataset=${datasetQuota} threshold=${thresholdQuota} inputTest=${inputTestQuota} scale=${liteMode ? cfg.LITE_SAMPLE_SCALE_M : cfg.SAMPLE_SCALE_M}m trees=${liteMode ? cfg.LITE_RF_TREES : cfg.RF_TREES}`);
 
     // Toàn bộ các bước "build" chỉ dựng graph GEE (lazy) — nhanh, không time-out.
     // Chỉ khi gọi eeEval() mới đẩy đồ thị lên Earth Engine để tính thật.
@@ -343,10 +358,17 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         'Build threshold pseudo-label (11 masks + priority mosaic) [LAZY]',
         () => Promise.resolve(buildThresholdLabel(base, dryIdx, wetIdx, demImage, region)),
     );
-    const datasetLabel = await log.run(
-        'Build dataset pseudo-label (DynamicWorld + ESA WorldCover + JRC GSW) [LAZY]',
-        () => Promise.resolve(buildDatasetLabel(featureImage, thresholdLabel, year, region)),
-    );
+    // Trong lite mode, DynamicWorld + ESA WorldCover + JRC GSW là 3 external
+    // dataset lớn — bỏ đi giúp getMapId trả trong ~15-30s thay vì timeout.
+    let datasetLabel = null;
+    if (useDatasetLabels) {
+        datasetLabel = await log.run(
+            'Build dataset pseudo-label (DynamicWorld + ESA WorldCover + JRC GSW) [LAZY]',
+            () => Promise.resolve(buildDatasetLabel(featureImage, thresholdLabel, year, region)),
+        );
+    } else {
+        log.mark('Dataset pseudo-label', 'SKIPPED (liteMode) — threshold labels only');
+    }
 
     // ── Ground-truth split + exclusion mask ──────────────────────────────
     let inputTrainSamples = ee.FeatureCollection([]);
@@ -373,28 +395,32 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     }
 
     // ── Dataset + Threshold pseudo-label samples (with exclusion) ────────
+    const sampleScaleM = liteMode ? cfg.LITE_SAMPLE_SCALE_M : cfg.SAMPLE_SCALE_M;
     const thresholdSamples = await log.run(
         'Sample threshold pool via stratifiedSample [LAZY]',
         () => Promise.resolve(sampleFromLabel(featureImage, thresholdLabel,
-            thresholdQuota, regionGeom, rfSeed * 1000 + 1, exclusionMask)),
-        { note: `numPoints=${thresholdQuota} scale=${cfg.SAMPLE_SCALE_M}m tileScale=16` },
+            thresholdQuota, regionGeom, rfSeed * 1000 + 1, exclusionMask, sampleScaleM)),
+        { note: `numPoints=${thresholdQuota} scale=${sampleScaleM}m tileScale=16` },
     );
-    const datasetSamples = await log.run(
-        'Sample dataset pool via stratifiedSample [LAZY]',
-        () => Promise.resolve(sampleFromLabel(featureImage, datasetLabel,
-            datasetQuota, regionGeom, rfSeed * 2000 + 1, exclusionMask)),
-        { note: `numPoints=${datasetQuota} scale=${cfg.SAMPLE_SCALE_M}m tileScale=16` },
-    );
+    const datasetSamples = useDatasetLabels
+        ? await log.run(
+            'Sample dataset pool via stratifiedSample [LAZY]',
+            () => Promise.resolve(sampleFromLabel(featureImage, datasetLabel,
+                datasetQuota, regionGeom, rfSeed * 2000 + 1, exclusionMask, sampleScaleM)),
+            { note: `numPoints=${datasetQuota} scale=${sampleScaleM}m tileScale=16` },
+        )
+        : ee.FeatureCollection([]);
 
     const trainSet = inputTrainSamples
         .merge(thresholdSamples)
         .merge(datasetSamples);
 
+    const rfTrees = liteMode ? cfg.LITE_RF_TREES : cfg.RF_TREES;
     const classifier = await log.run(
         'Assemble RF classifier graph (train + explain deferred) [LAZY]',
         () => Promise.resolve(
             ee.Classifier.smileRandomForest({
-                numberOfTrees:     cfg.RF_TREES,
+                numberOfTrees:     rfTrees,
                 variablesPerSplit: cfg.RF_VARIABLES_PER_SPLIT,
                 minLeafPopulation: cfg.RF_MIN_LEAF_POPULATION,
                 bagFraction:       cfg.RF_BAG_FRACTION,
@@ -405,7 +431,7 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
                 inputProperties: featureImage.bandNames(),
             }),
         ),
-        { note: `trees=${cfg.RF_TREES} bag=${cfg.RF_BAG_FRACTION}` },
+        { note: `trees=${rfTrees} bag=${cfg.RF_BAG_FRACTION}` },
     );
 
     // Đây là điểm evaluate() ĐẦU TIÊN, kéo toàn bộ đồ thị (composite → indices

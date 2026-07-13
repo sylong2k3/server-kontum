@@ -340,6 +340,11 @@ async function buildClassified(params, region) {
         // RF training to materialise synchronously and take 5+ minutes for Kon Tum.
         // Tiles are still rendered correctly; stats are omitted for on-demand requests.
         skipStats: true,
+        // Lite mode: on-demand endpoint bỏ dataset labels (DW+WC+JRC), giảm sample,
+        // giảm RF trees, dùng sample scale coarser. Cần thiết vì graph v3 gốc
+        // vượt quá budget của getMapId (~200 s → GEE "Please try again").
+        // Batch cron trong forest-classification.service.js vẫn dùng full v3.
+        liteMode:           params.liteMode !== false,
     });
     dbgTime('CLASSIFIED', `RF graph built (stats skipped)`, t0);
 
