@@ -6,10 +6,15 @@ const { t } = require('../utils/i18n.util');
 
 // ── GET /forest-classification/latest ────────────────────────────────────────
 const getLatest = async (req, res) => {
-    const { snapshot, districtAreas, stale, computing } = await svc.getLatest();
+    const { snapshot, districtAreas, stale, computing, geeTileUrl, geeMapId, classifiedViz }
+        = await svc.getLatest();
     OK(res, t('get_detail_success', req.lang), {
         snapshot: formatSnapshot(snapshot),
         districtAreas,
+        // Tile Earth Engine cho client render trực tiếp raster 11 lớp.
+        geeTileUrl,
+        geeMapId,
+        classifiedViz,
         stale,
         computing,
     });
@@ -88,21 +93,25 @@ const getSnapshot = async (req, res) => {
 function formatSnapshot(s) {
     if (!s) return null;
     return {
-        id:              s.id,
-        year:            s.year,
-        month:           s.month,
-        status:          s.status,
-        trigger:         s.trigger || 'cron',
-        provinceSummary: s.province_summary,
-        oobAccuracy:     s.oob_accuracy,
-        testAccuracy:    s.test_accuracy ?? null,
-        testKappa:       s.test_kappa ?? null,
-        sampleQuotas:    s.sample_quotas ?? null,
-        modelParams:     s.model_params ?? null,
-        durationMs:      s.duration_ms ?? null,
-        geoserverLayer:  s.geoserver_layer || null,
-        computedAt:      s.computed_at,
-        publishedAt:     s.published_at,
+        id:                 s.id,
+        year:               s.year,
+        month:              s.month,
+        status:             s.status,
+        trigger:            s.trigger || 'cron',
+        provinceSummary:    s.province_summary,
+        oobAccuracy:        s.oob_accuracy,
+        testAccuracy:       s.test_accuracy ?? null,
+        testKappa:          s.test_kappa ?? null,
+        sampleQuotas:       s.sample_quotas ?? null,
+        modelParams:        s.model_params ?? null,
+        durationMs:         s.duration_ms ?? null,
+        geoserverLayer:     s.geoserver_layer || null,
+        // Đưa cả 3 field GEE tile vào snapshot để client có sẵn khi chỉ đọc snapshot.
+        geeTileUrl:         s.gee_tile_url || null,
+        geeMapId:           s.gee_map_id || null,
+        geeTileGeneratedAt: s.gee_tile_generated_at || null,
+        computedAt:         s.computed_at,
+        publishedAt:        s.published_at,
     };
 }
 

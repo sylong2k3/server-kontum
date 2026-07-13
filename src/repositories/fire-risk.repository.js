@@ -75,14 +75,17 @@ const updateStatus = async (id, status, extra = {}) => {
         }
     };
 
-    addField('error_message',    extra.error_message);
-    addField('computed_at',      extra.computed_at);
-    addField('published_at',     extra.published_at);
-    addField('gee_task_id',      extra.gee_task_id);
-    addField('minio_key',        extra.minio_key);
-    addField('geoserver_layer',  extra.geoserver_layer);
-    addField('geoserver_store',  extra.geoserver_store);
-    addField('s2_coverage_ratio',extra.s2_coverage_ratio);
+    addField('error_message',        extra.error_message);
+    addField('computed_at',          extra.computed_at);
+    addField('published_at',         extra.published_at);
+    addField('gee_task_id',          extra.gee_task_id);
+    addField('minio_key',            extra.minio_key);
+    addField('geoserver_layer',      extra.geoserver_layer);
+    addField('geoserver_store',      extra.geoserver_store);
+    addField('s2_coverage_ratio',    extra.s2_coverage_ratio);
+    addField('gee_map_id',           extra.gee_map_id);
+    addField('gee_tile_url',         extra.gee_tile_url);
+    addField('gee_tile_generated_at',extra.gee_tile_generated_at);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);

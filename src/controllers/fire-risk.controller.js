@@ -7,21 +7,32 @@ const { t } = require('../utils/i18n.util');
 // ── GET /fire-risk/latest ─────────────────────────────────────────────────────
 const getLatest = async (req, res) => {
     const minRiskLevel = parseInt(req.query.minRiskLevel, 10) || 1;
-    const { snapshot, features, stale, computing } = await svc.getLatest({ minRiskLevel });
+    const {
+        snapshot, features, stale, computing,
+        geeTileUrl, geeMapId, riskLevelViz,
+    } = await svc.getLatest({ minRiskLevel });
     OK(res, t('get_detail_success', req.lang), {
         snapshot: {
-            id:               snapshot.id,
-            analysisDate:     snapshot.analysis_date,
-            status:           snapshot.status,
-            provinceSummary:  snapshot.province_summary,
-            districtStats:    snapshot.district_stats,
-            pNesterovStats:   snapshot.p_nesterov_stats,
-            s2CoverageRatio:  snapshot.s2_coverage_ratio,
-            geoserverLayer:   snapshot.geoserver_layer || null,
-            computedAt:       snapshot.computed_at,
-            publishedAt:      snapshot.published_at,
+            id:                  snapshot.id,
+            analysisDate:        snapshot.analysis_date,
+            status:              snapshot.status,
+            provinceSummary:     snapshot.province_summary,
+            districtStats:       snapshot.district_stats,
+            pNesterovStats:      snapshot.p_nesterov_stats,
+            s2CoverageRatio:     snapshot.s2_coverage_ratio,
+            geoserverLayer:      snapshot.geoserver_layer || null,
+            // Tile Earth Engine: client render trực tiếp bằng leaflet L.tileLayer(geeTileUrl).
+            geeTileUrl:          snapshot.gee_tile_url || null,
+            geeMapId:            snapshot.gee_map_id || null,
+            geeTileGeneratedAt:  snapshot.gee_tile_generated_at || null,
+            computedAt:          snapshot.computed_at,
+            publishedAt:         snapshot.published_at,
         },
         features,
+        // Trùng field ở tầng ngoài để client tiện lấy khi chỉ cần tile URL.
+        geeTileUrl,
+        geeMapId,
+        riskLevelViz,
         stale,
         computing,
     });

@@ -27,7 +27,16 @@ const {
     eeEval,
     getKonTumRegion,
     getKonTumDistricts,
+    getEeMapId,
 } = require('../utils/gee-satellite.util');
+
+// Palette 11-class trùng với §0 CẤU HÌNH LỚP trong docs/kontum_forest_classification_final.js.
+const CLASSIFIED_VIZ = {
+    bands:   ['classification'],
+    min:     0,
+    max:     cfg.CLASS_NAMES.length - 1,
+    palette: cfg.CLASS_PALETTE,
+};
 const { runRfClassification } = require('./forest-classification.pipeline');
 const { makeStageLogger } = require('../utils/stage-logger.util');
 const repo = require('../repositories/forest-classification.repository');
@@ -212,6 +221,22 @@ async function runAnalysis(year, month, {
         );
         log.mark('District area rows', `${districtAreas.length}`);
 
+        // GEE tile URL — client render trực tiếp raster phân loại 11 lớp.
+        // Không phụ thuộc GeoServer/GCS.
+        let geeMapId = null;
+        let geeTileUrl = null;
+        try {
+            const mapInfo = await log.run(
+                'Register GEE map (11-class viz → geeTileUrl)',
+                () => getEeMapId(classified, CLASSIFIED_VIZ),
+                { note: 'ee.data.getMapId — tile URL for /latest response' },
+            );
+            geeMapId   = mapInfo.mapId  || null;
+            geeTileUrl = mapInfo.tileUrl || null;
+        } catch (err) {
+            console.warn(`[FOREST-CLS] getEeMapId failed (non-fatal): ${err.message}`);
+        }
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary: provinceSummary,
@@ -221,6 +246,9 @@ async function runAnalysis(year, month, {
                 sample_quotas:    quotas,
                 computed_at:      new Date(),
                 duration_ms:      Date.now() - startMs,
+                gee_map_id:       geeMapId,
+                gee_tile_url:     geeTileUrl,
+                gee_tile_generated_at: geeTileUrl ? new Date() : null,
             }));
 
         await log.run('Persist district area rows',
@@ -313,7 +341,10 @@ const getLatest = async () => {
     const snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
         const pending = await repo.getLatest();
-        if (pending) return { snapshot: pending, districtAreas: [], stale: true, computing: true };
+        if (pending) return {
+            snapshot: pending, districtAreas: [], stale: true, computing: true,
+            geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
+        };
         throw new BusinessLogicError(
             'Chưa có dữ liệu phân loại rừng. Vui lòng thử lại sau.',
             ['FC_NO_DATA'],
@@ -321,7 +352,12 @@ const getLatest = async () => {
         );
     }
     const districtAreas = await repo.getDistrictAreas(snapshot.id);
-    return { snapshot, districtAreas, stale: false, computing: false };
+    return {
+        snapshot, districtAreas, stale: false, computing: false,
+        geeTileUrl:    snapshot.gee_tile_url || null,
+        geeMapId:      snapshot.gee_map_id   || null,
+        classifiedViz: CLASSIFIED_VIZ,
+    };
 };
 
 const getHistory = async ({ page = 1, limit = 24 } = {}) =>

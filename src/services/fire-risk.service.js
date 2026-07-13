@@ -29,9 +29,19 @@ const {
     eeEval: eeEvaluate,
     getKonTumRegion,
     getKonTumDistricts,
+    getEeMapId,
     todayUtc,
     fmtDate,
 } = require('../utils/gee-satellite.util');
+
+// Palette + range của RiskLevel 0-5 — trùng với §22 trong docs/kontum_fire_warning_final.js.
+// riskPaletteExtended: 0=trắng (không đủ dữ liệu), 1-5 theo cấp cháy chính thức.
+const RISK_LEVEL_VIZ = {
+    bands:   ['RiskLevel'],
+    min:     0,
+    max:     5,
+    palette: ['ffffff', '00a65a', 'f6e84a', 'f39c12', 'e74c3c', '7b241c'],
+};
 const { runFireRiskAnalysis } = require('./fire-risk.pipeline');
 const { pollGeeTask, publishRasterToMinio } = require('../utils/gee-export.helper');
 const { makeStageLogger } = require('../utils/stage-logger.util');
@@ -375,6 +385,23 @@ async function runAnalysis(analysisDate, {
         log.mark('P Nesterov',
             `mean=${pNesterovStats.mean} p90=${pNesterovStats.p90} max=${pNesterovStats.max}`);
 
+        // GEE tile URL cho RiskLevel — client render trực tiếp từ Earth Engine.
+        // Không phụ thuộc GCS/GeoServer. Nếu getMapId lỗi, log nhưng KHÔNG fail
+        // snapshot: stats DB đã có, tile chỉ là kênh hiển thị.
+        let geeMapId = null;
+        let geeTileUrl = null;
+        try {
+            const mapInfo = await log.run(
+                'Register GEE map (riskLevel viz → geeTileUrl)',
+                () => getEeMapId(riskLevel, RISK_LEVEL_VIZ),
+                { note: 'ee.data.getMapId — tile URL for /latest response' },
+            );
+            geeMapId   = mapInfo.mapId  || null;
+            geeTileUrl = mapInfo.tileUrl || null;
+        } catch (err) {
+            console.warn(`[FIRE-RISK] getEeMapId failed (non-fatal): ${err.message}`);
+        }
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary:  provinceSummary,
@@ -382,6 +409,9 @@ async function runAnalysis(analysisDate, {
                 p_nesterov_stats:  pNesterovStats,
                 s2_coverage_ratio: provinceSummary.s2CoverageRatio,
                 computed_at:       new Date(),
+                gee_map_id:        geeMapId,
+                gee_tile_url:      geeTileUrl,
+                gee_tile_generated_at: geeTileUrl ? new Date() : null,
             }));
 
         const featureRows = buildFeaturesFromStats(snapshot.id, districtStats);
@@ -460,7 +490,16 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
         );
     }
     const features = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
-    return { snapshot, features, stale: false, computing: false };
+    return {
+        snapshot,
+        features,
+        // Client render tile GEE trực tiếp — được publish khi runAnalysis chạy.
+        geeTileUrl:   snapshot.gee_tile_url || null,
+        geeMapId:     snapshot.gee_map_id || null,
+        riskLevelViz: RISK_LEVEL_VIZ,
+        stale:        false,
+        computing:    false,
+    };
 };
 
 /**
@@ -469,7 +508,12 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
 const getMap = async ({ minRiskLevel = 4 } = {}) => {
     const snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
-        return { type: 'FeatureCollection', features: [], snapshotDate: null };
+        return {
+            type: 'FeatureCollection',
+            features: [],
+            snapshotDate: null,
+            geeTileUrl: null,
+        };
     }
     const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
     const features = rows.map((r) => ({
@@ -487,10 +531,13 @@ const getMap = async ({ minRiskLevel = 4 } = {}) => {
         },
     }));
     return {
-        type:         'FeatureCollection',
+        type:           'FeatureCollection',
         features,
-        snapshotDate: snapshot.analysis_date,
+        snapshotDate:   snapshot.analysis_date,
         geoserverLayer: snapshot.geoserver_layer || null,
+        geeTileUrl:     snapshot.gee_tile_url || null,
+        geeMapId:       snapshot.gee_map_id || null,
+        riskLevelViz:   RISK_LEVEL_VIZ,
     };
 };
 

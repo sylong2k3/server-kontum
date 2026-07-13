@@ -74,19 +74,22 @@ const updateStatus = async (id, status, extra = {}) => {
         }
     };
 
-    addField('error_message',   extra.error_message);
-    addField('computed_at',     extra.computed_at);
-    addField('published_at',    extra.published_at);
-    addField('gee_task_id',     extra.gee_task_id);
-    addField('minio_key',       extra.minio_key);
-    addField('geoserver_layer', extra.geoserver_layer);
-    addField('geoserver_store', extra.geoserver_store);
-    addField('oob_accuracy',    extra.oob_accuracy);
-    addField('test_accuracy',   extra.test_accuracy);
-    addField('test_kappa',      extra.test_kappa);
-    addField('s2_image_count',  extra.s2_image_count);
-    addField('ls_image_count',  extra.ls_image_count);
-    addField('duration_ms',     extra.duration_ms);
+    addField('error_message',        extra.error_message);
+    addField('computed_at',          extra.computed_at);
+    addField('published_at',         extra.published_at);
+    addField('gee_task_id',          extra.gee_task_id);
+    addField('minio_key',            extra.minio_key);
+    addField('geoserver_layer',      extra.geoserver_layer);
+    addField('geoserver_store',      extra.geoserver_store);
+    addField('oob_accuracy',         extra.oob_accuracy);
+    addField('test_accuracy',        extra.test_accuracy);
+    addField('test_kappa',           extra.test_kappa);
+    addField('s2_image_count',       extra.s2_image_count);
+    addField('ls_image_count',       extra.ls_image_count);
+    addField('duration_ms',          extra.duration_ms);
+    addField('gee_map_id',           extra.gee_map_id);
+    addField('gee_tile_url',         extra.gee_tile_url);
+    addField('gee_tile_generated_at',extra.gee_tile_generated_at);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
