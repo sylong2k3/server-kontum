@@ -19,6 +19,7 @@ const MINIO_CONFIG = {
 };
 
 const BUCKET_REMOTE_SENSING = process.env.MINIO_BUCKET_REMOTE_SENSING || 'remote-sensing-images';
+const BUCKET_FIELD_MEASUREMENTS = process.env.MINIO_BUCKET_FIELD_MEASUREMENTS || 'field-measurement-photos';
 const DEFAULT_REGION         = process.env.MINIO_REGION || 'us-east-1';
 
 const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
@@ -56,6 +57,7 @@ const initMinio = async () => {
     try {
         const client = getClient();
         await ensureBucket(client, BUCKET_REMOTE_SENSING);
+        await ensureBucket(client, BUCKET_FIELD_MEASUREMENTS);
         console.info(t('minio_connected', getLang()));
     } catch (err) {
         // Không crash server nếu MinIO chưa sẵn sàng — worker sẽ retry
@@ -82,5 +84,6 @@ module.exports = {
     initMinio,
     healthCheck,
     BUCKET_REMOTE_SENSING,
+    BUCKET_FIELD_MEASUREMENTS,
     MINIO_CONFIG,
 };

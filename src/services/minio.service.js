@@ -2,7 +2,7 @@
 const fs = require('fs');
 const { PassThrough } = require('stream');
 const { pipeline } = require('stream/promises');
-const { getClient, BUCKET_REMOTE_SENSING } = require('../configs/minioClient');
+const { getClient, BUCKET_REMOTE_SENSING, BUCKET_FIELD_MEASUREMENTS } = require('../configs/minioClient');
 
 const PRESIGNED_DOWNLOAD_EXPIRE = Number(process.env.MINIO_PRESIGNED_EXPIRE_SECONDS) || 900;
 const PRESIGNED_UPLOAD_EXPIRE   = Number(process.env.MINIO_UPLOAD_PRESIGNED_EXPIRE_SECONDS) || 3600;
@@ -179,4 +179,5 @@ module.exports = {
     getObjectStream,
     getObjectHead,
     BUCKET_REMOTE_SENSING,
+    BUCKET_FIELD_MEASUREMENTS,
 };

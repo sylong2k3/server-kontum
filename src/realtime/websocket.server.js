@@ -123,8 +123,12 @@ function initWebSocketServer(server, options = {}) {
         }
 
         const authorization = req.headers.authorization || '';
-        const [scheme, token] = authorization.split(' ');
-        if (scheme !== 'Bearer' || !token) {
+        const [scheme, headerToken] = authorization.split(' ');
+        const token = (scheme === 'Bearer' && headerToken)
+            ? headerToken
+            : requestUrl.searchParams.get('token');
+
+        if (!token) {
             socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
             socket.destroy();
             return;

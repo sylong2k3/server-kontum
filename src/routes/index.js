@@ -13,10 +13,10 @@ const weatherRoutes = require('./weather.routes');
 const mapApiRoutes = require('./map-api.routes');
 const statisticsRoutes = require('./statistics.routes');
 const spatialRoutes = require('./spatial.routes');
-const mobileRoutes = require('./mobile.routes');
 const fireRiskRoutes            = require('./fire-risk.routes');
 const satelliteRoutes           = require('./satellite.routes');
 const forestClassificationRoutes = require('./forest-classification.routes');
+const fieldMeasurementRoutes = require('./field-measurement.routes');
 
 const router = Router();
 
@@ -48,10 +48,6 @@ router.use('/remote-sensing', remoteSensingRoutes);
 router.use('/stats', statisticsRoutes);
 router.use('/spatial', spatialRoutes);
 
-// ── MobileGIS — field-updates & offline sync (EP-10) ─────────────────────────
-router.use('/mobile', mobileRoutes.router);
-router.use('/admin/field-updates', mobileRoutes.adminRouter);
-
 // ── Cảnh báo cháy rừng / Fire Risk (EP-06) ───────────────────────────────────
 router.use('/fire-risk', fireRiskRoutes);
 
@@ -60,5 +56,9 @@ router.use('/satellite', satelliteRoutes);
 
 // ── Phân loại lớp phủ rừng / Forest Classification ───────────────────────────
 router.use('/forest-classification', forestClassificationRoutes);
+
+// ── Đo đạc thực địa / Field Measurements (docs/modules/17) ───────────────────
+router.use('/field-measurements', fieldMeasurementRoutes.measurementRouter);
+router.use('/monitored-areas', fieldMeasurementRoutes.areaRouter);
 
 module.exports = router;
