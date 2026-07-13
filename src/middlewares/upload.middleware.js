@@ -235,6 +235,27 @@ const uploadPdfMapFields = createFieldsUploader({ file: 'pdf_map', thumbnail: 'i
 const uploadMedia = createUploader(['image', 'video']);
 const uploadAny = createUploader(['image', 'video', 'document']);
 
+// uploadFieldPhotos — memory storage (buffer đi thẳng lên MinIO, không ghi đĩa cục bộ).
+// Dùng cho ảnh hiện trường của phiên đo đạc (field-measurement).
+const uploadFieldPhotos = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: FILE_CATEGORIES.image.maxSize,
+        files: Number(process.env.FIELD_MEASUREMENT_MAX_PHOTOS || 10),
+    },
+    fileFilter: (req, file, cb) => {
+        const cfg = FILE_CATEGORIES.image;
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (cfg.mimeTypes.includes(file.mimetype) && cfg.extensions.includes(ext)) {
+            return cb(null, true);
+        }
+        return cb(new Api400Error(
+            t('upload_invalid_type', req.lang),
+            [`INVALID_FILE_TYPE: ${file.originalname} (${file.mimetype})`],
+        ), false);
+    },
+});
+
 module.exports = {
     uploadImage,
     uploadVideo,
@@ -242,6 +263,7 @@ module.exports = {
     uploadPdfMap,
     uploadPdfMapFields,
     uploadMedia,
+    uploadFieldPhotos,
     uploadAny,
     handleUploadError,
     createUploader,
