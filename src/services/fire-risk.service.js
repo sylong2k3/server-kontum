@@ -34,6 +34,7 @@ const {
 } = require('../utils/gee-satellite.util');
 const { runFireRiskAnalysis } = require('./fire-risk.pipeline');
 const { pollGeeTask, publishRasterToMinio } = require('../utils/gee-export.helper');
+const { makeStageLogger } = require('../utils/stage-logger.util');
 const { BusinessLogicError } = require('../core/error.response');
 const { StatusCodes } = require('../core/http-status-code');
 
@@ -288,45 +289,52 @@ async function runAnalysis(analysisDate, {
     enableRf          = cfg.ENABLE_RF,
     inputFireAssetId  = cfg.INPUT_FIRE_ASSET_ID,
 } = {}) {
-    await initializeEarthEngine();
+    // Logger A → Z: mọi bước dựng graph + mọi evaluate() đều được đánh dấu
+    // để khi time-out xảy ra, ta biết chính xác bước nào bị nghẽn.
+    const log = makeStageLogger('FIRE-RISK', { correlationId: analysisDate });
 
-    // Upsert snapshot → status computing.
-    let snapshot = await repo.upsertSnapshot({
-        analysis_date: analysisDate,
-        status: 'computing',
-        model_params: {
-            version:             'v8.1',
-            feature_window_days: cfg.FEATURE_WINDOW_DAYS,
-            s2_fallback_days:    cfg.S2_FALLBACK_DAYS,
-            lst_fallback_days:   cfg.LST_FALLBACK_DAYS,
-            nesterov_lookback:   cfg.NESTEROV_LOOKBACK_DAYS,
-            nesterov_p_breaks:   cfg.NESTEROV_P_BREAKS,
-            risk_score_breaks:   cfg.RISK_SCORE_BREAKS,
-            rf_enabled:          enableRf,
-            rf_trees:            cfg.RF_TREES,
-            rf_bag_fraction:     cfg.RF_BAG_FRACTION,
-            train_months:        cfg.TRAIN_MONTHS,
-            train_scale_m:       cfg.TRAIN_SCALE_M,
-            train_samples:       cfg.TRAIN_SAMPLES_PER_CLASS,
-            negative_eligible_mode: cfg.NEGATIVE_ELIGIBLE_MODE,
-            input_fire_asset_id: inputFireAssetId || null,
-            blend_rule: inputFireAssetId
-                ? '50% input + 30% dataset + 20% threshold (with INPUT); 60% dataset + 40% threshold (without INPUT)'
-                : '60% dataset + 40% threshold',
-            export_scale_m:      cfg.EXPORT_SCALE_M,
-            official_thresholds_verified: false,
-        },
-    });
+    await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
+
+    let snapshot = await log.run('Upsert snapshot → status=computing', () =>
+        repo.upsertSnapshot({
+            analysis_date: analysisDate,
+            status: 'computing',
+            model_params: {
+                version:             'v8.1',
+                feature_window_days: cfg.FEATURE_WINDOW_DAYS,
+                s2_fallback_days:    cfg.S2_FALLBACK_DAYS,
+                lst_fallback_days:   cfg.LST_FALLBACK_DAYS,
+                nesterov_lookback:   cfg.NESTEROV_LOOKBACK_DAYS,
+                nesterov_p_breaks:   cfg.NESTEROV_P_BREAKS,
+                risk_score_breaks:   cfg.RISK_SCORE_BREAKS,
+                rf_enabled:          enableRf,
+                rf_trees:            cfg.RF_TREES,
+                rf_bag_fraction:     cfg.RF_BAG_FRACTION,
+                train_months:        cfg.TRAIN_MONTHS,
+                train_scale_m:       cfg.TRAIN_SCALE_M,
+                train_samples:       cfg.TRAIN_SAMPLES_PER_CLASS,
+                negative_eligible_mode: cfg.NEGATIVE_ELIGIBLE_MODE,
+                input_fire_asset_id: inputFireAssetId || null,
+                blend_rule: inputFireAssetId
+                    ? '50% input + 30% dataset + 20% threshold (with INPUT); 60% dataset + 40% threshold (without INPUT)'
+                    : '60% dataset + 40% threshold',
+                export_scale_m:      cfg.EXPORT_SCALE_M,
+                official_thresholds_verified: false,
+            },
+        }));
 
     try {
-        const region    = getKonTumRegion();
-        const districts = getKonTumDistricts();
+        const region    = await log.run('Load Kon Tum region polygon',
+            () => Promise.resolve(getKonTumRegion()));
+        const districts = await log.run('Load Kon Tum districts collection',
+            () => Promise.resolve(getKonTumDistricts()));
 
-        // Run the shared v8.1 pipeline (predictors → RF + threshold →
-        // blend → riskLevel → confidence / priority layers).
-        const analysis = runFireRiskAnalysis(region, analysisDate, {
+        // runFireRiskAnalysis đã được instrument sẵn — các sub-stage của
+        // pipeline sẽ chèn tiếp vào cùng bộ logger A→Z.
+        const analysis = await runFireRiskAnalysis(region, analysisDate, {
             enableRf,
             inputFireAssetId,
+            logger: log,
         });
 
         const {
@@ -339,35 +347,62 @@ async function runAnalysis(analysisDate, {
         const pNesterov    = currentPredictors.select('NesterovP').rename('NesterovP');
         const s2Observed45 = currentPredictors.select('S2_Observed45').rename('S2_Observed45');
 
-        // Province + district + P Nesterov stats (parallel evaluate calls).
-        const [districtStats, provinceSummary, pNesterovStats] = await Promise.all([
-            computeDistrictStats(riskLevel, pNesterov, s2Observed45,
-                blendCase, modelConfidenceClass, districts, region),
-            computeProvinceSummary(riskLevel, pNesterov, s2Observed45,
+        // Ba evaluate() heavy được TÁCH tuần tự thay vì Promise.all — khi một
+        // trong ba bị EE user-memory-limit, chạy song song sẽ tiếp tay cho nhau
+        // và ta không biết bước nào thực sự nghẽn. Tuần tự → log rõ ràng.
+        const provinceSummary = await log.run(
+            'EVALUATE province summary (reduceRegion freq-histogram × 5 bands)',
+            () => computeProvinceSummary(riskLevel, pNesterov, s2Observed45,
                 blendCase, modelConfidenceClass, dataSourceClass, region),
-            computePNesterovStats(pNesterov, region),
-        ]);
+            { note: 'scale=500m tileScale=8 maxPixels=1e10' },
+        );
+        log.mark('Province summary',
+            `totalForestHa=${provinceSummary.totalForestHa} avgRisk=${provinceSummary.avgRiskLevel} pMean=${provinceSummary.pNesterovProvMean}`);
 
-        snapshot = await repo.updateStatus(snapshot.id, 'completed', {
-            province_summary:  provinceSummary,
-            district_stats:    districtStats,
-            p_nesterov_stats:  pNesterovStats,
-            s2_coverage_ratio: provinceSummary.s2CoverageRatio,
-            computed_at:       new Date(),
-        });
+        const districtStats = await log.run(
+            'EVALUATE district stats (reduceRegions freq-histogram + mean × 5 bands)',
+            () => computeDistrictStats(riskLevel, pNesterov, s2Observed45,
+                blendCase, modelConfidenceClass, districts, region),
+            { note: 'scale=500m tileScale=8' },
+        );
+        log.mark('District rows', `${districtStats.length}`);
+
+        const pNesterovStats = await log.run(
+            'EVALUATE P Nesterov percentile stats (province-level)',
+            () => computePNesterovStats(pNesterov, region),
+            { note: 'scale=500m tileScale=4 maxPixels=1e10' },
+        );
+        log.mark('P Nesterov',
+            `mean=${pNesterovStats.mean} p90=${pNesterovStats.p90} max=${pNesterovStats.max}`);
+
+        snapshot = await log.run('Update snapshot → status=completed', () =>
+            repo.updateStatus(snapshot.id, 'completed', {
+                province_summary:  provinceSummary,
+                district_stats:    districtStats,
+                p_nesterov_stats:  pNesterovStats,
+                s2_coverage_ratio: provinceSummary.s2CoverageRatio,
+                computed_at:       new Date(),
+            }));
 
         const featureRows = buildFeaturesFromStats(snapshot.id, districtStats);
-        await repo.replaceFeatures(snapshot.id, featureRows);
+        await log.run(`Persist ${featureRows.length} feature rows`,
+            () => repo.replaceFeatures(snapshot.id, featureRows));
 
         if (submitExport) {
-            const taskName = await submitGeeExportTask(riskLevel, analysisDate);
+            const taskName = await log.run(
+                'Submit GEE raster export task (async → GCS)',
+                () => submitGeeExportTask(riskLevel, analysisDate),
+            );
             snapshot = await repo.updateStatus(snapshot.id, 'exporting', {
                 gee_task_id: taskName,
             });
         }
 
+        log.summary();
         return snapshot;
     } catch (err) {
+        log.summary();
+        console.error(`[FIRE-RISK] runAnalysis ${analysisDate} failed:`, err.message);
         await repo.updateStatus(snapshot.id, 'failed', {
             error_message: err.message,
         });

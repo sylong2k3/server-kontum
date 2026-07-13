@@ -336,19 +336,23 @@ async function buildClassified(params, region) {
         groundTruthAssetId: params.groundTruthAssetId,
         gtBufferM:          params.gtBufferM,
         minFieldTest:       params.minFieldTest,
+        // Skip blocking eeEval calls for OOB/test accuracy — these force the full
+        // RF training to materialise synchronously and take 5+ minutes for Kon Tum.
+        // Tiles are still rendered correctly; stats are omitted for on-demand requests.
+        skipStats: true,
     });
-    dbgTime('CLASSIFIED', `RF trained — OOB=${oobPct?.toFixed(2)}% test=${testAccuracyPct != null ? testAccuracyPct.toFixed(2) + '%' : 'n/a'}`, t0);
+    dbgTime('CLASSIFIED', `RF graph built (stats skipped)`, t0);
 
     const palette   = fcCfg.CLASS_PALETTE;
     const nClasses  = fcCfg.CLASS_NAMES.length;
     const vizParams = { bands: ['classification'], min: 0, max: nClasses - 1, palette };
 
-    dbg('CLASSIFIED', `computing area stats at ${fcCfg.AREA_STATS_SCALE_M}m scale`);
-    const areaStats = await computeAreaStats(eeImage, regionGeom, nClasses, fcCfg.AREA_STATS_SCALE_M);
+    // Skip computeAreaStats (reduceRegion over Kon Tum at 60m would take > 5 min).
+    // Return class list without areas so the cache and client both know the shape.
     const areaByClass = CLASSIFIED_CLASSES.map((c) => ({
-        classId: c.id, name: c.name, color: c.color, areaHa: areaStats[c.id] || 0,
+        classId: c.id, name: c.name, color: c.color, areaHa: null,
     }));
-    dbgTime('CLASSIFIED', `area by class: ${areaByClass.map(c => `${c.name}=${c.areaHa}ha`).join(', ')}`, t0);
+    dbgTime('CLASSIFIED', `vizParams built`, t0);
 
     return {
         eeImage,
@@ -410,7 +414,9 @@ async function buildFireRisk(params, region) {
     // The fire-risk pipeline expects an ee.FeatureCollection for `region.geometry()` calls.
     const regionFC = ee.FeatureCollection([ee.Feature(region)]);
 
-    const analysis = runFireRiskAnalysis(regionFC, analysisDate, {
+    // runFireRiskAnalysis is now async (each build step is stage-logged);
+    // the returned graph is still lazy — evaluate() only fires below.
+    const analysis = await runFireRiskAnalysis(regionFC, analysisDate, {
         enableRf,
         inputFireAssetId: params.inputFireAssetId || '',
     });

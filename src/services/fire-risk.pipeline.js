@@ -22,6 +22,7 @@
 
 const cfg = require('../configs/fire-risk');
 const { ee } = require('../configs/gge');
+const { makeStageLogger } = require('../utils/stage-logger.util');
 
 // ── Small utilities ──────────────────────────────────────────────────────────
 
@@ -628,75 +629,126 @@ function buildRiskProducts({
  * Returns predictors, scores, riskLevel and derived layers so callers can
  * publish tiles, run reduceRegions, or export GeoTIFF.
  *
+ * NOTE: async so mỗi bước dựng graph được mark qua stage logger (A → Z).
+ * Không gọi evaluate() ở đây — mọi ee.Image trả về vẫn là lazy graph.
+ *
  * @param {ee.FeatureCollection|ee.Geometry} region
  * @param {string} analysisDate                              'YYYY-MM-DD'
  * @param {object} [opts]
  * @param {boolean} [opts.enableRf=cfg.ENABLE_RF]            train + apply RF
  * @param {string}  [opts.inputFireAssetId=cfg.INPUT_FIRE_ASSET_ID]
+ * @param {object}  [opts.logger]                            stage-logger reuse
  */
 function runFireRiskAnalysis(region, analysisDate, opts = {}) {
     const enableRf         = opts.enableRf ?? cfg.ENABLE_RF;
     const inputFireAssetId = opts.inputFireAssetId ?? cfg.INPUT_FIRE_ASSET_ID;
 
-    const terrain    = getTerrain(region);
-    const fuel       = getFuelInfo(region);
-    const forestMask = fuel.forestMask;
+    // Logger có thể được caller cung cấp để hợp nhất luồng A→Z của service +
+    // pipeline. Nếu không, dựng logger cục bộ để pipeline vẫn có dấu vết.
+    const log = opts.logger || makeStageLogger('FIRE-RISK-PL', { correlationId: analysisDate });
 
-    const currentPredictors = getPredictorImage(region, analysisDate, true,
-        { terrain, fuel });
+    log.mark('Pipeline config',
+        `analysisDate=${analysisDate} enableRf=${enableRf} inputAsset=${inputFireAssetId || '(none)'}`);
 
-    const fixedThresholdScore = computeFixedThresholdScore(currentPredictors, fuel.fuelK);
+    // Toàn bộ khối "build" là graph EE lazy — timing chỉ đo dựng graph, không đo compute.
+    const terrain = log.run('Build terrain bands (DEM + slope + aspect exposure) [LAZY]',
+        () => Promise.resolve(getTerrain(region)));
+    const fuel    = log.run('Build fuel info + forest mask [LAZY]',
+        () => Promise.resolve(getFuelInfo(region)));
+    // Đồng bộ ngay ở đây vì bên dưới cần forestMask/fuelK.
+    // Await chỉ chờ log — chưa gọi evaluate().
+    return (async () => {
+        const terrainVal = await terrain;
+        const fuelVal    = await fuel;
+        const forestMask = fuelVal.forestMask;
 
-    let datasetModelScore;
-    if (enableRf) {
-        const trainingFC = buildTrainingCollection(region, forestMask);
-        datasetModelScore = classifyRfProbability(currentPredictors, trainingFC);
-    } else {
-        datasetModelScore = fixedThresholdScore.multiply(0.85).rename('DatasetModelScore');
-    }
+        const currentPredictors = await log.run(
+            'Build current predictor image (S2 30d + LST 30d + ERA5 + terrain + fuel + P Nesterov) [LAZY]',
+            () => Promise.resolve(getPredictorImage(region, analysisDate, true,
+                { terrain: terrainVal, fuel: fuelVal })),
+            { note: `${PREDICTOR_BANDS.length} bands, fallback S2/LST 180d enabled` },
+        );
 
-    // FIRMS recent hotspot layer (7 days by default, forest-masked).
-    const analysisEnd = ee.Date(analysisDate);
-    const firmsStart  = analysisEnd.advance(-cfg.FIRMS_RECENT_DAYS, 'day');
-    const firmsRecentHotspot = getFirmsHotspot(region, firmsStart, analysisEnd)
-        .and(forestMask).selfMask().rename('FIRMS_RecentHotspot');
-    const firmsInfluence = firmsRecentHotspot.unmask(0)
-        .focalMax(cfg.FIRMS_BUFFER_M, 'circle', 'meters')
-        .gt(0).and(forestMask).rename('FIRMS_Influence');
+        const fixedThresholdScore = await log.run(
+            'Build fixed threshold score (P + veg + terrain + spread weather) [LAZY]',
+            () => Promise.resolve(computeFixedThresholdScore(currentPredictors, fuelVal.fuelK)),
+        );
 
-    const inputImages = buildInputImages(region, forestMask, inputFireAssetId);
+        let datasetModelScore;
+        if (enableRf) {
+            const trainingFC = await log.run(
+                `Build RF training collection over ${cfg.TRAIN_MONTHS.length} months [LAZY]`,
+                () => Promise.resolve(buildTrainingCollection(region, forestMask)),
+                {
+                    note: `MCD64A1 + FireCCI51 + FIRMS; ${cfg.TRAIN_SAMPLES_PER_CLASS}/class/month, scale=${cfg.TRAIN_SCALE_M}m tileScale=${cfg.TRAIN_HEAVY_TILE_SCALE}`,
+                },
+            );
+            datasetModelScore = await log.run(
+                'Classify RF probability (train + apply) [LAZY — deferred until evaluate()]',
+                () => Promise.resolve(classifyRfProbability(currentPredictors, trainingFC)),
+                { note: `${cfg.RF_TREES} trees, bag=${cfg.RF_BAG_FRACTION}` },
+            );
+        } else {
+            datasetModelScore = await log.run(
+                'RF disabled — DatasetModelScore = 0.85 × ThresholdScore [LAZY]',
+                () => Promise.resolve(fixedThresholdScore.multiply(0.85).rename('DatasetModelScore')),
+            );
+        }
 
-    const risk = buildRiskProducts({
-        currentPredictors,
-        forestMask,
-        fixedThresholdScore,
-        datasetModelScore,
-        inputImages,
-        firmsInfluence,
-        rfEnabled: enableRf,
-        region,
-    });
+        const [firmsRecentHotspot, firmsInfluence] = await log.run(
+            `Build FIRMS recent hotspot + focal buffer (${cfg.FIRMS_RECENT_DAYS}d, ${cfg.FIRMS_BUFFER_M}m) [LAZY]`,
+            () => Promise.resolve((() => {
+                const analysisEnd = ee.Date(analysisDate);
+                const firmsStart  = analysisEnd.advance(-cfg.FIRMS_RECENT_DAYS, 'day');
+                const hot = getFirmsHotspot(region, firmsStart, analysisEnd)
+                    .and(forestMask).selfMask().rename('FIRMS_RecentHotspot');
+                const infl = hot.unmask(0)
+                    .focalMax(cfg.FIRMS_BUFFER_M, 'circle', 'meters')
+                    .gt(0).and(forestMask).rename('FIRMS_Influence');
+                return [hot, infl];
+            })()),
+        );
 
-    return {
-        // Predictors / diagnostics
-        currentPredictors,
-        fuelClass:            fuel.fuelClass,
-        fuelK:                fuel.fuelK,
-        forestMask,
-        // Component scores
-        fixedThresholdScore,
-        datasetModelScore,
-        // Fire evidence layers
-        firmsRecentHotspot,
-        firmsInfluence,
-        inputImages,
-        // Final products
-        ...risk,
-        // Metadata for callers
-        rfEnabled:        enableRf,
-        inputFireAssetId: inputFireAssetId || null,
-        fuelSource:       fuel.source,
-    };
+        const inputImages = await log.run(
+            'Build input asset overlay (buffered points → score/coverage/confirmed) [LAZY]',
+            () => Promise.resolve(buildInputImages(region, forestMask, inputFireAssetId)),
+        );
+
+        const risk = await log.run(
+            'Build risk products (blend + riskLevel + confidence + priority) [LAZY]',
+            () => Promise.resolve(buildRiskProducts({
+                currentPredictors,
+                forestMask,
+                fixedThresholdScore,
+                datasetModelScore,
+                inputImages,
+                firmsInfluence,
+                rfEnabled: enableRf,
+                region,
+            })),
+        );
+
+        return {
+            // Predictors / diagnostics
+            currentPredictors,
+            fuelClass:            fuelVal.fuelClass,
+            fuelK:                fuelVal.fuelK,
+            forestMask,
+            // Component scores
+            fixedThresholdScore,
+            datasetModelScore,
+            // Fire evidence layers
+            firmsRecentHotspot,
+            firmsInfluence,
+            inputImages,
+            // Final products
+            ...risk,
+            // Metadata for callers
+            rfEnabled:        enableRf,
+            inputFireAssetId: inputFireAssetId || null,
+            fuelSource:       fuelVal.source,
+        };
+    })();
 }
 
 module.exports = {

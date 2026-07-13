@@ -25,6 +25,7 @@ const {
     addIndices,
     getDemBands,
 } = require('../utils/gee-satellite.util');
+const { makeStageLogger } = require('../utils/stage-logger.util');
 
 // ── Priority mosaic ───────────────────────────────────────────────────────────
 
@@ -307,10 +308,19 @@ function buildExclusionMask(groundTruthFC, bufferM, region) {
  * @param {number} [opts.minFieldTest=10]        Min input test samples/class.
  */
 async function runRfClassification(year, region, regionGeom, opts = {}) {
-    const { seed, groundTruthAssetId = '', gtBufferM = 60, minFieldTest = 10 } = opts;
+    const {
+        seed, groundTruthAssetId = '', gtBufferM = 60, minFieldTest = 10,
+        // Skip blocking eeEval calls (OOB accuracy, test metrics).
+        // Use for on-demand tile generation where metadata is not critical.
+        skipStats = false,
+        logger,
+    } = opts;
     const rfSeed  = seed ?? year;
     const hasGT   = Boolean(groundTruthAssetId);
     const total   = cfg.SAMPLES_PER_CLASS;
+
+    // Local logger nếu caller không truyền — mọi bước sau đây đều được đánh dấu.
+    const log = logger || makeStageLogger('FOREST-CLS-RF', { correlationId: year });
 
     // ── Quotas per source ────────────────────────────────────────────────
     const inputQuota     = hasGT ? Math.round(total * 0.5) : 0;
@@ -318,11 +328,25 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     const thresholdQuota = total - inputQuota - datasetQuota;
     const inputTestQuota = Math.max(minFieldTest, Math.round(total * 0.2));
 
-    const { featureImage, base, dryIdx, wetIdx, demImage } =
-        buildFeatureImage(year, region);
+    log.mark('RF quotas',
+        `hasGT=${hasGT} input=${inputQuota} dataset=${datasetQuota} threshold=${thresholdQuota} inputTest=${inputTestQuota}`);
 
-    const thresholdLabel = buildThresholdLabel(base, dryIdx, wetIdx, demImage, region);
-    const datasetLabel   = buildDatasetLabel(featureImage, thresholdLabel, year, region);
+    // Toàn bộ các bước "build" chỉ dựng graph GEE (lazy) — nhanh, không time-out.
+    // Chỉ khi gọi eeEval() mới đẩy đồ thị lên Earth Engine để tính thật.
+    const { featureImage, base, dryIdx, wetIdx, demImage } = await log.run(
+        'Build feature image (base+dry+wet composites + indices + DEM) [LAZY]',
+        () => Promise.resolve(buildFeatureImage(year, region)),
+        { note: 'Landsat 5/7/8/9 + S2, 3 composites, 8 indices ×3, elev/slope/aspect' },
+    );
+
+    const thresholdLabel = await log.run(
+        'Build threshold pseudo-label (11 masks + priority mosaic) [LAZY]',
+        () => Promise.resolve(buildThresholdLabel(base, dryIdx, wetIdx, demImage, region)),
+    );
+    const datasetLabel = await log.run(
+        'Build dataset pseudo-label (DynamicWorld + ESA WorldCover + JRC GSW) [LAZY]',
+        () => Promise.resolve(buildDatasetLabel(featureImage, thresholdLabel, year, region)),
+    );
 
     // ── Ground-truth split + exclusion mask ──────────────────────────────
     let inputTrainSamples = ee.FeatureCollection([]);
@@ -330,72 +354,112 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     let exclusionMask     = null;
 
     if (hasGT) {
-        const gtFC = ee.FeatureCollection(groundTruthAssetId)
-            .filter(ee.Filter.notNull(['class']));
-        const gtWithSplit = gtFC.randomColumn('split_random', rfSeed + 101);
-        const gtTrainFC   = gtWithSplit.filter(ee.Filter.lt('split_random', 0.7));
-        const gtTestFC    = gtWithSplit.filter(ee.Filter.gte('split_random', 0.7));
+        await log.run(
+            `Build ground-truth pool (asset=${groundTruthAssetId}) [LAZY]`,
+            async () => {
+                const gtFC = ee.FeatureCollection(groundTruthAssetId)
+                    .filter(ee.Filter.notNull(['class']));
+                const gtWithSplit = gtFC.randomColumn('split_random', rfSeed + 101);
+                const gtTrainFC   = gtWithSplit.filter(ee.Filter.lt('split_random', 0.7));
+                const gtTestFC    = gtWithSplit.filter(ee.Filter.gte('split_random', 0.7));
 
-        exclusionMask     = buildExclusionMask(gtFC, gtBufferM, region);
-        inputTrainSamples = sampleGroundTruth(featureImage, gtTrainFC, inputQuota,
-            regionGeom, rfSeed + 501);
-        inputTestSamples  = sampleGroundTruth(featureImage, gtTestFC, inputTestQuota,
-            regionGeom, rfSeed + 502);
+                exclusionMask     = buildExclusionMask(gtFC, gtBufferM, region);
+                inputTrainSamples = sampleGroundTruth(featureImage, gtTrainFC, inputQuota,
+                    regionGeom, rfSeed + 501);
+                inputTestSamples  = sampleGroundTruth(featureImage, gtTestFC, inputTestQuota,
+                    regionGeom, rfSeed + 502);
+            },
+        );
     }
 
     // ── Dataset + Threshold pseudo-label samples (with exclusion) ────────
-    const thresholdSamples = sampleFromLabel(featureImage, thresholdLabel,
-        thresholdQuota, regionGeom, rfSeed * 1000 + 1, exclusionMask);
-    const datasetSamples   = sampleFromLabel(featureImage, datasetLabel,
-        datasetQuota, regionGeom, rfSeed * 2000 + 1, exclusionMask);
+    const thresholdSamples = await log.run(
+        'Sample threshold pool via stratifiedSample [LAZY]',
+        () => Promise.resolve(sampleFromLabel(featureImage, thresholdLabel,
+            thresholdQuota, regionGeom, rfSeed * 1000 + 1, exclusionMask)),
+        { note: `numPoints=${thresholdQuota} scale=${cfg.SAMPLE_SCALE_M}m tileScale=16` },
+    );
+    const datasetSamples = await log.run(
+        'Sample dataset pool via stratifiedSample [LAZY]',
+        () => Promise.resolve(sampleFromLabel(featureImage, datasetLabel,
+            datasetQuota, regionGeom, rfSeed * 2000 + 1, exclusionMask)),
+        { note: `numPoints=${datasetQuota} scale=${cfg.SAMPLE_SCALE_M}m tileScale=16` },
+    );
 
     const trainSet = inputTrainSamples
         .merge(thresholdSamples)
         .merge(datasetSamples);
 
-    const classifier = ee.Classifier.smileRandomForest({
-        numberOfTrees:     cfg.RF_TREES,
-        variablesPerSplit: cfg.RF_VARIABLES_PER_SPLIT,
-        minLeafPopulation: cfg.RF_MIN_LEAF_POPULATION,
-        bagFraction:       cfg.RF_BAG_FRACTION,
-        seed:              rfSeed,
-    }).train({
-        features:        trainSet,
-        classProperty:   'class',
-        inputProperties: featureImage.bandNames(),
-    });
+    const classifier = await log.run(
+        'Assemble RF classifier graph (train + explain deferred) [LAZY]',
+        () => Promise.resolve(
+            ee.Classifier.smileRandomForest({
+                numberOfTrees:     cfg.RF_TREES,
+                variablesPerSplit: cfg.RF_VARIABLES_PER_SPLIT,
+                minLeafPopulation: cfg.RF_MIN_LEAF_POPULATION,
+                bagFraction:       cfg.RF_BAG_FRACTION,
+                seed:              rfSeed,
+            }).train({
+                features:        trainSet,
+                classProperty:   'class',
+                inputProperties: featureImage.bandNames(),
+            }),
+        ),
+        { note: `trees=${cfg.RF_TREES} bag=${cfg.RF_BAG_FRACTION}` },
+    );
 
-    const rfInfo      = ee.Dictionary(classifier.explain());
-    const oobAccuracy = ee.Number(1)
-        .subtract(ee.Number(rfInfo.get('outOfBagErrorEstimate')))
-        .multiply(100);
-    const oobPct = await eeEval(oobAccuracy);
+    // Đây là điểm evaluate() ĐẦU TIÊN, kéo toàn bộ đồ thị (composite → indices
+    // → threshold → dataset → sampling → RF train) chạy trên EE.
+    // Nếu time-out xảy ra ở stage này → điểm nghẽn nằm ở sampling/training.
+    let oobPct = null;
+    if (!skipStats) {
+        oobPct = await log.run(
+            'EVALUATE OOB accuracy (forces sampling + RF training on EE)',
+            async () => {
+                const rfInfo      = ee.Dictionary(classifier.explain());
+                const oobAccuracy = ee.Number(1)
+                    .subtract(ee.Number(rfInfo.get('outOfBagErrorEstimate')))
+                    .multiply(100);
+                return eeEval(oobAccuracy);
+            },
+            { note: 'blocking evaluate() — first heavy call' },
+        );
+        log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
+    }
 
     // ── Independent test accuracy from ground-truth holdout ──────────────
     let testAccuracyPct = null;
     let testKappa       = null;
-    if (hasGT) {
-        const classOrder = ee.List.sequence(0, cfg.CLASS_NAMES.length - 1);
-        const validated  = inputTestSamples.classify(classifier);
-        const matrix     = validated.errorMatrix('class', 'classification', classOrder);
-        const testSize   = await eeEval(inputTestSamples.size());
-        if (testSize > 0) {
-            testAccuracyPct = await eeEval(ee.Number(matrix.accuracy()).multiply(100));
-            testKappa       = await eeEval(matrix.kappa());
-        }
+    if (!skipStats && hasGT) {
+        await log.run(
+            'EVALUATE independent test accuracy + kappa (ground-truth holdout)',
+            async () => {
+                const classOrder = ee.List.sequence(0, cfg.CLASS_NAMES.length - 1);
+                const validated  = inputTestSamples.classify(classifier);
+                const matrix     = validated.errorMatrix('class', 'classification', classOrder);
+                const testSize   = await eeEval(inputTestSamples.size());
+                if (testSize > 0) {
+                    testAccuracyPct = await eeEval(ee.Number(matrix.accuracy()).multiply(100));
+                    testKappa       = await eeEval(matrix.kappa());
+                }
+            },
+        );
     }
 
     // JRC stable-water post-correction (§14.13 in the GEE script).
-    const jrc       = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').clip(region);
-    const jrcStable = jrc.select('occurrence').unmask(0).gte(70)
-        .and(jrc.select('recurrence').unmask(0).gte(70));
-    const mndwiBase = base.normalizedDifference(['green', 'swir1']);
-
-    const classifiedRaw = featureImage.classify(classifier).rename('classification')
-        .toByte().clip(region);
-    const classified    = classifiedRaw
-        .where(jrcStable.and(mndwiBase.gte(-0.05)), 9)
-        .rename('classification').toByte().clip(region);
+    const classified = await log.run(
+        'Classify + JRC stable-water correction [LAZY]',
+        () => Promise.resolve((() => {
+            const jrc       = ee.Image('JRC/GSW1_4/GlobalSurfaceWater').clip(region);
+            const jrcStable = jrc.select('occurrence').unmask(0).gte(70)
+                .and(jrc.select('recurrence').unmask(0).gte(70));
+            const mndwiBase = base.normalizedDifference(['green', 'swir1']);
+            const raw       = featureImage.classify(classifier).rename('classification')
+                .toByte().clip(region);
+            return raw.where(jrcStable.and(mndwiBase.gte(-0.05)), 9)
+                .rename('classification').toByte().clip(region);
+        })()),
+    );
 
     return {
         classified,

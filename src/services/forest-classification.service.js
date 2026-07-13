@@ -29,6 +29,7 @@ const {
     getKonTumDistricts,
 } = require('../utils/gee-satellite.util');
 const { runRfClassification } = require('./forest-classification.pipeline');
+const { makeStageLogger } = require('../utils/stage-logger.util');
 const repo = require('../repositories/forest-classification.repository');
 const { BusinessLogicError } = require('../core/error.response');
 const { StatusCodes } = require('../core/http-status-code');
@@ -134,37 +135,46 @@ async function runAnalysis(year, month, {
     gtBufferM          = parseInt(process.env.FC_GT_BUFFER_M, 10) || 60,
     minFieldTest       = parseInt(process.env.FC_MIN_FIELD_TEST, 10) || 10,
 } = {}) {
-    await initializeEarthEngine();
+    // Logger đánh dấu A → Z: khi bị time-out, log này cho biết đứng lại ở bước nào.
+    const log = makeStageLogger('FOREST-CLS', {
+        correlationId: `${year}-${String(month).padStart(2, '0')}`,
+    });
     const startMs = Date.now();
     const hasGT   = Boolean(groundTruthAssetId);
 
-    let snapshot = await repo.upsertSnapshot({
-        year, month,
-        status: 'computing',
-        trigger,
-        requested_by: requestedBy,
-        model_params: {
-            version:        'v3',
-            rf_trees:       cfg.RF_TREES,
-            rf_vars_split:  cfg.RF_VARIABLES_PER_SPLIT,
-            bag_fraction:   cfg.RF_BAG_FRACTION,
-            samples:        cfg.SAMPLES_PER_CLASS,
-            sample_scale_m: cfg.SAMPLE_SCALE_M,
-            area_scale_m:   cfg.AREA_STATS_SCALE_M,
-            ground_truth_asset_id: hasGT ? groundTruthAssetId : null,
-            gt_buffer_m:    hasGT ? gtBufferM : null,
-            blend_rule:     hasGT
-                ? 'Input 50% + Dataset 30% + Threshold 20%'
-                : 'Dataset 60% + Threshold 40%',
-        },
-    });
+    await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
+
+    let snapshot = await log.run('Upsert snapshot → status=computing', () =>
+        repo.upsertSnapshot({
+            year, month,
+            status: 'computing',
+            trigger,
+            requested_by: requestedBy,
+            model_params: {
+                version:        'v3',
+                rf_trees:       cfg.RF_TREES,
+                rf_vars_split:  cfg.RF_VARIABLES_PER_SPLIT,
+                bag_fraction:   cfg.RF_BAG_FRACTION,
+                samples:        cfg.SAMPLES_PER_CLASS,
+                sample_scale_m: cfg.SAMPLE_SCALE_M,
+                area_scale_m:   cfg.AREA_STATS_SCALE_M,
+                ground_truth_asset_id: hasGT ? groundTruthAssetId : null,
+                gt_buffer_m:    hasGT ? gtBufferM : null,
+                blend_rule:     hasGT
+                    ? 'Input 50% + Dataset 30% + Threshold 20%'
+                    : 'Dataset 60% + Threshold 40%',
+            },
+        }));
 
     try {
-        const region    = getKonTumRegion();
-        const districts = getKonTumDistricts();
+        const region    = await log.run('Load Kon Tum region polygon',
+            () => Promise.resolve(getKonTumRegion()));
+        const districts = await log.run('Load Kon Tum districts collection',
+            () => Promise.resolve(getKonTumDistricts()));
 
-        // Steps 1-7: build features, pseudo-labels, sample, train RF, water correction.
-        // Full pipeline lives in forest-classification.pipeline.js.
+        // Steps 1-7: full RF pipeline (feature image, pseudo-labels, sampling,
+        // training, JRC water correction). Sub-stage logs come from the pipeline
+        // — same logger is forwarded so all A→Z markers show in one stream.
         const {
             classified,
             oobPct,
@@ -180,41 +190,62 @@ async function runAnalysis(year, month, {
                 groundTruthAssetId,
                 gtBufferM,
                 minFieldTest,
+                logger: log,
             },
         );
 
-        // Step 8-9: area stats.
-        const [provinceSummary, districtAreas] = await Promise.all([
-            computeProvinceAreaStats(classified, region),
-            computeDistrictAreaStats(classified, districts),
-        ]);
+        // Steps 8-9: các evaluate() được TÁCH tuần tự thay vì Promise.all —
+        // song song sẽ khiến EE phân bổ bộ nhớ đồng thời cho cả hai, dễ vượt
+        // ngưỡng và cùng lúc time-out mà không biết bước nào chậm.
+        const provinceSummary = await log.run(
+            'EVALUATE province area stats (reduceRegion sum groupBy class)',
+            () => computeProvinceAreaStats(classified, region),
+            { note: `scale=${cfg.AREA_STATS_SCALE_M}m tileScale=8 bestEffort` },
+        );
+        log.mark('Province area',
+            `totalHa=${provinceSummary.totalHa}, classes=${Object.keys(provinceSummary.byClass || {}).length}`);
 
-        // Update snapshot.
-        snapshot = await repo.updateStatus(snapshot.id, 'completed', {
-            province_summary: provinceSummary,
-            oob_accuracy:     Math.round(oobPct * 100) / 100,
-            test_accuracy:    testAccuracyPct != null ? Math.round(testAccuracyPct * 100) / 100 : null,
-            test_kappa:       testKappa != null ? Math.round(testKappa * 1000) / 1000 : null,
-            sample_quotas:    quotas,
-            computed_at:      new Date(),
-            duration_ms:      Date.now() - startMs,
-        });
+        const districtAreas = await log.run(
+            'EVALUATE district area stats (reduceRegions sum groupBy class)',
+            () => computeDistrictAreaStats(classified, districts),
+            { note: `scale=${cfg.AREA_STATS_SCALE_M}m tileScale=8` },
+        );
+        log.mark('District area rows', `${districtAreas.length}`);
 
-        // Save district areas.
-        await repo.replaceDistrictAreas(snapshot.id, districtAreas);
+        snapshot = await log.run('Update snapshot → status=completed', () =>
+            repo.updateStatus(snapshot.id, 'completed', {
+                province_summary: provinceSummary,
+                oob_accuracy:     oobPct != null ? Math.round(oobPct * 100) / 100 : null,
+                test_accuracy:    testAccuracyPct != null ? Math.round(testAccuracyPct * 100) / 100 : null,
+                test_kappa:       testKappa != null ? Math.round(testKappa * 1000) / 1000 : null,
+                sample_quotas:    quotas,
+                computed_at:      new Date(),
+                duration_ms:      Date.now() - startMs,
+            }));
 
-        // Step 10: area change alert.
-        const prevSnapshot = await repo.getPreviousCompleted(year, month);
-        await sendAreaChangeAlert(snapshot, prevSnapshot, provinceSummary);
+        await log.run('Persist district area rows',
+            () => repo.replaceDistrictAreas(snapshot.id, districtAreas));
 
-        // Step 11: optional raster export.
+        const prevSnapshot = await log.run(
+            'Fetch previous completed snapshot (for area-change alert)',
+            () => repo.getPreviousCompleted(year, month),
+        );
+        await log.run('Evaluate + dispatch area-change alert',
+            () => sendAreaChangeAlert(snapshot, prevSnapshot, provinceSummary));
+
         if (submitExport) {
-            const taskName = await submitExportTask(classified, year, month, region);
+            const taskName = await log.run(
+                'Submit GEE raster export task (async)',
+                () => submitExportTask(classified, year, month, region),
+            );
             snapshot = await repo.updateStatus(snapshot.id, 'exporting', { gee_task_id: taskName });
         }
 
+        log.summary();
         return snapshot;
     } catch (err) {
+        log.summary();
+        console.error(`[FOREST-CLS] runAnalysis ${year}-${month} failed:`, err.message);
         await repo.updateStatus(snapshot.id, 'failed', { error_message: err.message });
         throw err;
     }
