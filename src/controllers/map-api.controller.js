@@ -20,9 +20,9 @@ const createKey = async (req, res) => {
 };
 
 const listKeys = async (req, res) => {
-    const { page, limit, layer_id, is_active } = req.query;
+    const { page, limit, q, layer_id, is_active } = req.query;
     const offset = (page - 1) * limit;
-    const { items, total } = await svc.listKeys({ limit, offset, layer_id, is_active }, req.lang);
+    const { items, total } = await svc.listKeys({ limit, offset, q, layer_id, is_active }, req.lang);
     return OK_LIST(res, t('map_api_list_success', req.lang), items, { page, limit, total });
 };
 

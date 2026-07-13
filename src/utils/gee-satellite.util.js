@@ -8,10 +8,19 @@
  * All functions accept/return EE objects unless noted with "→ JS value".
  */
 
+const fs   = require('fs');
+const path = require('path');
 const { ee } = require('../configs/gge');
 
 // Default timeout for .evaluate() calls (5 minutes).
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.GEE_TIMEOUT_MS, 10) || 5 * 60 * 1000;
+
+// Local Kon Tum province polygon (higher-fidelity than FAO/GAUL).
+// Used only as a fallback when the request omits `params.geometry`;
+// user-supplied ROIs are always clipped to as-is.
+// Override the file path with the KON_TUM_BOUNDARY_GEOJSON env var.
+const KON_TUM_BOUNDARY_PATH = process.env.KON_TUM_BOUNDARY_GEOJSON
+    || path.resolve(__dirname, '../../data/RanhGioiTinh_Polygon.geojson');
 
 // ── GEE async helpers ─────────────────────────────────────────────────────────
 
@@ -73,27 +82,70 @@ function getEeMapId(eeImage, vizParams = {}) {
 
 // ── Region helpers ────────────────────────────────────────────────────────────
 
-const GAUL_ADM0  = 'Viet Nam';
-const GAUL_ADM1  = 'Kon Tum';
-
 function getKonTumRegion() {
-    return ee.FeatureCollection('FAO/GAUL/2015/level1')
-        .filter(ee.Filter.eq('ADM0_NAME', GAUL_ADM0))
-        .filter(ee.Filter.eq('ADM1_NAME', GAUL_ADM1));
+    return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
 }
 
 function getKonTumDistricts() {
-    return ee.FeatureCollection('FAO/GAUL/2015/level2')
-        .filter(ee.Filter.eq('ADM0_NAME', GAUL_ADM0))
-        .filter(ee.Filter.eq('ADM1_NAME', GAUL_ADM1));
+    return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
+}
+
+// ── Local Kon Tum boundary polygon ────────────────────────────────────────────
+
+// Recursively strip Z/M components so ee.Geometry accepts the coords —
+// the source file stores [x, y, 0] triplets which GEE rejects.
+function _stripZ(coords) {
+    if (typeof coords[0] === 'number') return coords.slice(0, 2);
+    return coords.map(_stripZ);
+}
+
+// Extract the numeric EPSG code from either "EPSG:XXXX" or a CRS URN
+// like "urn:ogc:def:crs:EPSG::XXXX".
+function _parseEpsgCode(crsName) {
+    const m = String(crsName || '').match(/EPSG:*:*(\d+)$/i);
+    return m ? m[1] : null;
+}
+
+let _cachedBoundaryGeom = null;
+
+/**
+ * Load the Kon Tum province polygon from the configured GeoJSON file.
+ * Lazily evaluated and cached. Throws if the file is missing or invalid.
+ */
+function getKonTumBoundaryGeometry() {
+    if (_cachedBoundaryGeom) return _cachedBoundaryGeom;
+    const raw = fs.readFileSync(KON_TUM_BOUNDARY_PATH, 'utf8');
+    const doc = JSON.parse(raw);
+    const feature = doc.type === 'FeatureCollection'
+        ? doc.features?.[0]
+        : (doc.type === 'Feature' ? doc : null);
+    const geom = feature?.geometry || (doc.type === 'Polygon' || doc.type === 'MultiPolygon' ? doc : null);
+    if (!geom) throw new Error(`[GEE-SAT] Không tìm thấy polygon geometry trong file: ${KON_TUM_BOUNDARY_PATH}`);
+
+    const crsName   = doc.crs?.properties?.name;
+    const epsg      = _parseEpsgCode(crsName);
+    const projLabel = epsg ? `EPSG:${epsg}` : 'EPSG:4326';
+
+    const cleanGeom = {
+        type: geom.type,
+        coordinates: _stripZ(geom.coordinates),
+    };
+
+    // Non-WGS84 → geodesic=false (planar/UTM). WGS84 → geodesic=true default.
+    _cachedBoundaryGeom = epsg && epsg !== '4326'
+        ? ee.Geometry(cleanGeom, projLabel, false)
+        : ee.Geometry(cleanGeom);
+    return _cachedBoundaryGeom;
 }
 
 /**
  * Parse a geometry parameter (GeoJSON object or bbox array [minX,minY,maxX,maxY])
- * into an ee.Geometry. Falls back to Kon Tum province if null.
+ * into an ee.Geometry. Falls back to RanhGioiTinh_Polygon.geojson when omitted.
  */
 function toEeGeometry(geometry) {
-    if (!geometry) return getKonTumRegion().geometry();
+    if (!geometry) {
+        return getKonTumBoundaryGeometry();
+    }
     if (Array.isArray(geometry) && geometry.length === 4) {
         const [minX, minY, maxX, maxY] = geometry;
         return ee.Geometry.BBox(minX, minY, maxX, maxY);
@@ -175,7 +227,7 @@ function maskS2FireRisk(image) {
 function makeComposite(year, startMonth, endMonth, region) {
     const startDate = ee.Date.fromYMD(year, startMonth, 1);
     const endDate   = ee.Date.fromYMD(year, endMonth, 1).advance(1, 'month');
-    const bounds    = region || getKonTumRegion();
+    const bounds    = region || getKonTumBoundaryGeometry();
 
     const l5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2')
         .filterBounds(bounds).filterDate(startDate, endDate)
@@ -272,7 +324,7 @@ function medianOrFallback(collection, bands, fallbackValues) {
 
 /** Return elevation/slope/aspect from SRTM for the given region. */
 function getDemBands(region) {
-    const dem       = ee.Image('USGS/SRTMGL1_003').clip(region || getKonTumRegion());
+    const dem       = ee.Image('USGS/SRTMGL1_003').clip(region || getKonTumBoundaryGeometry());
     const elevation = dem.rename('elevation');
     const slope     = ee.Terrain.slope(dem).rename('slope');
     const aspect    = ee.Terrain.aspect(dem).rename('aspect');
@@ -280,6 +332,33 @@ function getDemBands(region) {
 }
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Generate a temporary GEE download URL for a satellite image (GeoTIFF).
+ * Returns null if the image is too large or GEE rejects the request.
+ */
+async function getEeDownloadUrl(eeImage, region, vizParams = {}) {
+    try {
+        const visImage = Object.keys(vizParams).length > 0
+            ? eeImage.visualize(vizParams)
+            : eeImage;
+        return await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(null), 20_000);
+            visImage.getDownloadURL({
+                name: 'satellite',
+                scale: 100,
+                region,
+                fileFormat: 'GeoTIFF',
+                maxPixels: 1e8,
+            }, (url, err) => {
+                clearTimeout(timer);
+                resolve(err ? null : url);
+            });
+        });
+    } catch (e) {
+        return null;
+    }
+}
 
 /** Current date as 'YYYY-MM-DD' string (UTC). */
 const todayUtc = () => new Date().toISOString().slice(0, 10);
@@ -293,8 +372,10 @@ const fmtDate = (d) => {
 module.exports = {
     eeEval,
     getEeMapId,
+    getEeDownloadUrl,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumBoundaryGeometry,
     toEeGeometry,
     maskLandsatC2,
     prepL57,
@@ -307,6 +388,4 @@ module.exports = {
     getDemBands,
     todayUtc,
     fmtDate,
-    GAUL_ADM0,
-    GAUL_ADM1,
 };

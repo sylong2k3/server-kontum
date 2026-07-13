@@ -1,19 +1,21 @@
 'use strict';
 
 /**
- * Fire Risk Service (EP-06 — Cảnh báo cháy rừng).
+ * Fire Risk Service (EP-06 — Cảnh báo cháy rừng), v8.1.
  *
- * Pipeline (mirrors GEE script chayRungFinal.txt v8.1):
- *   1. Sentinel-2 → NDVI, NDMI, NBR (vegetation health & moisture)
- *   2. MODIS MOD11A1 → LST (land surface temperature)
- *   3. ERA5-Land DAILY_AGGR → AirTemp, DewPoint, RelHumidity, WindSpeed, Rain
- *   4. P Nesterov (QĐ 25/2022/QĐ-UBND) accumulated over NESTEROV_LOOKBACK_DAYS
- *   5. Threshold score: blends P, NDVI, NDMI, LST
- *   6. Optional RF score via GEE (expensive — submitted as async task if enabled)
- *   7. FinalFireRiskScore → RiskLevel (1-5)
- *   8. reduceRegions per district → district_stats JSONB → DB snapshot
- *   9. High-risk vector features (level 4-5) → fire.fire_risk_features
- *  10. Async: export GeoTIFF → GCS → MinIO → GeoServer harvest
+ * Delegates the GEE pipeline to `fire-risk.pipeline.js`, which mirrors
+ * docs/kontum_fire_warning_final.js:
+ *   - Predictors: 30-day S2 (NDVI/NDMI/NBR) + LST + ERA5 + terrain + fuelK
+ *   - P Nesterov with daily rain-reset (QĐ 25/2022 lookup)
+ *   - Optional Random Forest classifier trained on 20 dry-season months
+ *     of MCD64A1 + FireCCI51 + FIRMS labels
+ *   - Blend: 50% input + 30% dataset + 20% threshold (with INPUT)
+ *            60% dataset + 40% threshold (without INPUT)
+ *   - Data-quality Level 0 when neither S2 nor LST observed in the window
+ *   - Priority warning: model risk (3) | FIRMS recent (4) | confirmed input (5)
+ *
+ * This service adds server-side concerns: DB snapshots, district reduceRegions,
+ * area statistics, GeoTIFF export → GCS → MinIO → GeoServer publish.
  *
  * Node.js GEE SDK note:
  *   Use .evaluate(callback) (promisified via eeEvaluate) instead of print().
@@ -27,233 +29,13 @@ const {
     eeEval: eeEvaluate,
     getKonTumRegion,
     getKonTumDistricts,
-    medianOrFallback,
-    maskS2FireRisk,
     todayUtc,
     fmtDate,
 } = require('../utils/gee-satellite.util');
+const { runFireRiskAnalysis } = require('./fire-risk.pipeline');
 const { pollGeeTask, publishRasterToMinio } = require('../utils/gee-export.helper');
 const { BusinessLogicError } = require('../core/error.response');
 const { StatusCodes } = require('../core/http-status-code');
-
-// ── Sentinel-2 indices ───────────────────────────────────────────────────────
-
-const S2_BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12'];
-
-function getS2Collection(region, startDate, endDate) {
-    return ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-        .filterBounds(region)
-        .filterDate(startDate, endDate)
-        .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 85))
-        .map(maskS2FireRisk);
-}
-
-/**
- * Compute NDVI, NDMI, NBR from Sentinel-2 with fallback to 180-day history.
- * Returns {indices, s2DataSource, s2Observed45}.
- */
-function computeS2Indices(region, analysisEnd) {
-    const endDate   = ee.Date(analysisEnd);
-    const startDate = endDate.advance(-cfg.FEATURE_WINDOW_DAYS, 'day');
-    const fbStart   = startDate.advance(-cfg.S2_FALLBACK_DAYS, 'day');
-
-    const primary  = medianOrFallback(getS2Collection(region, startDate, endDate), S2_BANDS,
-        [0.12, 0.10, 0.08, 0.40, 0.20, 0.12]);
-    const fallback = medianOrFallback(getS2Collection(region, fbStart, startDate), S2_BANDS,
-        [0.12, 0.10, 0.08, 0.40, 0.20, 0.12]);
-
-    const primaryValid = primary.mask().reduce(ee.Reducer.min()).unmask(0);
-    const merged       = primary.unmask(fallback);
-    const filled       = merged.unmask(
-        ee.Image.constant([0.12, 0.10, 0.08, 0.40, 0.20, 0.12]).rename(S2_BANDS),
-    ).rename(S2_BANDS).clip(region);
-
-    const ndvi = filled.normalizedDifference(['B8', 'B4']).rename('NDVI');
-    const ndmi = filled.normalizedDifference(['B8', 'B11']).rename('NDMI');
-    const nbr  = filled.normalizedDifference(['B8', 'B12']).rename('NBR');
-
-    return {
-        indices:        ndvi.addBands(ndmi).addBands(nbr),
-        s2Observed45:   primaryValid.unmask(0).toByte().rename('S2_Observed45'),
-    };
-}
-
-// ── MODIS LST ─────────────────────────────────────────────────────────────────
-
-function computeLST(region, analysisEnd) {
-    const endDate   = ee.Date(analysisEnd);
-    const startDate = endDate.advance(-cfg.FEATURE_WINDOW_DAYS, 'day');
-    const fbStart   = startDate.advance(-cfg.LST_FALLBACK_DAYS, 'day');
-
-    // ImageCollection → mean() to Image, THEN scale/offset.
-    // Order matters: `.multiply()` doesn't exist on ImageCollection.
-    const makeLst = (col) => col
-        .select('LST_Day_1km')
-        .mean()
-        .multiply(cfg.LST_SCALE_FACTOR)
-        .subtract(cfg.LST_KELVIN_OFFSET)
-        .rename('LST_C');
-
-    const modis  = ee.ImageCollection('MODIS/061/MOD11A1').filterBounds(region);
-    const primary  = modis.filterDate(startDate, endDate);
-    const fallback = modis.filterDate(fbStart, startDate);
-
-    const lstPrimary  = ee.Image(ee.Algorithms.If(primary.size().gt(0),
-        makeLst(primary), ee.Image.constant(30).rename('LST_C').updateMask(0)));
-    const lstFallback = ee.Image(ee.Algorithms.If(fallback.size().gt(0),
-        makeLst(fallback), ee.Image.constant(30).rename('LST_C').updateMask(0)));
-
-    const lstObserved = lstPrimary.mask().unmask(0).toByte().rename('LST_Observed45');
-    const lst = lstPrimary.unmask(lstFallback)
-        .unmask(ee.Image.constant(30).rename('LST_C'))
-        .clip(region);
-
-    return { lst, lstObserved };
-}
-
-// ── ERA5-Land weather & P Nesterov ────────────────────────────────────────────
-
-/**
- * Compute weather predictors (AirTemp, RelHumidity, WindSpeed) and
- * P Nesterov index accumulated over NESTEROV_LOOKBACK_DAYS.
- *
- * P Nesterov formula (simplified daily accumulation):
- *   P_i = (T13 * D13) * (T13 + D13)   — where D13 = T13 − Td13 (humidity deficit)
- *   Σ P_i resets when daily rain >= RAIN_RESET_MM (5 mm by default)
- *
- * ERA5-Land proxies:
- *   T13 ≈ temperature_2m at 06:00 UTC (13:00 VN)
- *   Td13 ≈ dewpoint_temperature_2m
- *   Rain ≈ total_precipitation_sum * 1000 (m → mm)
- */
-function computeWeatherAndNesterov(region, analysisEnd) {
-    const endDate   = ee.Date(analysisEnd);
-    const startDate = endDate.advance(-cfg.FEATURE_WINDOW_DAYS, 'day');
-    const pStart    = endDate.advance(-cfg.NESTEROV_LOOKBACK_DAYS, 'day');
-
-    const era5 = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR').filterBounds(region);
-
-    // ── Weather predictors over feature window ─────────────────────────────
-    const wx = era5.filterDate(startDate, endDate);
-    const airTemp = wx.select('temperature_2m').mean()
-        .subtract(273.15).rename('AirTemp_C').unmask(25);
-    const dewPoint = wx.select('dewpoint_temperature_2m').mean()
-        .subtract(273.15).rename('DewPoint_C').unmask(18);
-    const windU   = wx.select('u_component_of_wind_10m').mean().unmask(0);
-    const windV   = wx.select('v_component_of_wind_10m').mean().unmask(0);
-    const windSpeed = windU.pow(2).add(windV.pow(2)).sqrt().rename('WindSpeed_ms').unmask(2);
-    const rain    = wx.select('total_precipitation_sum').mean()
-        .multiply(1000).rename('Rain_mm').unmask(0);
-
-    // Relative humidity from temperature and dew point.
-    const e  = dewPoint.expression(
-        '6.1078 * exp((17.269 * t) / (237.3 + t))', { t: dewPoint });
-    const es = airTemp.expression(
-        '6.1078 * exp((17.269 * t) / (237.3 + t))', { t: airTemp });
-    const relHumidity = e.divide(es).multiply(100).clamp(0, 100).rename('RelHumidity_pct').unmask(70);
-
-    // ── P Nesterov accumulation over lookback window ──────────────────────
-    const pDays = era5.filterDate(pStart, endDate);
-
-    // Map each daily image to a Nesterov daily contribution.
-    const pDaily = pDays.map((img) => {
-        const t  = img.select('temperature_2m').subtract(273.15);
-        const td = img.select('dewpoint_temperature_2m').subtract(273.15);
-        const r  = img.select('total_precipitation_sum').multiply(1000);
-
-        // Humidity deficit D = T - Td (clamped to 0 if below min temp).
-        const deficite = t.subtract(td).max(0);
-        // Daily P contribution: T * D, clamped >= 0, reset if rain >= threshold.
-        const pContrib = t.multiply(deficite)
-            .where(t.lt(cfg.MIN_TEMP_FOR_NESTEROV_C), 0)
-            .where(r.gte(5), ee.Image.constant(0));   // rain reset
-        return pContrib.rename('P_daily').copyProperties(img, ['system:time_start']);
-    });
-
-    // Sum over the lookback window.
-    const pNesterov = pDaily.select('P_daily').sum()
-        .max(0).rename('P_Nesterov').unmask(0).clip(region);
-
-    const weatherBands = airTemp.addBands(dewPoint)
-        .addBands(relHumidity).addBands(windSpeed).addBands(rain).clip(region);
-
-    return { weatherBands, pNesterov };
-}
-
-// ── Forest fuel mask ─────────────────────────────────────────────────────────
-
-function getForestMask(region) {
-    const igbp = ee.ImageCollection('MODIS/061/MCD12Q1')
-        .filterDate('2020-01-01', '2021-01-01')
-        .first().select('LC_Type1').clip(region).unmask(0);
-    // IGBP classes 1-10 = forest/vegetation types.
-    return igbp.gte(1).and(igbp.lte(10)).rename('ForestMask');
-}
-
-// ── Threshold-based risk score ────────────────────────────────────────────────
-
-/**
- * Compute final fire risk score and risk level from indices without RF.
- * Used when RF is not enabled or as the primary component.
- *
- * FinalFireRiskScore ∈ [0,1]; RiskLevel ∈ {0,1,2,3,4,5}
- * 0 = no data (no S2 and no LST observation in 45-day window).
- */
-function computeThresholdRisk(region, s2Indices, s2Observed45, lst, lstObserved, weatherBands, pNesterov) {
-    const ndvi = s2Indices.select('NDVI');
-    const ndmi = s2Indices.select('NDMI');
-
-    // P Nesterov score (0-1): threshold look-up from QĐ 25/2022.
-    const [p1, p2, p3, p4] = cfg.NESTEROV_P_BREAKS;
-    const pScore = pNesterov.expression(
-        '(p < p1) ? 0.05 : (p < p2) ? 0.30 : (p < p3) ? 0.60 : (p < p4) ? 0.80 : 0.95',
-        { p: pNesterov, p1, p2, p3, p4 },
-    ).rename('PScore');
-
-    // NDVI drought score (lower NDVI = higher drought stress = higher risk).
-    const ndviScore = ndvi.expression(
-        '(n > 0.5) ? 0.10 : (n > 0.3) ? 0.35 : (n > 0.1) ? 0.65 : 0.90',
-        { n: ndvi },
-    ).rename('NDVIScore');
-
-    // NDMI moisture score (lower = drier vegetation = higher risk).
-    const ndmiScore = ndmi.expression(
-        '(m > 0.1) ? 0.10 : (m > -0.1) ? 0.40 : (m > -0.3) ? 0.70 : 0.90',
-        { m: ndmi },
-    ).rename('NDMIScore');
-
-    // LST score (higher surface temp = higher risk).
-    const lstC   = lst.select('LST_C');
-    const lstScore = lstC.expression(
-        '(t < 30) ? 0.10 : (t < 35) ? 0.30 : (t < 40) ? 0.60 : 0.85',
-        { t: lstC },
-    ).rename('LSTScore');
-
-    // Weighted blend.
-    const thresholdScore = pScore.multiply(cfg.WEIGHT_P_NESTEROV)
-        .add(ndviScore.multiply(cfg.WEIGHT_NDVI_DROUGHT))
-        .add(ndmiScore.multiply(cfg.WEIGHT_NDMI_DROUGHT))
-        .add(lstScore.multiply(cfg.WEIGHT_LST))
-        .rename('ThresholdScore');
-
-    // Apply forest mask.
-    const forestMask = getForestMask(region);
-    const finalScore = thresholdScore.updateMask(forestMask).rename('FinalFireRiskScore');
-
-    // RiskLevel: 0 = no observation; 1-5 by risk_score_breaks.
-    const [b1, b2, b3, b4] = cfg.RISK_SCORE_BREAKS;
-    const riskLevelRaw = finalScore.expression(
-        '(r < b1) ? 1 : (r < b2) ? 2 : (r < b3) ? 3 : (r < b4) ? 4 : 5',
-        { r: finalScore, b1, b2, b3, b4 },
-    ).rename('RiskLevel');
-
-    // Mask out pixels with no S2 AND no LST recent observation.
-    const hasObservation = s2Observed45.add(lstObserved).gt(0);
-    const riskLevel = riskLevelRaw.updateMask(hasObservation)
-        .unmask(0).toInt8().clip(region);
-
-    return { finalScore, riskLevel };
-}
 
 // ── District statistics ───────────────────────────────────────────────────────
 
@@ -261,12 +43,15 @@ function computeThresholdRisk(region, s2Indices, s2Observed45, lst, lstObserved,
  * Compute per-district area (ha) by risk level using reduceRegions.
  * Returns plain JS object from GEE evaluate().
  */
-async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, districts, region) {
+async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCase, modelConfidenceClass, districts, region) {
     const SCALE = 500;
     const TILE  = 8;
 
-    // Histogram of risk levels per district.
+    // Histogram of risk levels + blend case + confidence per district;
+    // mean of P Nesterov + S2 observation coverage.
     const histImg = riskLevel.rename('riskLevel')
+        .addBands(blendCase.rename('blendCase'))
+        .addBands(modelConfidenceClass.rename('confidenceClass'))
         .addBands(pNesterov.rename('pNesterov'))
         .addBands(s2Observed45.rename('s2Obs'));
 
@@ -284,19 +69,32 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, district
     const stats = (fcResult.features || []).map((feat) => {
         const p = feat.properties || {};
         const hist = p.riskLevel_histogram || {};
+        const blendHist = p.blendCase_histogram || {};
+        const confHist  = p.confidenceClass_histogram || {};
         // Convert pixel counts to ha: 1 pixel at 500m scale = 25 ha.
         const pixelHa = (SCALE / 1000) ** 2 * 100; // km² → ha
         const levelDist = {};
         let totalForestHa = 0;
-        for (let l = 1; l <= 5; l++) {
+        // Level 0 = no observation; include for coverage totals but exclude from risk.
+        for (let l = 0; l <= 5; l++) {
             const ha = (hist[String(l)] || 0) * pixelHa;
             levelDist[l] = Math.round(ha * 100) / 100;
-            totalForestHa += ha;
+            if (l >= 1) totalForestHa += ha;
         }
         return {
-            unitCode:      p.ADM2_CODE  || null,
-            name:          p.ADM2_NAME  || p.ADM1_NAME || null,
-            riskLevelDist: levelDist,
+            unitCode:          p.ADM2_CODE  || null,
+            name:              p.ADM2_NAME  || p.ADM1_NAME || null,
+            riskLevelDist:     levelDist,
+            blendCaseHa: {
+                withInput:    Math.round((blendHist['1'] || 0) * pixelHa * 100) / 100,
+                withoutInput: Math.round((blendHist['2'] || 0) * pixelHa * 100) / 100,
+            },
+            confidenceHa: {
+                none:   Math.round((confHist['0'] || 0) * pixelHa * 100) / 100,
+                low:    Math.round((confHist['1'] || 0) * pixelHa * 100) / 100,
+                medium: Math.round((confHist['2'] || 0) * pixelHa * 100) / 100,
+                high:   Math.round((confHist['3'] || 0) * pixelHa * 100) / 100,
+            },
             totalForestHa: Math.round(totalForestHa * 100) / 100,
             pNesterovMean: Math.round((p.pNesterov_mean || 0) * 100) / 100,
             s2Coverage:    Math.round((p.s2Obs_mean || 0) * 1000) / 1000,
@@ -309,12 +107,16 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, district
 /**
  * Compute province-level summary.
  */
-async function computeProvinceSummary(riskLevel, pNesterov, s2Observed45, region) {
+async function computeProvinceSummary(riskLevel, pNesterov, s2Observed45, blendCase, modelConfidenceClass, dataSourceClass, region) {
     const SCALE = 500;
     const pixelHa = (SCALE / 1000) ** 2 * 100;
 
-    const reduced = riskLevel.addBands(pNesterov.rename('pNesterov'))
+    const reduced = riskLevel
+        .addBands(pNesterov.rename('pNesterov'))
         .addBands(s2Observed45.rename('s2Obs'))
+        .addBands(blendCase.rename('blendCase'))
+        .addBands(modelConfidenceClass.rename('confidenceClass'))
+        .addBands(dataSourceClass.rename('dataSource'))
         .reduceRegion({
             reducer:   ee.Reducer.frequencyHistogram()
                 .combine(ee.Reducer.mean(), null, true),
@@ -325,16 +127,21 @@ async function computeProvinceSummary(riskLevel, pNesterov, s2Observed45, region
         });
 
     const result = await eeEvaluate(reduced);
-    const hist   = result.riskLevel_histogram || {};
+    const hist       = result.riskLevel_histogram || {};
+    const blendHist  = result.blendCase_histogram || {};
+    const confHist   = result.confidenceClass_histogram || {};
+    const dsHist     = result.dataSource_histogram || {};
     const levelDist = {};
     let totalForestHa = 0;
     let weightedRiskSum = 0;
 
-    for (let l = 1; l <= 5; l++) {
+    for (let l = 0; l <= 5; l++) {
         const ha = (hist[String(l)] || 0) * pixelHa;
         levelDist[l]   = Math.round(ha * 100) / 100;
-        totalForestHa += ha;
-        weightedRiskSum += ha * l;
+        if (l >= 1) {
+            totalForestHa   += ha;
+            weightedRiskSum += ha * l;
+        }
     }
 
     const avgRiskLevel = totalForestHa > 0
@@ -345,6 +152,21 @@ async function computeProvinceSummary(riskLevel, pNesterov, s2Observed45, region
         totalForestHa:    Math.round(totalForestHa * 100) / 100,
         avgRiskLevel,
         riskLevelDist:    levelDist,
+        blendCaseHa: {
+            withInput:    Math.round((blendHist['1'] || 0) * pixelHa * 100) / 100,
+            withoutInput: Math.round((blendHist['2'] || 0) * pixelHa * 100) / 100,
+        },
+        confidenceHa: {
+            none:   Math.round((confHist['0'] || 0) * pixelHa * 100) / 100,
+            low:    Math.round((confHist['1'] || 0) * pixelHa * 100) / 100,
+            medium: Math.round((confHist['2'] || 0) * pixelHa * 100) / 100,
+            high:   Math.round((confHist['3'] || 0) * pixelHa * 100) / 100,
+        },
+        dataSourceHa: {
+            noData:         Math.round((dsHist['0'] || 0) * pixelHa * 100) / 100,
+            fallbackOnly:   Math.round((dsHist['1'] || 0) * pixelHa * 100) / 100,
+            observed45Days: Math.round((dsHist['2'] || 0) * pixelHa * 100) / 100,
+        },
         pNesterovProvMean: Math.round((result.pNesterov_mean || 0) * 100) / 100,
         s2CoverageRatio:   Math.round((result.s2Obs_mean || 0) * 1000) / 1000,
     };
@@ -366,11 +188,11 @@ async function computePNesterovStats(pNesterov, region) {
     const result = await eeEvaluate(reduced);
     const [p1, p2, p3, p4] = cfg.NESTEROV_P_BREAKS;
     return {
-        mean:        Math.round((result.P_Nesterov_mean || 0) * 10) / 10,
-        max:         Math.round((result.P_Nesterov_max  || 0) * 10) / 10,
-        p10:         Math.round((result['P_Nesterov_p10'] || 0) * 10) / 10,
-        p50:         Math.round((result['P_Nesterov_p50'] || 0) * 10) / 10,
-        p90:         Math.round((result['P_Nesterov_p90'] || 0) * 10) / 10,
+        mean:        Math.round((result.NesterovP_mean || 0) * 10) / 10,
+        max:         Math.round((result.NesterovP_max  || 0) * 10) / 10,
+        p10:         Math.round((result['NesterovP_p10'] || 0) * 10) / 10,
+        p50:         Math.round((result['NesterovP_p50'] || 0) * 10) / 10,
+        p90:         Math.round((result['NesterovP_p90'] || 0) * 10) / 10,
         levelBreaks: { p1, p2, p3, p4 },
     };
 }
@@ -461,7 +283,11 @@ function buildFeaturesFromStats(snapshotId, districtStats) {
  * @param {boolean} opts.submitExport — submit raster export task after stats
  * @returns {object} snapshot row
  */
-async function runAnalysis(analysisDate, { submitExport = cfg.isGcsConfigured() } = {}) {
+async function runAnalysis(analysisDate, {
+    submitExport      = cfg.isGcsConfigured(),
+    enableRf          = cfg.ENABLE_RF,
+    inputFireAssetId  = cfg.INPUT_FIRE_ASSET_ID,
+} = {}) {
     await initializeEarthEngine();
 
     // Upsert snapshot → status computing.
@@ -471,9 +297,22 @@ async function runAnalysis(analysisDate, { submitExport = cfg.isGcsConfigured() 
         model_params: {
             version:             'v8.1',
             feature_window_days: cfg.FEATURE_WINDOW_DAYS,
+            s2_fallback_days:    cfg.S2_FALLBACK_DAYS,
+            lst_fallback_days:   cfg.LST_FALLBACK_DAYS,
             nesterov_lookback:   cfg.NESTEROV_LOOKBACK_DAYS,
             nesterov_p_breaks:   cfg.NESTEROV_P_BREAKS,
             risk_score_breaks:   cfg.RISK_SCORE_BREAKS,
+            rf_enabled:          enableRf,
+            rf_trees:            cfg.RF_TREES,
+            rf_bag_fraction:     cfg.RF_BAG_FRACTION,
+            train_months:        cfg.TRAIN_MONTHS,
+            train_scale_m:       cfg.TRAIN_SCALE_M,
+            train_samples:       cfg.TRAIN_SAMPLES_PER_CLASS,
+            negative_eligible_mode: cfg.NEGATIVE_ELIGIBLE_MODE,
+            input_fire_asset_id: inputFireAssetId || null,
+            blend_rule: inputFireAssetId
+                ? '50% input + 30% dataset + 20% threshold (with INPUT); 60% dataset + 40% threshold (without INPUT)'
+                : '60% dataset + 40% threshold',
             export_scale_m:      cfg.EXPORT_SCALE_M,
             official_thresholds_verified: false,
         },
@@ -483,24 +322,32 @@ async function runAnalysis(analysisDate, { submitExport = cfg.isGcsConfigured() 
         const region    = getKonTumRegion();
         const districts = getKonTumDistricts();
 
-        // Step 1-3: compute indices.
-        const { indices: s2Indices, s2Observed45 } = computeS2Indices(region, analysisDate);
-        const { lst, lstObserved }                 = computeLST(region, analysisDate);
-        const { weatherBands, pNesterov }          = computeWeatherAndNesterov(region, analysisDate);
+        // Run the shared v8.1 pipeline (predictors → RF + threshold →
+        // blend → riskLevel → confidence / priority layers).
+        const analysis = runFireRiskAnalysis(region, analysisDate, {
+            enableRf,
+            inputFireAssetId,
+        });
 
-        // Step 4-5: compute risk.
-        const { riskLevel } = computeThresholdRisk(
-            region, s2Indices, s2Observed45, lst, lstObserved, weatherBands, pNesterov,
-        );
+        const {
+            currentPredictors,
+            riskLevel,
+            blendCase,
+            modelConfidenceClass,
+            dataSourceClass,
+        } = analysis;
+        const pNesterov    = currentPredictors.select('NesterovP').rename('NesterovP');
+        const s2Observed45 = currentPredictors.select('S2_Observed45').rename('S2_Observed45');
 
-        // Step 6: district and province stats (parallel evaluate calls).
+        // Province + district + P Nesterov stats (parallel evaluate calls).
         const [districtStats, provinceSummary, pNesterovStats] = await Promise.all([
-            computeDistrictStats(riskLevel, pNesterov, s2Observed45, districts, region),
-            computeProvinceSummary(riskLevel, pNesterov, s2Observed45, region),
+            computeDistrictStats(riskLevel, pNesterov, s2Observed45,
+                blendCase, modelConfidenceClass, districts, region),
+            computeProvinceSummary(riskLevel, pNesterov, s2Observed45,
+                blendCase, modelConfidenceClass, dataSourceClass, region),
             computePNesterovStats(pNesterov, region),
         ]);
 
-        // Update snapshot with stats.
         snapshot = await repo.updateStatus(snapshot.id, 'completed', {
             province_summary:  provinceSummary,
             district_stats:    districtStats,
@@ -509,11 +356,9 @@ async function runAnalysis(analysisDate, { submitExport = cfg.isGcsConfigured() 
             computed_at:       new Date(),
         });
 
-        // Step 7: save vector features from stats.
         const featureRows = buildFeaturesFromStats(snapshot.id, districtStats);
         await repo.replaceFeatures(snapshot.id, featureRows);
 
-        // Step 8: optionally submit raster export (async).
         if (submitExport) {
             const taskName = await submitGeeExportTask(riskLevel, analysisDate);
             snapshot = await repo.updateStatus(snapshot.id, 'exporting', {
@@ -622,10 +467,15 @@ const getHistory = async ({ page = 1, limit = 30 } = {}) =>
 
 /**
  * Trigger manual analysis for today (admin only).
+ * Accepts optional v8.1 overrides: enableRf, inputFireAssetId.
  */
-const refresh = async ({ analysisDate, submitExport } = {}) => {
+const refresh = async ({ analysisDate, submitExport, enableRf, inputFireAssetId } = {}) => {
     const date = analysisDate || todayUtc();
-    return runAnalysis(date, { submitExport });
+    return runAnalysis(date, {
+        submitExport,
+        ...(enableRf !== undefined         ? { enableRf }         : {}),
+        ...(inputFireAssetId !== undefined ? { inputFireAssetId } : {}),
+    });
 };
 
 module.exports = {

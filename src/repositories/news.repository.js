@@ -50,8 +50,16 @@ const buildWhere = ({ q, status, category, publicOnly = true } = {}, startIdx = 
         const likeIdx = idx++;
         conditions.push(
             `(nt_eff.search_tsv @@ plainto_tsquery('simple', $${tsvIdx})` +
+            ` OR CAST(n.id AS TEXT) ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR n.status ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR COALESCE(n.category, '') ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR COALESCE(u.full_name, '') ILIKE $${likeIdx} ESCAPE '\\'` +
             ` OR nt_eff.title ILIKE $${likeIdx} ESCAPE '\\'` +
-            ` OR nt_eff.summary ILIKE $${likeIdx} ESCAPE '\\')`
+            ` OR COALESCE(nt_eff.slug, '') ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR COALESCE(nt_eff.summary, '') ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR COALESCE(nt_eff.content, '') ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR to_char(n.created_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${likeIdx} ESCAPE '\\'` +
+            ` OR to_char(n.updated_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${likeIdx} ESCAPE '\\')`
         );
     }
 
@@ -130,6 +138,7 @@ const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {
         `SELECT COUNT(*)::int AS total
          FROM cms.news n
          ${translationJoin('$1', '$2')}
+         LEFT JOIN auth.users u ON u.id = n.author_id
          WHERE ${where}
            AND nt_eff.id IS NOT NULL`,
         queryParams

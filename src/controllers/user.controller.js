@@ -4,9 +4,9 @@ const { t } = require('../utils/i18n.util');
 const { buildActor } = require('../utils/actor.util');
 
 const listUsers = async (req, res) => {
-    const { page, limit, roleCode, isActive, email, sortBy, sortOrder } = req.query;
+    const { page, limit, roleCode, isActive, q, email, sortBy, sortOrder } = req.query;
     const actor = buildActor(req);
-    const filter = { page, limit, roleCode, isActive, email, sortBy, sortOrder };
+    const filter = { page, limit, roleCode, isActive, q, email, sortBy, sortOrder };
     const { items, total } = await userService.listUsers(filter, actor);
     OK_LIST(res, t('get_list_success', req.lang), items, {
         page: filter.page,

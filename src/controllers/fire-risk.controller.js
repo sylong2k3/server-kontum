@@ -47,7 +47,15 @@ const getHistory = async (req, res) => {
 const refresh = async (req, res) => {
     const analysisDate = req.body?.analysisDate || null;
     const submitExport = req.body?.submitExport !== false;  // default true
-    const snapshot = await svc.refresh({ analysisDate, submitExport });
+    // Optional v8.1 overrides — omit to fall back on env / cfg defaults.
+    const enableRf         = req.body?.enableRf !== undefined
+        ? Boolean(req.body.enableRf) : undefined;
+    const inputFireAssetId = req.body?.inputFireAssetId
+        ? String(req.body.inputFireAssetId).trim() : undefined;
+
+    const snapshot = await svc.refresh({
+        analysisDate, submitExport, enableRf, inputFireAssetId,
+    });
     CREATED(res, 'Đã kích hoạt phân tích cháy rừng.', { snapshot });
 };
 

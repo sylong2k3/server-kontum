@@ -56,7 +56,18 @@ const buildWhere = ({ q, theme, year, yearFrom, yearTo, isPublic, publicOnly = t
         const qi = idx++;
         conditions.push(
             `(mt_eff.title ILIKE '%' || $${qi} || '%'` +
-            ` OR mt_eff.description ILIKE '%' || $${qi} || '%')`
+            ` OR COALESCE(mt_eff.description, '') ILIKE '%' || $${qi} || '%'` +
+            ` OR CAST(m.id AS TEXT) ILIKE '%' || $${qi} || '%'` +
+            ` OR m.theme_code ILIKE '%' || $${qi} || '%'` +
+            ` OR CAST(m.year AS TEXT) ILIKE '%' || $${qi} || '%'` +
+            ` OR COALESCE(m.scale, '') ILIKE '%' || $${qi} || '%'` +
+            ` OR COALESCE(m.region, '') ILIKE '%' || $${qi} || '%'` +
+            ` OR COALESCE(m.file_name, '') ILIKE '%' || $${qi} || '%'` +
+            ` OR COALESCE(m.mime_type, '') ILIKE '%' || $${qi} || '%'` +
+            ` OR CAST(m.file_size AS TEXT) ILIKE '%' || $${qi} || '%'` +
+            ` OR COALESCE(u.full_name, '') ILIKE '%' || $${qi} || '%'` +
+            ` OR to_char(m.created_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE '%' || $${qi} || '%'` +
+            ` OR to_char(m.updated_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE '%' || $${qi} || '%')`
         );
     }
 
@@ -129,6 +140,7 @@ const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {
         `SELECT COUNT(*)::int AS total
          FROM cms.pdf_maps m
          ${translationJoin(lang, fbLang)}
+         LEFT JOIN auth.users u ON u.id = m.uploaded_by
          WHERE ${where}
            AND mt_eff.id IS NOT NULL`,
         params

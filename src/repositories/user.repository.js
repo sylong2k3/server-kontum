@@ -108,7 +108,7 @@ const findByIdSafe = async (userId) => {
 
 const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
 
-const _buildUserFilter = ({ roleCode, roleCodes, isActive, email }, startIdx = 1) => {
+const _buildUserFilter = ({ roleCode, roleCodes, isActive, q, email }, startIdx = 1) => {
     const conditions = ['u.deleted_at IS NULL'];
     const params = [];
     let idx = startIdx;
@@ -121,9 +121,22 @@ const _buildUserFilter = ({ roleCode, roleCodes, isActive, email }, startIdx = 1
         params.push(roleCode);
     }
     if (isActive !== undefined) { conditions.push(`u.is_active = $${idx++}`); params.push(isActive); }
-    if (email) {
+    const keyword = q || email;
+    if (keyword) {
+        const likeValue = `%${_escapeLike(String(keyword).toLowerCase())}%`;
         conditions.push(`LOWER(u.email) LIKE $${idx++} ESCAPE '\\'`);
-        params.push(`%${_escapeLike(email.toLowerCase())}%`);
+        params.push(likeValue);
+
+        const qi = idx - 1;
+        conditions[conditions.length - 1] = `(
+            CAST(u.id AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR LOWER(u.email) LIKE $${qi} ESCAPE '\\'
+            OR LOWER(COALESCE(u.full_name, '')) LIKE $${qi} ESCAPE '\\'
+            OR LOWER(COALESCE(u.phone, '')) LIKE $${qi} ESCAPE '\\'
+            OR LOWER(COALESCE(r.code, '')) LIKE $${qi} ESCAPE '\\'
+            OR LOWER(COALESCE(r.name_vi, '')) LIKE $${qi} ESCAPE '\\'
+            OR LOWER(COALESCE(r.name_en, '')) LIKE $${qi} ESCAPE '\\'
+        )`;
     }
 
     return {
@@ -148,8 +161,8 @@ const _normalizeSort = (sortBy = 'created_at', sortOrder = 'DESC') => ({
     sortDirection: String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC',
 });
 
-const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC' } = {}) => {
-    const filter = { roleCode, roleCodes, isActive, email };
+const findAll = async ({ roleCode, roleCodes, isActive, q, email, page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC' } = {}) => {
+    const filter = { roleCode, roleCodes, isActive, q, email };
     const { where, params, nextIdx } = _buildUserFilter(filter);
     const offset = (page - 1) * limit;
     const { sortColumn, sortDirection } = _normalizeSort(sortBy, sortOrder);
@@ -179,8 +192,8 @@ const findAll = async ({ roleCode, roleCodes, isActive, email, page = 1, limit =
     return { items, total };
 };
 
-const countAll = async ({ roleCode, roleCodes, isActive, email } = {}) => {
-    const { where, params } = _buildUserFilter({ roleCode, roleCodes, isActive, email });
+const countAll = async ({ roleCode, roleCodes, isActive, q, email } = {}) => {
+    const { where, params } = _buildUserFilter({ roleCode, roleCodes, isActive, q, email });
 
     const { rows } = await db.query(
         `SELECT COUNT(u.id)::int AS total

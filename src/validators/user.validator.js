@@ -28,6 +28,7 @@ const listUsersSchema = Joi.object({
     limit: Joi.number().integer().min(1).max(100).default(20),
     roleCode: Joi.string().valid(...VALID_ROLES).optional(),
     isActive: Joi.boolean().optional(),
+    q: Joi.string().trim().max(255).optional().allow(''),
     email: Joi.string().trim().max(255).optional().allow(''),
     sortBy: Joi.string()
         .valid('id', 'created_at', 'updated_at', 'email', 'full_name', 'phone', 'last_login_at')

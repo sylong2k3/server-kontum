@@ -82,6 +82,8 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('geoserver_layer', extra.geoserver_layer);
     addField('geoserver_store', extra.geoserver_store);
     addField('oob_accuracy',    extra.oob_accuracy);
+    addField('test_accuracy',   extra.test_accuracy);
+    addField('test_kappa',      extra.test_kappa);
     addField('s2_image_count',  extra.s2_image_count);
     addField('ls_image_count',  extra.ls_image_count);
     addField('duration_ms',     extra.duration_ms);
@@ -89,6 +91,11 @@ const updateStatus = async (id, status, extra = {}) => {
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
         vals.push(extra.province_summary ? JSON.stringify(extra.province_summary) : null);
+    }
+
+    if (extra.sample_quotas !== undefined) {
+        sets.push(`sample_quotas = $${idx++}`);
+        vals.push(extra.sample_quotas ? JSON.stringify(extra.sample_quotas) : null);
     }
 
     const { rows } = await db.query(

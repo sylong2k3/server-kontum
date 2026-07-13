@@ -12,7 +12,7 @@ router.post('/rgb',        optionalAuth, asyncHandler(ctrl.getRgb));
 router.post('/ndvi',       optionalAuth, asyncHandler(ctrl.getNdvi));
 router.post('/heat-map',   optionalAuth, asyncHandler(ctrl.getHeatmap));
 router.post('/classified', optionalAuth, asyncHandler(ctrl.getClassified));
-router.post('/compare',    optionalAuth, asyncHandler(ctrl.getCompare));
+router.post('/fire-risk',  optionalAuth, asyncHandler(ctrl.getFireRisk));
 
 // Tile proxy — public. Hides raw GEE token from client; enables CORS.
 // Pattern mirrors /weather/tiles/:type/:z/:x/:y

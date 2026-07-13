@@ -27,7 +27,13 @@ const getHistory = async (req, res) => {
 const refresh = async (req, res) => {
     const year  = req.body?.year  ? parseInt(req.body.year,  10) : null;
     const month = req.body?.month ? parseInt(req.body.month, 10) : null;
-    const snapshot = await svc.refresh({ year, month });
+    // Optional v3 ground-truth overrides — fall back to env defaults in svc.refresh.
+    const groundTruthAssetId = req.body?.groundTruthAssetId
+        ? String(req.body.groundTruthAssetId).trim() : undefined;
+    const gtBufferM    = req.body?.gtBufferM    != null ? Number(req.body.gtBufferM)    : undefined;
+    const minFieldTest = req.body?.minFieldTest != null ? Number(req.body.minFieldTest) : undefined;
+
+    const snapshot = await svc.refresh({ year, month, groundTruthAssetId, gtBufferM, minFieldTest });
     CREATED(res, 'Đã kích hoạt phân loại lớp phủ rừng.', { snapshot });
 };
 
@@ -89,6 +95,10 @@ function formatSnapshot(s) {
         trigger:         s.trigger || 'cron',
         provinceSummary: s.province_summary,
         oobAccuracy:     s.oob_accuracy,
+        testAccuracy:    s.test_accuracy ?? null,
+        testKappa:       s.test_kappa ?? null,
+        sampleQuotas:    s.sample_quotas ?? null,
+        modelParams:     s.model_params ?? null,
         durationMs:      s.duration_ms ?? null,
         geoserverLayer:  s.geoserver_layer || null,
         computedAt:      s.computed_at,

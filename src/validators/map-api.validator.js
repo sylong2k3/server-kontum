@@ -34,6 +34,7 @@ const updateKeySchema = Joi.object({
 const listKeysSchema = Joi.object({
     page:      Joi.number().integer().min(1).default(1),
     limit:     Joi.number().integer().min(1).max(100).default(20),
+    q:         Joi.string().trim().max(255).optional().allow(''),
     layer_id:  Joi.number().integer().positive().optional(),
     is_active: Joi.boolean().optional(),
 });
