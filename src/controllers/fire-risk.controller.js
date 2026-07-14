@@ -17,7 +17,8 @@ const getLatest = async (req, res) => {
             analysisDate:        snapshot.analysis_date,
             status:              snapshot.status,
             provinceSummary:     snapshot.province_summary,
-            districtStats:       snapshot.district_stats,
+            // districtStats đã gỡ — bây giờ tính cấp cảnh báo trên polygon tỉnh
+            // (RanhGioiTinh_Polygon), không phân theo huyện nữa.
             pNesterovStats:      snapshot.p_nesterov_stats,
             s2CoverageRatio:     snapshot.s2_coverage_ratio,
             geoserverLayer:      snapshot.geoserver_layer || null,

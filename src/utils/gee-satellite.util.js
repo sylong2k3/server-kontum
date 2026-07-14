@@ -86,18 +86,69 @@ function getKonTumRegion() {
     return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
 }
 
+// Đường dẫn file polygon huyện WGS84 (do người dùng convert từ QGIS: dissolve
+// theo CODE_2002 → polygonize → save GeoJSON EPSG:4326). Có thể override qua
+// env `KON_TUM_DISTRICTS_GEOJSON`.
+const KON_TUM_DISTRICTS_PATH = process.env.KON_TUM_DISTRICTS_GEOJSON
+    || path.resolve(__dirname, '../../data/RanhGioiHuyen_WGS84.geojson');
+
+let _cachedDistrictsFC = null;
+let _cachedDistrictsSource = null;
+
 /**
- * Districts (huyện) của Kon Tum lấy từ FAO/GAUL/2015/level2.
- * Trả về 8 features với các thuộc tính ADM0_NAME, ADM1_NAME, ADM2_NAME, ADM2_CODE.
+ * Districts (huyện) của Kon Tum. Ưu tiên đọc file polygon WGS84 local nếu tồn
+ * tại (cấu trúc chuẩn: FeatureCollection Polygon/MultiPolygon EPSG:4326 với
+ * thuộc tính CODE_2002, NAME_VN, NAME_EN). Nếu không có file → fallback về
+ * FAO/GAUL/2015/level2 (8 huyện cũ, mã ADM2_CODE).
  *
- * Cần cho reduceRegions() ở fire-risk / forest-classification: mỗi feature giữ
- * nguyên geometry huyện — sau khi evaluate() thì client có polygon để render
- * (khắc phục tình trạng client fallback lat/lng về 0,0 khi features.geometry=null).
+ * Trả về ee.FeatureCollection dùng cho reduceRegions() ở fire-risk +
+ * forest-classification. Mỗi feature giữ nguyên geometry để client render.
  */
 function getKonTumDistricts() {
-    return ee.FeatureCollection('FAO/GAUL/2015/level2')
+    if (_cachedDistrictsFC) return _cachedDistrictsFC;
+
+    if (fs.existsSync(KON_TUM_DISTRICTS_PATH)) {
+        try {
+            const raw = fs.readFileSync(KON_TUM_DISTRICTS_PATH, 'utf8');
+            const doc = JSON.parse(raw);
+            if (doc?.type === 'FeatureCollection' && Array.isArray(doc.features) && doc.features.length > 0) {
+                const eeFeats = doc.features.map((f) => {
+                    const geom = f.geometry;
+                    // Chuẩn hoá properties về ADM2_CODE/ADM2_NAME để tương thích
+                    // với mapper hiện có (fire-risk.service, forest-classification.service).
+                    const p = f.properties || {};
+                    const props = {
+                        ADM2_CODE: p.CODE_2002 || p.ADM2_CODE || p.OBJECTID || null,
+                        ADM2_NAME: p.NAME_VN   || p.ADM2_NAME || p.NAME_EN || null,
+                        NAME_EN:   p.NAME_EN   || p.ADM2_NAME || null,
+                        NAME_VN:   p.NAME_VN   || null,
+                        source:    'LOCAL_RANHGIOIHUYEN_WGS84',
+                    };
+                    return ee.Feature(ee.Geometry(geom), props);
+                });
+                _cachedDistrictsFC     = ee.FeatureCollection(eeFeats);
+                _cachedDistrictsSource = 'LOCAL_RANHGIOIHUYEN_WGS84';
+                return _cachedDistrictsFC;
+            }
+            console.warn(`[GEE-SAT] ${KON_TUM_DISTRICTS_PATH} không có features hợp lệ, fallback FAO/GAUL.`);
+        } catch (err) {
+            console.warn(`[GEE-SAT] Lỗi đọc ${KON_TUM_DISTRICTS_PATH}: ${err.message}, fallback FAO/GAUL.`);
+        }
+    }
+
+    _cachedDistrictsFC = ee.FeatureCollection('FAO/GAUL/2015/level2')
         .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
         .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
+    _cachedDistrictsSource = 'FAO_GAUL_2015_LEVEL2';
+    return _cachedDistrictsFC;
+}
+
+/**
+ * Nguồn thực tế của getKonTumDistricts đã cache — dùng để log / debug.
+ * Trả về `null` nếu getKonTumDistricts() chưa được gọi.
+ */
+function getKonTumDistrictsSource() {
+    return _cachedDistrictsSource;
 }
 
 // ── Local Kon Tum boundary polygon ────────────────────────────────────────────
@@ -385,6 +436,7 @@ module.exports = {
     getEeDownloadUrl,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumDistrictsSource,
     getKonTumBoundaryGeometry,
     toEeGeometry,
     maskLandsatC2,
