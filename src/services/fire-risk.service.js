@@ -31,6 +31,7 @@ const {
     eeEval: eeEvaluate,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumDistrictsSource,
     getEeMapId,
     todayUtc,
     fmtDate,
@@ -201,74 +202,6 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCas
 }
 
 /**
- * Compute province-level summary.
- */
-async function computeProvinceSummary(riskLevel, pNesterov, s2Observed45, blendCase, modelConfidenceClass, dataSourceClass, region) {
-    const SCALE = 500;
-    const pixelHa = (SCALE / 1000) ** 2 * 100;
-
-    const reduced = riskLevel
-        .addBands(pNesterov.rename('pNesterov'))
-        .addBands(s2Observed45.rename('s2Obs'))
-        .addBands(blendCase.rename('blendCase'))
-        .addBands(modelConfidenceClass.rename('confidenceClass'))
-        .addBands(dataSourceClass.rename('dataSource'))
-        .reduceRegion({
-            reducer:   ee.Reducer.frequencyHistogram()
-                .combine(ee.Reducer.mean(), null, true),
-            geometry:  region.geometry(),
-            scale:     SCALE,
-            tileScale: 8,
-            maxPixels: 1e10,
-        });
-
-    const result = await eeEvaluate(reduced);
-    const hist       = result.riskLevel_histogram || {};
-    const blendHist  = result.blendCase_histogram || {};
-    const confHist   = result.confidenceClass_histogram || {};
-    const dsHist     = result.dataSource_histogram || {};
-    // Chỉ giữ phân bố diện tích theo cấp (ha). Bỏ totalForestHa + avgRiskLevel
-    // theo yêu cầu — client không cần khái niệm "rừng tổng" (dễ nhầm với diện
-    // tích rừng thực). Diện tích ở đây là số pixel × 25 ha ở scale 500 m,
-    // KHÔNG phải sinh khối rừng.
-    const levelDist = {};
-    let maxLevelWithArea = 0;
-    let totalWithArea    = 0;
-    for (let l = 0; l <= 5; l++) {
-        const ha = (hist[String(l)] || 0) * pixelHa;
-        levelDist[l] = Math.round(ha * 100) / 100;
-        if (l >= 1 && ha > 0) {
-            if (l > maxLevelWithArea) maxLevelWithArea = l;
-            totalWithArea += ha;
-        }
-    }
-
-    return {
-        // Cấp cảnh báo cao nhất có diện tích > 0 trong toàn tỉnh — để client
-        // đọc badge nhanh mà không phải scan lại riskLevelDist.
-        maxLevel:         maxLevelWithArea,
-        riskLevelDist:    levelDist,
-        blendCaseHa: {
-            withInput:    Math.round((blendHist['1'] || 0) * pixelHa * 100) / 100,
-            withoutInput: Math.round((blendHist['2'] || 0) * pixelHa * 100) / 100,
-        },
-        confidenceHa: {
-            none:   Math.round((confHist['0'] || 0) * pixelHa * 100) / 100,
-            low:    Math.round((confHist['1'] || 0) * pixelHa * 100) / 100,
-            medium: Math.round((confHist['2'] || 0) * pixelHa * 100) / 100,
-            high:   Math.round((confHist['3'] || 0) * pixelHa * 100) / 100,
-        },
-        dataSourceHa: {
-            noData:         Math.round((dsHist['0'] || 0) * pixelHa * 100) / 100,
-            fallbackOnly:   Math.round((dsHist['1'] || 0) * pixelHa * 100) / 100,
-            observed45Days: Math.round((dsHist['2'] || 0) * pixelHa * 100) / 100,
-        },
-        pNesterovProvMean: Math.round((result.pNesterov_mean || 0) * 100) / 100,
-        s2CoverageRatio:   Math.round((result.s2Obs_mean || 0) * 1000) / 1000,
-    };
-}
-
-/**
  * Compute P Nesterov province-level stats.
  */
 async function computePNesterovStats(pNesterov, region) {
@@ -341,58 +274,116 @@ async function publishRaster(analysisDate, gcsPath) {
     });
 }
 
-// ── Province-level vector features ────────────────────────────────────────────
+// ── District → province aggregation ──────────────────────────────────────────
 
 /**
- * Build fire_risk_features rows từ province summary + polygon tỉnh.
+ * Aggregate provinceSummary trực tiếp từ mảng districtStats — thay cho
+ * reduceRegion province riêng biệt. Tiết kiệm 1 evaluate() (~24s) và loại
+ * bỏ bug: reduceRegion province từng trả riskLevelDist=0 khi geodesic/CRS
+ * lệch với reduceRegions của districts (dẫn tới avgRiskLevel=null,
+ * totalForestHa=0 dù districtStats có số thực).
  *
- * Bỏ hoàn toàn phân tích theo huyện (RanhGioiHuyen) — cấp cảnh báo giờ tính
- * cho TOÀN TỈNH. Mỗi cấp có diện tích > 0 sẽ tạo 1 feature với chung 1
- * polygon tỉnh (RanhGioiTinh_Polygon.geojson). Client filter theo cấp và vẫn
- * có polygon để render trên bản đồ.
+ * @param {Array<object>} districtStats — output của computeDistrictStats
+ * @returns {object} shape giống computeProvinceSummary cũ
+ */
+function aggregateProvinceFromDistricts(districtStats) {
+    const riskLevelDist = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const blendCaseHa   = { withInput: 0, withoutInput: 0 };
+    const confidenceHa  = { none: 0, low: 0, medium: 0, high: 0 };
+    let totalForestHa   = 0;
+    let weightedRiskSum = 0; // Σ(level × ha) — dùng tính avgRiskLevel
+    let weightedPSum    = 0; // Σ(pNesterovMean × totalForestHa)
+    let weightedS2Sum   = 0; // Σ(s2Coverage × totalForestHa)
+
+    for (const d of districtStats || []) {
+        const dTotal = Number(d.totalForestHa) || 0;
+        totalForestHa += dTotal;
+        for (let l = 0; l <= 5; l++) {
+            const ha = Number(d.riskLevelDist?.[l]) || 0;
+            riskLevelDist[l] += ha;
+            if (l >= 1) weightedRiskSum += l * ha;
+        }
+        blendCaseHa.withInput    += Number(d.blendCaseHa?.withInput)    || 0;
+        blendCaseHa.withoutInput += Number(d.blendCaseHa?.withoutInput) || 0;
+        confidenceHa.none        += Number(d.confidenceHa?.none)   || 0;
+        confidenceHa.low         += Number(d.confidenceHa?.low)    || 0;
+        confidenceHa.medium      += Number(d.confidenceHa?.medium) || 0;
+        confidenceHa.high        += Number(d.confidenceHa?.high)   || 0;
+        if (dTotal > 0) {
+            weightedPSum  += (Number(d.pNesterovMean) || 0) * dTotal;
+            weightedS2Sum += (Number(d.s2Coverage)    || 0) * dTotal;
+        }
+    }
+
+    let maxLevel = 0;
+    for (let l = 5; l >= 1; l--) if ((riskLevelDist[l] || 0) > 0) { maxLevel = l; break; }
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const round3 = (n) => Math.round(n * 1000) / 1000;
+
+    return {
+        maxLevel,
+        riskLevelDist: Object.fromEntries(
+            Object.entries(riskLevelDist).map(([k, v]) => [k, round2(v)]),
+        ),
+        totalForestHa: round2(totalForestHa),
+        avgRiskLevel:  totalForestHa > 0
+            ? Math.round((weightedRiskSum / totalForestHa) * 100) / 100
+            : null,
+        blendCaseHa: {
+            withInput:    round2(blendCaseHa.withInput),
+            withoutInput: round2(blendCaseHa.withoutInput),
+        },
+        confidenceHa: {
+            none:   round2(confidenceHa.none),
+            low:    round2(confidenceHa.low),
+            medium: round2(confidenceHa.medium),
+            high:   round2(confidenceHa.high),
+        },
+        pNesterovProvMean: totalForestHa > 0 ? round2(weightedPSum  / totalForestHa) : 0,
+        s2CoverageRatio:   totalForestHa > 0 ? round3(weightedS2Sum / totalForestHa) : 0,
+    };
+}
+
+// ── District-level vector features ───────────────────────────────────────────
+
+/**
+ * Build fire_risk_features rows từ districtStats: mỗi huyện + mỗi cấp có
+ * diện tích > 0 → 1 row. Geometry là polygon huyện (từ reduceRegions output,
+ * đã ở EPSG:4326). Persist geojson → PostGIS ST_GeomFromGeoJSON.
  *
  * @param {string} snapshotId
- * @param {object} provinceSummary  — có riskLevelDist { 0..5 → ha }
- * @param {object} provinceGeometry — GeoJSON Polygon/MultiPolygon EPSG:4326 của tỉnh
- * @param {object} provinceCentroid — { lng, lat } tính từ bbox tỉnh
- * @param {object} pNesterovStats   — có mean (đưa vào từng feature)
- * @param {number} s2CoverageRatio  — 0..1
+ * @param {Array<object>} districtStats — output của computeDistrictStats
+ * @returns {Array<object>} rows cho repo.replaceFeatures
  */
-function buildFeaturesFromProvinceSummary(snapshotId, provinceSummary, provinceGeometry, provinceCentroid, pNesterovStats, s2CoverageRatio) {
+function buildFeaturesFromDistrictStats(snapshotId, districtStats) {
     const rows = [];
-    // ST_GeomFromGeoJSON chỉ đọc `type` + `coordinates`, không cần strip
-    // `_properties` — nhưng để an toàn cho các ORM khác, chỉ stringify 2 field.
-    const geoJsonText = provinceGeometry
-        ? JSON.stringify({ type: provinceGeometry.type, coordinates: provinceGeometry.coordinates })
-        : null;
-    const centroid    = provinceCentroid || null;
-    const pMean       = Number.isFinite(pNesterovStats?.mean) ? pNesterovStats.mean : null;
-    const s2Cov       = Number.isFinite(s2CoverageRatio) ? s2CoverageRatio : null;
-    const dist        = provinceSummary?.riskLevelDist || {};
-    // Properties gốc file: Ten_tinh, Ma_DVHC, Dien_tich, Dan_so, …
-    const provProps   = provinceGeometry?._properties || {};
-    // Tên tỉnh ưu tiên từ file (có dấu tiếng Việt), fallback 'Kon Tum'.
-    const districtName = provProps.Ten_tinh || 'Kon Tum';
-    for (let l = 1; l <= 5; l++) {
-        const areaHa = dist[l] || 0;
-        if (areaHa <= 0) continue;
-        rows.push({
-            risk_level:      l,
-            district_code:   provProps.Ma_DVHC ? String(provProps.Ma_DVHC) : null,
-            district_name:   districtName,
-            area_ha:         areaHa,
-            p_nesterov_mean: pMean,
-            ndvi_mean:       null,
-            properties: {
-                s2Coverage:  s2Cov,
-                centroid,
-                scope:       'province',                    // để client phân biệt với record huyện cũ
-                provinceAreaHa: provProps.Dien_tich || null, // diện tích thực từ file (nếu có)
-                provinceCode:   provProps.Ma_DVHC || null,
-                provinceName:   districtName,
-            },
-            geojson: geoJsonText,
-        });
+    for (const d of districtStats || []) {
+        const dist = d.riskLevelDist || {};
+        const geoJsonText = d.geometry
+            ? JSON.stringify({ type: d.geometry.type, coordinates: d.geometry.coordinates })
+            : null;
+        const centroid = d.centroid || null;
+        const pMean    = Number.isFinite(d.pNesterovMean) ? d.pNesterovMean : null;
+        const s2Cov    = Number.isFinite(d.s2Coverage)    ? d.s2Coverage    : null;
+        for (let l = 1; l <= 5; l++) {
+            const areaHa = Number(dist[l]) || 0;
+            if (areaHa <= 0) continue;
+            rows.push({
+                risk_level:      l,
+                district_code:   d.unitCode ? String(d.unitCode) : null,
+                district_name:   d.name || null,
+                area_ha:         areaHa,
+                p_nesterov_mean: pMean,
+                ndvi_mean:       null,
+                properties: {
+                    s2Coverage: s2Cov,
+                    centroid,
+                    scope:      'district',
+                    totalForestHa: d.totalForestHa,
+                },
+                geojson: geoJsonText,
+            });
+        }
     }
     return rows;
 }
@@ -449,24 +440,25 @@ async function runAnalysis(analysisDate, {
 
     try {
         // ─────────────────────────────────────────────────────────────────
-        // Region chuẩn cho toàn bộ fire-risk = polygon tỉnh Kon Tum lấy từ
-        // file local `server/data/RanhGioiTinh_Polygon.geojson` (CRS: WGS84/
-        // CRS84, MultiPolygon 2 mảnh). File này được đọc & strip Z (0) ở
-        // `getKonTumBoundaryGeometry()` trong utils/gee-satellite.util.js.
+        // Region tính toán = polygon tỉnh Kon Tum (RanhGioiTinh_Polygon.geojson,
+        // WGS84 MultiPolygon 2 mảnh). Đọc + strip Z trong `getKonTumBoundaryGeometry()`.
         //
-        // Toàn bộ chain fire-risk tính TRÊN CHÍNH polygon này:
-        //   - runFireRiskAnalysis(region, ...)      → clip mọi ee.Image
-        //   - reduceRegion(geometry: region.geometry(), ...) → stats scope tỉnh
-        //   - Feature GeoJSON polygon trả client   → outline trên map
-        //   - Centroid từ bbox polygon             → fly-to
-        // Không dùng FAO/GAUL, không tính theo huyện.
+        // Districts = polygon huyện (`RanhGioiHuyen_WGS84.geojson` nếu có, fallback
+        // `RanhGioiHuyen_Polygon.geojson` UTM 48N — util tự pass projection cho GEE).
+        // reduceRegions output geometry EPSG:4326 → an toàn để persist PostGIS.
         // ─────────────────────────────────────────────────────────────────
         const region = await log.run(
             'Load Kon Tum region polygon (RanhGioiTinh_Polygon.geojson, WGS84 MultiPolygon)',
             () => Promise.resolve(getKonTumRegion()),
         );
 
-        const provinceGeoJson = loadLocalProvinceGeoJson();
+        const districts = await log.run(
+            'Load Kon Tum districts collection (local geojson, tự detect CRS)',
+            () => Promise.resolve(getKonTumDistricts()),
+        );
+        log.mark('Districts source', `source=${getKonTumDistrictsSource()}`);
+
+        const provinceGeoJson  = loadLocalProvinceGeoJson();
         const provinceCentroid = computeCentroid(provinceGeoJson);
         log.mark('Province polygon loaded',
             `type=${provinceGeoJson?.type} centroid=(${provinceCentroid?.lng?.toFixed(3)}, ${provinceCentroid?.lat?.toFixed(3)})`);
@@ -484,22 +476,24 @@ async function runAnalysis(analysisDate, {
             riskLevel,
             blendCase,
             modelConfidenceClass,
-            dataSourceClass,
         } = analysis;
         const pNesterov    = currentPredictors.select('NesterovP').rename('NesterovP');
         const s2Observed45 = currentPredictors.select('S2_Observed45').rename('S2_Observed45');
 
-        // 2 evaluate() heavy — tách tuần tự thay vì Promise.all. Đã bỏ
-        // computeDistrictStats theo yêu cầu: chỉ tính stats trên polygon tỉnh
-        // (RanhGioiTinh_Polygon), không phân theo huyện nữa.
-        const provinceSummary = await log.run(
-            'EVALUATE province summary (reduceRegion freq-histogram × 5 bands)',
-            () => computeProvinceSummary(riskLevel, pNesterov, s2Observed45,
-                blendCase, modelConfidenceClass, dataSourceClass, region),
-            { note: 'scale=500m tileScale=8 maxPixels=1e10' },
+        // 1 evaluate() heavy cho districts. Bỏ hoàn toàn reduceRegion province
+        // riêng — provinceSummary được aggregate từ districtStats phía dưới
+        // (tiết kiệm ~24s + đảm bảo nhất quán giữa 2 khung số).
+        const districtStats = await log.run(
+            'EVALUATE district stats (reduceRegions freq-histogram + mean × 5 bands)',
+            () => computeDistrictStats(riskLevel, pNesterov, s2Observed45,
+                blendCase, modelConfidenceClass, districts, region),
+            { note: 'scale=500m tileScale=8' },
         );
-        log.mark('Province summary',
-            `maxLevel=${provinceSummary.maxLevel} pMean=${provinceSummary.pNesterovProvMean} s2Cov=${provinceSummary.s2CoverageRatio}`);
+        log.mark('District stats', `rows=${districtStats.length}`);
+
+        const provinceSummary = aggregateProvinceFromDistricts(districtStats);
+        log.mark('Province summary (aggregated)',
+            `maxLevel=${provinceSummary.maxLevel} totalHa=${provinceSummary.totalForestHa} avgLvl=${provinceSummary.avgRiskLevel} pMean=${provinceSummary.pNesterovProvMean} s2Cov=${provinceSummary.s2CoverageRatio}`);
 
         const pNesterovStats = await log.run(
             'EVALUATE P Nesterov percentile stats (province-level)',
@@ -529,7 +523,7 @@ async function runAnalysis(analysisDate, {
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary:  provinceSummary,
-                district_stats:    null,   // gỡ theo yêu cầu — không tính theo huyện nữa
+                district_stats:    districtStats,
                 p_nesterov_stats:  pNesterovStats,
                 s2_coverage_ratio: provinceSummary.s2CoverageRatio,
                 computed_at:       new Date(),
@@ -538,11 +532,8 @@ async function runAnalysis(analysisDate, {
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
             }));
 
-        const featureRows = buildFeaturesFromProvinceSummary(
-            snapshot.id, provinceSummary, provinceGeoJson, provinceCentroid,
-            pNesterovStats, provinceSummary.s2CoverageRatio,
-        );
-        await log.run(`Persist ${featureRows.length} province-level feature rows`,
+        const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);
+        await log.run(`Persist ${featureRows.length} district-level feature rows`,
             () => repo.replaceFeatures(snapshot.id, featureRows));
 
         if (submitExport) {

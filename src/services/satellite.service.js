@@ -20,6 +20,8 @@
  */
 
 const crypto = require('crypto');
+const os     = require('os');
+const path   = require('path');
 
 const DEBUG = process.env.SATELLITE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
 function dbg(tag, msg, data) {
@@ -700,7 +702,8 @@ async function pollPublishes() {
 
                 if (published) {
                     // Create standalone GeoTIFF coverage store in GeoServer.
-                    const localTmp = `/tmp/${fileName}`;
+                    // Use os.tmpdir() so Windows dev also works.
+                    const localTmp = path.join(os.tmpdir(), fileName);
                     const gsLayer  = await geoserver.publishRasterLayer({
                         geoserver_store: storeName,
                         source_url:      localTmp,

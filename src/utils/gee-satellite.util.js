@@ -86,56 +86,96 @@ function getKonTumRegion() {
     return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
 }
 
-// Đường dẫn file polygon huyện WGS84 (do người dùng convert từ QGIS: dissolve
-// theo CODE_2002 → polygonize → save GeoJSON EPSG:4326). Có thể override qua
-// env `KON_TUM_DISTRICTS_GEOJSON`.
-const KON_TUM_DISTRICTS_PATH = process.env.KON_TUM_DISTRICTS_GEOJSON
+// Đường dẫn file polygon huyện. Ưu tiên WGS84 (do QGIS convert). Nếu vắng,
+// fallback sang file gốc `RanhGioiHuyen_Polygon.geojson` (thường EPSG:32648
+// UTM zone 48N), tự pass projection cho GEE. Có thể override qua env
+// `KON_TUM_DISTRICTS_GEOJSON` (path bất kỳ, tự detect CRS từ trường `crs`).
+const KON_TUM_DISTRICTS_PATH_WGS84 = process.env.KON_TUM_DISTRICTS_GEOJSON
     || path.resolve(__dirname, '../../data/RanhGioiHuyen_WGS84.geojson');
+const KON_TUM_DISTRICTS_PATH_RAW = path.resolve(
+    __dirname, '../../data/RanhGioiHuyen_Polygon.geojson',
+);
 
 let _cachedDistrictsFC = null;
 let _cachedDistrictsSource = null;
 
 /**
- * Districts (huyện) của Kon Tum. Ưu tiên đọc file polygon WGS84 local nếu tồn
- * tại (cấu trúc chuẩn: FeatureCollection Polygon/MultiPolygon EPSG:4326 với
- * thuộc tính CODE_2002, NAME_VN, NAME_EN). Nếu không có file → fallback về
- * FAO/GAUL/2015/level2 (8 huyện cũ, mã ADM2_CODE).
+ * Districts (huyện) của Kon Tum. Thứ tự ưu tiên:
+ *   1. File WGS84 (`RanhGioiHuyen_WGS84.geojson` hoặc env override) — CRS
+ *      EPSG:4326, có `NAME_VN` + `CODE_2002` thực.
+ *   2. File gốc UTM (`RanhGioiHuyen_Polygon.geojson`) — CRS đọc từ trường
+ *      `doc.crs` (thường EPSG:32648). Properties có thể thiếu tên thực
+ *      (placeholder "xa 1..N"); ta gán label theo index.
+ *   3. Fallback FAO/GAUL/2015/level2 (8 huyện cũ 2015, đã lỗi thời).
  *
- * Trả về ee.FeatureCollection dùng cho reduceRegions() ở fire-risk +
- * forest-classification. Mỗi feature giữ nguyên geometry để client render.
+ * Trả về ee.FeatureCollection dùng cho reduceRegions(). GEE tự reproject
+ * khi ta khai báo đúng projection ở ee.Geometry(...). reduceRegions output
+ * feature.geometry sẽ ở EPSG:4326 (GEE mặc định) — an toàn để persist vào
+ * PostGIS + tính centroid client-side.
  */
 function getKonTumDistricts() {
     if (_cachedDistrictsFC) return _cachedDistrictsFC;
 
-    if (fs.existsSync(KON_TUM_DISTRICTS_PATH)) {
+    const tryLoad = (filePath) => {
+        if (!fs.existsSync(filePath)) return null;
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const doc = JSON.parse(raw);
+        if (doc?.type !== 'FeatureCollection'
+            || !Array.isArray(doc.features)
+            || doc.features.length === 0) return null;
+
+        const crsName = doc.crs?.properties?.name;
+        const epsg    = _parseEpsgCode(crsName);
+        const projLbl = epsg ? `EPSG:${epsg}` : null;
+        // Non-WGS84 (UTM v.v.) → geodesic=false + explicit projection.
+        // WGS84 hoặc thiếu CRS → default (EPSG:4326 geodesic).
+        const nonWgs84 = epsg && epsg !== '4326';
+
+        const eeFeats = doc.features.map((f, idx) => {
+            const g = f?.geometry;
+            if (!g) return null;
+            const clean = { type: g.type, coordinates: _stripZ(g.coordinates) };
+            const eeGeom = nonWgs84
+                ? ee.Geometry(clean, projLbl, false)
+                : ee.Geometry(clean);
+            const p = f.properties || {};
+            const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_EN || null;
+            // File có thể có placeholder "xa 1..N" — vẫn giữ để hiển thị
+            // được cho tới khi có data đúng. Không placeholder → gán index.
+            const name    = rawName || `Huyện ${idx + 1}`;
+            const rawCode = p.CODE_2002 || p.ADM2_CODE || p.OBJECTID || null;
+            const code    = rawCode != null ? String(rawCode) : `KT-${idx + 1}`;
+            return ee.Feature(eeGeom, {
+                ADM2_CODE: code,
+                ADM2_NAME: name,
+                NAME_EN:   p.NAME_EN || null,
+                NAME_VN:   name,
+                source:    projLbl ? `LOCAL_${projLbl}` : 'LOCAL_WGS84',
+            });
+        }).filter(Boolean);
+        if (eeFeats.length === 0) return null;
+        return {
+            fc:     ee.FeatureCollection(eeFeats),
+            source: projLbl
+                ? `LOCAL_RANHGIOIHUYEN_${projLbl}`
+                : 'LOCAL_RANHGIOIHUYEN_WGS84',
+        };
+    };
+
+    for (const p of [KON_TUM_DISTRICTS_PATH_WGS84, KON_TUM_DISTRICTS_PATH_RAW]) {
         try {
-            const raw = fs.readFileSync(KON_TUM_DISTRICTS_PATH, 'utf8');
-            const doc = JSON.parse(raw);
-            if (doc?.type === 'FeatureCollection' && Array.isArray(doc.features) && doc.features.length > 0) {
-                const eeFeats = doc.features.map((f) => {
-                    const geom = f.geometry;
-                    // Chuẩn hoá properties về ADM2_CODE/ADM2_NAME để tương thích
-                    // với mapper hiện có (fire-risk.service, forest-classification.service).
-                    const p = f.properties || {};
-                    const props = {
-                        ADM2_CODE: p.CODE_2002 || p.ADM2_CODE || p.OBJECTID || null,
-                        ADM2_NAME: p.NAME_VN   || p.ADM2_NAME || p.NAME_EN || null,
-                        NAME_EN:   p.NAME_EN   || p.ADM2_NAME || null,
-                        NAME_VN:   p.NAME_VN   || null,
-                        source:    'LOCAL_RANHGIOIHUYEN_WGS84',
-                    };
-                    return ee.Feature(ee.Geometry(geom), props);
-                });
-                _cachedDistrictsFC     = ee.FeatureCollection(eeFeats);
-                _cachedDistrictsSource = 'LOCAL_RANHGIOIHUYEN_WGS84';
+            const loaded = tryLoad(p);
+            if (loaded) {
+                _cachedDistrictsFC     = loaded.fc;
+                _cachedDistrictsSource = loaded.source;
                 return _cachedDistrictsFC;
             }
-            console.warn(`[GEE-SAT] ${KON_TUM_DISTRICTS_PATH} không có features hợp lệ, fallback FAO/GAUL.`);
         } catch (err) {
-            console.warn(`[GEE-SAT] Lỗi đọc ${KON_TUM_DISTRICTS_PATH}: ${err.message}, fallback FAO/GAUL.`);
+            console.warn(`[GEE-SAT] Lỗi đọc ${p}: ${err.message}`);
         }
     }
 
+    console.warn('[GEE-SAT] Không tìm được file huyện local — fallback FAO/GAUL/2015 (8 huyện cũ 2015).');
     _cachedDistrictsFC = ee.FeatureCollection('FAO/GAUL/2015/level2')
         .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
         .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));

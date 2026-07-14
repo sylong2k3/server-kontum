@@ -5,6 +5,8 @@
  * Used by fire-risk.service.js and forest-classification.service.js.
  */
 
+const os   = require('os');
+const path = require('path');
 const { ee } = require('../configs/gge');
 const { eeEval } = require('./gee-satellite.util');
 const minioSvc   = require('../services/minio.service');
@@ -16,15 +18,21 @@ const GEE_POLL_MAX_ATTEMPTS = parseInt(process.env.GEE_POLL_MAX_ATTEMPTS, 10) ||
 /**
  * Poll a GEE export task until COMPLETED, FAILED, CANCELLED, or max attempts.
  * Returns final status string: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'TIMEOUT'.
+ *
+ * Terminal states are checked BEFORE `op.done`: a cancelled task has
+ * `done: true` AND `metadata.state === 'CANCELLED'`, so testing `done` first
+ * would misclassify it as COMPLETED.
  */
 async function pollGeeTask(taskName) {
     for (let i = 0; i < GEE_POLL_MAX_ATTEMPTS; i++) {
         await new Promise((r) => setTimeout(r, GEE_POLL_INTERVAL_MS));
         const ops   = await eeEval(ee.data.listOperations([taskName]));
         const op    = ops?.[0];
+        const state = op?.metadata?.state;
+        if (state === 'CANCELLED')  return 'CANCELLED';
+        if (state === 'FAILED')     return 'FAILED';
         if (op?.error)              return 'FAILED';
         if (op?.done)               return 'COMPLETED';
-        if (op?.metadata?.state === 'CANCELLED') return 'CANCELLED';
     }
     return 'TIMEOUT';
 }
@@ -57,7 +65,8 @@ async function publishRasterToMinio({
 
     const { Storage } = require('@google-cloud/storage');
     const storage     = new Storage(gcsKeyFile ? { keyFilename: gcsKeyFile } : {});
-    const localTmp    = `/tmp/${fileName}`;
+    // Use OS tmpdir so this works on Windows dev as well as Linux prod.
+    const localTmp    = path.join(os.tmpdir(), fileName);
 
     // Download from GCS.
     await storage.bucket(bucket).file(`${gcsPath}.tif`).download({ destination: localTmp });

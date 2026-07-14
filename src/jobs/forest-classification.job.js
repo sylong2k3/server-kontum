@@ -26,7 +26,9 @@ let pollTask     = null;
 const runMonthlyAnalysis = async () => {
     const now   = new Date();
     // Run for the previous month — e.g. on July 1 we classify June.
-    const d     = new Date(now.getUTCFullYear(), now.getUTCMonth() - 1, 1);
+    // Build the anchor in UTC so year/month reads back consistently regardless
+    // of the host timezone. `new Date(y, m, 1)` (local) → getUTC*() mixes clocks.
+    const d     = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
     const year  = d.getUTCFullYear();
     const month = d.getUTCMonth() + 1;
 
