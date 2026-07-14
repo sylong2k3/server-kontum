@@ -32,6 +32,7 @@ const {
     getKonTumRegion,
     getKonTumDistricts,
     getKonTumDistrictsSource,
+    getKonTumBoundarySource,
     getEeMapId,
     todayUtc,
     fmtDate,
@@ -230,11 +231,17 @@ async function computePNesterovStats(pNesterov, region) {
 
 /**
  * Submit GEE export task to Google Cloud Storage.
- * Returns GEE task name string (used for polling).
+ * Returns GEE task name string, or `null` when GCS is not configured.
+ *getKonTumBoundarySource
+ * Trả về null thay vì throw để analysis pipeline không fail toàn bộ khi
+ * người vận hành chưa cấu hình GEE_GCS_BUCKET — DB snapshot + tile URL
+ * vẫn được giữ, chỉ bỏ bước xuất GeoTIFF sang GeoServer.
  */
 async function submitGeeExportTask(riskLevel, analysisDate) {
     if (!cfg.isGcsConfigured()) {
-        throw new Error('GEE_GCS_BUCKET not configured — cannot export raster');
+        console.warn('[FIRE-RISK] GEE_GCS_BUCKET chưa cấu hình — bỏ qua raster export. ' +
+            'Set biến môi trường GEE_GCS_BUCKET + GOOGLE_APPLICATION_CREDENTIALS để bật.');
+        return null;
     }
     const dateTag   = analysisDate.replace(/-/g, '');
     const filePrefix = `fire_risk/kontum_fire_risk_level_${dateTag}`;
@@ -448,15 +455,20 @@ async function runAnalysis(analysisDate, {
         // reduceRegions output geometry EPSG:4326 → an toàn để persist PostGIS.
         // ─────────────────────────────────────────────────────────────────
         const region = await log.run(
-            'Load Kon Tum region polygon (RanhGioiTinh_Polygon.geojson, WGS84 MultiPolygon)',
+            'Load Kon Tum region polygon (local RanhGioiTinh_Polygon.geojson, fallback FAO/GAUL)',
             () => Promise.resolve(getKonTumRegion()),
         );
+        const provinceSource = getKonTumBoundarySource();
+        log.mark('Province source', `source=${provinceSource}` +
+            (provinceSource === 'FAO_GAUL_2015_LEVEL1' ? ' ⚠ dùng FAO fallback, cân nhắc copy file local' : ''));
 
         const districts = await log.run(
-            'Load Kon Tum districts collection (local geojson, tự detect CRS)',
+            'Load Kon Tum districts collection (local geojson, fallback FAO/GAUL)',
             () => Promise.resolve(getKonTumDistricts()),
         );
-        log.mark('Districts source', `source=${getKonTumDistrictsSource()}`);
+        const districtsSource = getKonTumDistrictsSource();
+        log.mark('Districts source', `source=${districtsSource}` +
+            (districtsSource === 'FAO_GAUL_2015_LEVEL2' ? ' ⚠ dùng FAO fallback, cân nhắc copy file local' : ''));
 
         const provinceGeoJson  = loadLocalProvinceGeoJson();
         const provinceCentroid = computeCentroid(provinceGeoJson);
@@ -541,9 +553,15 @@ async function runAnalysis(analysisDate, {
                 'Submit GEE raster export task (async → GCS)',
                 () => submitGeeExportTask(riskLevel, analysisDate),
             );
-            snapshot = await repo.updateStatus(snapshot.id, 'exporting', {
-                gee_task_id: taskName,
-            });
+            // submitGeeExportTask returns null when GCS is not configured — in that
+            // case keep status='completed' (all stats persisted) and skip export.
+            if (taskName) {
+                snapshot = await repo.updateStatus(snapshot.id, 'exporting', {
+                    gee_task_id: taskName,
+                });
+            } else {
+                log.mark('Raster export skipped', 'GEE_GCS_BUCKET chưa cấu hình');
+            }
         }
 
         log.summary();

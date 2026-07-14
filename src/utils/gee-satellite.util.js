@@ -208,35 +208,94 @@ function _parseEpsgCode(crsName) {
 }
 
 let _cachedBoundaryGeom = null;
+let _cachedBoundarySource = null;
 
 /**
- * Load the Kon Tum province polygon from the configured GeoJSON file.
- * Lazily evaluated and cached. Throws if the file is missing or invalid.
+ * Load the Kon Tum province polygon.
+ * Priority:
+ *   1. Local geojson (KON_TUM_BOUNDARY_PATH / RanhGioiTinh_Polygon.geojson)
+ *   2. FAO/GAUL/2015/level1 (dissolved) — fallback nếu file local vắng mặt
+ *      trên production. Kém chi tiết hơn ranh giới thực nhưng đủ cho tính stats.
+ *
+ * Lazily evaluated + cached singleton. Source hiển thị qua `getKonTumBoundarySource()`.
  */
 function getKonTumBoundaryGeometry() {
     if (_cachedBoundaryGeom) return _cachedBoundaryGeom;
-    const raw = fs.readFileSync(KON_TUM_BOUNDARY_PATH, 'utf8');
-    const doc = JSON.parse(raw);
-    const feature = doc.type === 'FeatureCollection'
-        ? doc.features?.[0]
-        : (doc.type === 'Feature' ? doc : null);
-    const geom = feature?.geometry || (doc.type === 'Polygon' || doc.type === 'MultiPolygon' ? doc : null);
-    if (!geom) throw new Error(`[GEE-SAT] Không tìm thấy polygon geometry trong file: ${KON_TUM_BOUNDARY_PATH}`);
 
-    const crsName   = doc.crs?.properties?.name;
-    const epsg      = _parseEpsgCode(crsName);
-    const projLabel = epsg ? `EPSG:${epsg}` : 'EPSG:4326';
+    // Try local file first — preferred.
+    if (fs.existsSync(KON_TUM_BOUNDARY_PATH)) {
+        try {
+            const raw = fs.readFileSync(KON_TUM_BOUNDARY_PATH, 'utf8');
+            const doc = JSON.parse(raw);
+            const feature = doc.type === 'FeatureCollection'
+                ? doc.features?.[0]
+                : (doc.type === 'Feature' ? doc : null);
+            const geom = feature?.geometry
+                || (doc.type === 'Polygon' || doc.type === 'MultiPolygon' ? doc : null);
+            if (!geom) throw new Error('Không thấy polygon geometry hợp lệ');
 
-    const cleanGeom = {
-        type: geom.type,
-        coordinates: _stripZ(geom.coordinates),
-    };
+            const crsName   = doc.crs?.properties?.name;
+            const epsg      = _parseEpsgCode(crsName);
+            const projLabel = epsg ? `EPSG:${epsg}` : 'EPSG:4326';
+            const cleanGeom = {
+                type: geom.type,
+                coordinates: _stripZ(geom.coordinates),
+            };
+            _cachedBoundaryGeom = epsg && epsg !== '4326'
+                ? ee.Geometry(cleanGeom, projLabel, false)
+                : ee.Geometry(cleanGeom);
+            _cachedBoundarySource = `LOCAL_${projLabel}`;
+            console.log(`[GEE-SAT] ✓ Province polygon: ${_cachedBoundarySource} (${KON_TUM_BOUNDARY_PATH})`);
+            return _cachedBoundaryGeom;
+        } catch (err) {
+            console.warn(`[GEE-SAT] Lỗi đọc province polygon ${KON_TUM_BOUNDARY_PATH}: ${err.message}`);
+        }
+    } else {
+        console.warn(`[GEE-SAT] Province polygon file KHÔNG tồn tại: ${KON_TUM_BOUNDARY_PATH}`);
+    }
 
-    // Non-WGS84 → geodesic=false (planar/UTM). WGS84 → geodesic=true default.
-    _cachedBoundaryGeom = epsg && epsg !== '4326'
-        ? ee.Geometry(cleanGeom, projLabel, false)
-        : ee.Geometry(cleanGeom);
+    // Fallback: FAO/GAUL/2015/level1 (dissolved to province).
+    console.warn('[GEE-SAT] ⚠ Fallback province polygon: FAO/GAUL/2015/level1 (Kon Tum). ' +
+        'Copy data/RanhGioiTinh_Polygon.geojson lên server để dùng ranh giới thực.');
+    const faoFC = ee.FeatureCollection('FAO/GAUL/2015/level1')
+        .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
+        .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
+    _cachedBoundaryGeom  = faoFC.geometry();
+    _cachedBoundarySource = 'FAO_GAUL_2015_LEVEL1';
     return _cachedBoundaryGeom;
+}
+
+/**
+ * Nguồn thực tế của getKonTumBoundaryGeometry đã cache — dùng để log / debug.
+ * Trả về `null` nếu getKonTumBoundaryGeometry() chưa được gọi.
+ */
+function getKonTumBoundarySource() {
+    return _cachedBoundarySource;
+}
+
+/**
+ * Diagnostic tại startup — kiểm tra file local nào có sẵn để cảnh báo sớm
+ * thay vì đợi first API request. Không throw, chỉ log.
+ */
+function logGeeGeometrySources() {
+    console.log('[GEE-SAT] ── Kiểm tra file geometry local ─────────────────');
+    const files = [
+        ['Province', KON_TUM_BOUNDARY_PATH],
+        ['Districts (WGS84)', KON_TUM_DISTRICTS_PATH_WGS84],
+        ['Districts (raw)',   KON_TUM_DISTRICTS_PATH_RAW],
+    ];
+    let allOk = true;
+    for (const [label, filePath] of files) {
+        const exists = fs.existsSync(filePath);
+        const mark   = exists ? '✓' : '✗';
+        console.log(`[GEE-SAT]  ${mark} ${label}: ${filePath}`);
+        if (!exists) allOk = false;
+    }
+    if (!allOk) {
+        console.log('[GEE-SAT] ⚠ Một số file thiếu — sẽ dùng FAO/GAUL làm fallback.');
+        console.log('[GEE-SAT]   Fix: copy nội dung folder server/data/ sang production server.');
+    }
+    console.log('[GEE-SAT] ──────────────────────────────────────────────────');
 }
 
 /**
@@ -478,6 +537,8 @@ module.exports = {
     getKonTumDistricts,
     getKonTumDistrictsSource,
     getKonTumBoundaryGeometry,
+    getKonTumBoundarySource,
+    logGeeGeometrySources,
     toEeGeometry,
     maskLandsatC2,
     prepL57,
