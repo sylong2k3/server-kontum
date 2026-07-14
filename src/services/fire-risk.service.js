@@ -54,8 +54,12 @@ let _cachedProvinceGeoJson = null;
 
 /**
  * Đọc polygon tỉnh Kon Tum từ RanhGioiTinh_Polygon.geojson. Cache singleton.
- * Trả về GeoJSON geometry (Polygon | MultiPolygon) EPSG:4326.
+ * Trả về { geometry, properties } với geometry đã strip Z (WGS84 2D).
  * KHÔNG evaluate() qua GEE — đọc thẳng file, chi phí ~ms.
+ *
+ * Properties file gốc gồm: Ma_DVHC (mã đơn vị hành chính), Ten_tinh (tên tiếng
+ * Việt có dấu), Dien_tich (diện tích ha), Dan_so, Matdo_dans, MapID, Shape_Leng,
+ * Shape_Area — được preserve nguyên để client hiển thị/log.
  */
 function loadLocalProvinceGeoJson() {
     if (_cachedProvinceGeoJson) return _cachedProvinceGeoJson;
@@ -68,8 +72,11 @@ function loadLocalProvinceGeoJson() {
         const geom = feature?.geometry
             || (doc.type === 'Polygon' || doc.type === 'MultiPolygon' ? doc : null);
         if (!geom) throw new Error('Không thấy geometry hợp lệ');
-        // Strip Z/M nếu file có toạ độ [x,y,0] để client không lấn cấn.
-        _cachedProvinceGeoJson = { type: geom.type, coordinates: _stripZ(geom.coordinates) };
+        _cachedProvinceGeoJson = {
+            type:        geom.type,
+            coordinates: _stripZ(geom.coordinates),   // 3D [x,y,0] → 2D [x,y]
+            _properties: feature?.properties || {},   // preserve Ten_tinh, Ma_DVHC, …
+        };
         return _cachedProvinceGeoJson;
     } catch (err) {
         console.warn(`[FIRE-RISK] Không đọc được ${KON_TUM_PROVINCE_PATH}: ${err.message}`);
@@ -353,25 +360,36 @@ async function publishRaster(analysisDate, gcsPath) {
  */
 function buildFeaturesFromProvinceSummary(snapshotId, provinceSummary, provinceGeometry, provinceCentroid, pNesterovStats, s2CoverageRatio) {
     const rows = [];
-    const geoJsonText = provinceGeometry ? JSON.stringify(provinceGeometry) : null;
+    // ST_GeomFromGeoJSON chỉ đọc `type` + `coordinates`, không cần strip
+    // `_properties` — nhưng để an toàn cho các ORM khác, chỉ stringify 2 field.
+    const geoJsonText = provinceGeometry
+        ? JSON.stringify({ type: provinceGeometry.type, coordinates: provinceGeometry.coordinates })
+        : null;
     const centroid    = provinceCentroid || null;
     const pMean       = Number.isFinite(pNesterovStats?.mean) ? pNesterovStats.mean : null;
     const s2Cov       = Number.isFinite(s2CoverageRatio) ? s2CoverageRatio : null;
     const dist        = provinceSummary?.riskLevelDist || {};
+    // Properties gốc file: Ten_tinh, Ma_DVHC, Dien_tich, Dan_so, …
+    const provProps   = provinceGeometry?._properties || {};
+    // Tên tỉnh ưu tiên từ file (có dấu tiếng Việt), fallback 'Kon Tum'.
+    const districtName = provProps.Ten_tinh || 'Kon Tum';
     for (let l = 1; l <= 5; l++) {
         const areaHa = dist[l] || 0;
         if (areaHa <= 0) continue;
         rows.push({
             risk_level:      l,
-            district_code:   null,
-            district_name:   'Kon Tum',
+            district_code:   provProps.Ma_DVHC ? String(provProps.Ma_DVHC) : null,
+            district_name:   districtName,
             area_ha:         areaHa,
             p_nesterov_mean: pMean,
             ndvi_mean:       null,
             properties: {
                 s2Coverage:  s2Cov,
                 centroid,
-                scope:       'province',   // để client phân biệt với record huyện cũ
+                scope:       'province',                    // để client phân biệt với record huyện cũ
+                provinceAreaHa: provProps.Dien_tich || null, // diện tích thực từ file (nếu có)
+                provinceCode:   provProps.Ma_DVHC || null,
+                provinceName:   districtName,
             },
             geojson: geoJsonText,
         });
@@ -430,16 +448,28 @@ async function runAnalysis(analysisDate, {
         }));
 
     try {
-        const region = await log.run('Load Kon Tum region polygon (RanhGioiTinh_Polygon)',
-            () => Promise.resolve(getKonTumRegion()));
+        // ─────────────────────────────────────────────────────────────────
+        // Region chuẩn cho toàn bộ fire-risk = polygon tỉnh Kon Tum lấy từ
+        // file local `server/data/RanhGioiTinh_Polygon.geojson` (CRS: WGS84/
+        // CRS84, MultiPolygon 2 mảnh). File này được đọc & strip Z (0) ở
+        // `getKonTumBoundaryGeometry()` trong utils/gee-satellite.util.js.
+        //
+        // Toàn bộ chain fire-risk tính TRÊN CHÍNH polygon này:
+        //   - runFireRiskAnalysis(region, ...)      → clip mọi ee.Image
+        //   - reduceRegion(geometry: region.geometry(), ...) → stats scope tỉnh
+        //   - Feature GeoJSON polygon trả client   → outline trên map
+        //   - Centroid từ bbox polygon             → fly-to
+        // Không dùng FAO/GAUL, không tính theo huyện.
+        // ─────────────────────────────────────────────────────────────────
+        const region = await log.run(
+            'Load Kon Tum region polygon (RanhGioiTinh_Polygon.geojson, WGS84 MultiPolygon)',
+            () => Promise.resolve(getKonTumRegion()),
+        );
 
-        // ─────────────────────────────────────────────────────────────────
-        // Polygon tỉnh (RanhGioiTinh) đọc trực tiếp từ GeoJSON local ở đây,
-        // KHÔNG evaluate() qua GEE — nhanh và không tốn thời gian GEE. Client
-        // dùng polygon này để vẽ outline tỉnh; centroid dùng cho fly-to.
-        // ─────────────────────────────────────────────────────────────────
         const provinceGeoJson = loadLocalProvinceGeoJson();
         const provinceCentroid = computeCentroid(provinceGeoJson);
+        log.mark('Province polygon loaded',
+            `type=${provinceGeoJson?.type} centroid=(${provinceCentroid?.lng?.toFixed(3)}, ${provinceCentroid?.lat?.toFixed(3)})`);
 
         // runFireRiskAnalysis đã được instrument sẵn — các sub-stage của
         // pipeline sẽ chèn tiếp vào cùng bộ logger A→Z.
