@@ -4,12 +4,19 @@
  * Satellite Image Service — on-demand GEE tile generation + GeoServer publish.
  *
  * Flow:
- *   1. POST /satellite/{type}   → compute GEE image → return proxy tile URL (immediate)
- *   2. POST /satellite/publish  → submit GEE export task → GCS → MinIO → GeoServer (async)
- *   3. GET  /satellite/tiles/:id/:z/:x/:y → proxy GEE tile server-side (hides GEE tokens)
+ *   1. POST /satellite/{type}  → compute GEE image → return `geeTileUrl` (Earth
+ *                                 Engine CDN URL). Client cắm thẳng vào Mapbox.
+ *   2. POST /satellite/publish → submit GEE export task → GCS → MinIO → GeoServer
+ *                                 (async — kết quả có `geoserverLayer` WMS name).
+ *
+ * Ghi chú kiến trúc: phiên bản cũ có proxy Node.js `/satellite/tiles/:id/:z/:x/:y`
+ * để giấu GEE token khỏi client. Đã gỡ theo yêu cầu — client dùng `geeTileUrl`
+ * gọi thẳng https://earthengine.googleapis.com/… . Ưu điểm: tile qua Google CDN
+ * nhanh hơn, Node.js không thành nút cổ chai. Đánh đổi: mapId URL của GEE lộ ra
+ * client (không đi kèm secret cá nhân — nó chỉ là handle tới một image lazy đã
+ * đăng ký trên EE, tương tự signed URL).
  *
  * All endpoints cache results in satellite.image_results.
- * Proxy URL format: /api/v1/satellite/tiles/{resultId}/{z}/{x}/{y}
  */
 
 const crypto = require('crypto');
@@ -124,11 +131,6 @@ function hashParams(params) {
         fl: params.fireLayer,
     });
     return crypto.createHash('sha256').update(str).digest('hex');
-}
-
-function buildProxyUrl(resultId) {
-    const base = (process.env.APP_URL || '').replace(/\/$/, '');
-    return `${base}/api/v1/satellite/tiles/${resultId}/{z}/{x}/{y}`;
 }
 
 // ── Shared collection builder ─────────────────────────────────────────────────
@@ -555,7 +557,8 @@ async function processRequest(imageType, rawParams) {
             dbgTime('PROCESS', `cache HIT id=${cached.id}`, t0);
             return {
                 resultId:    cached.id,
-                tileUrl:     buildProxyUrl(cached.id),
+                // Client gọi thẳng Earth Engine CDN qua `geeTileUrl` — không có
+                // trung chuyển Node.js. Proxy `tileUrl` cũ đã gỡ.
                 geeTileUrl:  cached.tile_url,
                 geoserverLayer: cached.geoserver_layer || null,
                 downloadUrl: cached.metadata?.downloadUrl || null,
@@ -598,62 +601,13 @@ async function processRequest(imageType, rawParams) {
     dbgTime('PROCESS', `saved id=${saved.id} — done`, t0);
     return {
         resultId:       saved.id,
-        tileUrl:        saved.id ? buildProxyUrl(saved.id) : tileUrl,
+        // Response chỉ có geeTileUrl → client vẽ tile bằng URL Earth Engine.
         geeTileUrl:     tileUrl,
         geoserverLayer: null,
         downloadUrl,
         stats, legend, metadata,
         cached: false,
     };
-}
-
-// ── Tile proxy ────────────────────────────────────────────────────────────────
-
-/**
- * Fetch a single GEE tile and stream it to the response.
- * Called by GET /satellite/tiles/:resultId/:z/:x/:y.
- */
-async function streamTile(resultId, z, x, y, res) {
-    const t0 = Date.now();
-    dbg('TILE', `fetch id=${resultId} z=${z} x=${x} y=${y}`);
-    const result = await repo.getById(resultId);
-    if (!result) {
-        dbg('TILE', `id=${resultId} not found → 404`);
-        res.status(404).end();
-        return;
-    }
-
-    const url = result.tile_url
-        .replace('{z}', z).replace('{x}', x).replace('{y}', y);
-
-    const controller = new AbortController();
-    const timer      = setTimeout(() => controller.abort(), 30_000);
-
-    try {
-        const upstream = await fetch(url, { signal: controller.signal });
-        clearTimeout(timer);
-
-        if (!upstream.ok) {
-            dbg('TILE', `upstream ${upstream.status} for z=${z} x=${x} y=${y}`);
-            res.status(upstream.status).end();
-            return;
-        }
-
-        res.set('Content-Type', upstream.headers.get('content-type') || 'image/png');
-        res.set('Cache-Control', 'public, max-age=3600');
-        dbgTime('TILE', `streaming z=${z}/${x}/${y}`, t0);
-
-        // Node 18+ readable stream from Response.
-        const { Readable } = require('stream');
-        Readable.fromWeb(upstream.body).pipe(res);
-    } catch (err) {
-        clearTimeout(timer);
-        if (err.name === 'AbortError') {
-            dbg('TILE', `timeout z=${z} x=${x} y=${y} → 504`);
-            res.status(504).end(); return;
-        }
-        throw err;
-    }
 }
 
 // ── GeoServer publish (async) ─────────────────────────────────────────────────
@@ -784,7 +738,6 @@ module.exports = {
     getClassified: (p) => processRequest('classified', p),
     getFireRisk:   (p) => processRequest('fire-risk',  p),
     processRequest,
-    streamTile,
     publishResult,
     pollPublishes,
     CLASSIFIED_CLASSES,

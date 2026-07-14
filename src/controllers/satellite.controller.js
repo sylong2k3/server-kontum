@@ -40,13 +40,6 @@ const getFireRisk = async (req, res) => {
     OK(res, t('get_detail_success', req.lang), result);
 };
 
-// ── GET /satellite/tiles/:resultId/:z/:x/:y ───────────────────────────────────
-// Proxies GEE tiles server-side: hides GEE tokens from client, enables CORS.
-const proxyTile = async (req, res) => {
-    const { resultId, z, x, y } = req.params;
-    await svc.streamTile(resultId, z, x, y, res);
-};
-
 // ── POST /satellite/publish ───────────────────────────────────────────────────
 // Submit async GEE export task → GeoServer. Body: { resultId }
 const publishToGeoServer = async (req, res) => {
@@ -58,4 +51,4 @@ const publishToGeoServer = async (req, res) => {
     CREATED(res, 'Đã gửi tác vụ xuất GeoTIFF.', { result: updated });
 };
 
-module.exports = { getRgb, getNdvi, getHeatmap, getClassified, getFireRisk, proxyTile, publishToGeoServer };
+module.exports = { getRgb, getNdvi, getHeatmap, getClassified, getFireRisk, publishToGeoServer };
