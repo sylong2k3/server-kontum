@@ -58,7 +58,10 @@ const getHistory = async (req, res) => {
 // ── POST /fire-risk/refresh ───────────────────────────────────────────────────
 const refresh = async (req, res) => {
     const analysisDate = req.body?.analysisDate || null;
-    const submitExport = req.body?.submitExport !== false;  // default true
+    // Chỉ set khi client explicit gửi — nếu undefined, để service dùng default
+    // `cfg.isGcsConfigured()` (không bật export raster khi thiếu GCS bucket).
+    const submitExport = req.body?.submitExport !== undefined
+        ? Boolean(req.body.submitExport) : undefined;
     // Optional v8.1 overrides — omit to fall back on env / cfg defaults.
     const enableRf         = req.body?.enableRf !== undefined
         ? Boolean(req.body.enableRf) : undefined;

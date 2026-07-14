@@ -681,8 +681,8 @@ const getHistory = async ({ page = 1, limit = 30 } = {}) =>
 const refresh = async ({ analysisDate, submitExport, enableRf, inputFireAssetId } = {}) => {
     const date = analysisDate || todayUtc();
     return runAnalysis(date, {
-        submitExport,
-        ...(enableRf !== undefined         ? { enableRf }         : {}),
+        ...(submitExport     !== undefined ? { submitExport }     : {}),
+        ...(enableRf         !== undefined ? { enableRf }         : {}),
         ...(inputFireAssetId !== undefined ? { inputFireAssetId } : {}),
     });
 };
