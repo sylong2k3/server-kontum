@@ -103,15 +103,25 @@ let _cachedDistrictsSource = null;
  * Districts (huyện) của Kon Tum. Thứ tự ưu tiên:
  *   1. File WGS84 (`RanhGioiHuyen_WGS84.geojson` hoặc env override) — CRS
  *      EPSG:4326, có `NAME_VN` + `CODE_2002` thực.
- *   2. File gốc UTM (`RanhGioiHuyen_Polygon.geojson`) — CRS đọc từ trường
- *      `doc.crs` (thường EPSG:32648). Properties có thể thiếu tên thực
- *      (placeholder "xa 1..N"); ta gán label theo index.
+ *   2. File gốc `RanhGioiHuyen_Polygon.geojson`. Hiện tại (2026-07 trở đi) file
+ *      này ở dạng GADM v2 (WGS84, không có `doc.crs`, properties dùng
+ *      `ID_2/NAME_2/VARNAME_2/TYPE_2/NAME_1`, 10 huyện). Trước đó có bản UTM
+ *      48N placeholder "xa 1..N" — loader tự detect qua trường `doc.crs`.
  *   3. Fallback FAO/GAUL/2015/level2 (8 huyện cũ 2015, đã lỗi thời).
  *
  * Trả về ee.FeatureCollection dùng cho reduceRegions(). GEE tự reproject
  * khi ta khai báo đúng projection ở ee.Geometry(...). reduceRegions output
  * feature.geometry sẽ ở EPSG:4326 (GEE mặc định) — an toàn để persist vào
  * PostGIS + tính centroid client-side.
+ *
+ * Output ee.Feature properties (consumer-facing, KHÔNG đổi tên để tương
+ * thích fire-risk.service.js + forest-classification.service.js):
+ *   - ADM2_CODE  → mã huyện (string), unique
+ *   - ADM2_NAME  → tên tiếng Việt có dấu (VD "Đăk Glei"), hoặc placeholder
+ *   - NAME_EN    → tên English (VD "Dak Glei"), có thể null
+ *   - NAME_VN    → alias của ADM2_NAME
+ *   - TYPE_2     → "Huyện" / "Thi xa" / "Thành phố" (từ TYPE_2 của GADM)
+ *   - source     → nhãn debug (LOCAL_EPSG:XXXX hoặc LOCAL_WGS84)
  */
 function getKonTumDistricts() {
     if (_cachedDistrictsFC) return _cachedDistrictsFC;
@@ -131,28 +141,54 @@ function getKonTumDistricts() {
         // WGS84 hoặc thiếu CRS → default (EPSG:4326 geodesic).
         const nonWgs84 = epsg && epsg !== '4326';
 
-        const eeFeats = doc.features.map((f, idx) => {
+        // NOTE — file GADM v2 mới có thể chứa TRÙNG feature (18 rows, 9 huyện
+        // unique). Dedupe theo (ID_2/CODE_2002/ADM2_CODE) — nếu trùng, giữ
+        // feature ĐẦU. Không code hợp lệ → dedupe theo (NAME_2/NAME_VN/index).
+        const seenCodes = new Set();
+        const eeFeats = [];
+        let addedIdx = 0;
+        for (const f of doc.features) {
             const g = f?.geometry;
-            if (!g) return null;
+            if (!g) continue;
+            const p = f.properties || {};
+            // Tên: ưu tiên tên tiếng Việt có dấu.
+            const rawName = p.NAME_VN
+                || p.ADM2_NAME
+                || p.NAME_2
+                || p.VARNAME_2
+                || p.NAME_EN
+                || null;
+            const name = rawName || `Huyện ${addedIdx + 1}`;
+            // Code: chấp nhận cả int (ID_2) và string. Convert về string.
+            const rawCode = p.CODE_2002
+                ?? p.ADM2_CODE
+                ?? p.ID_2
+                ?? p.OBJECTID
+                ?? null;
+            const code = rawCode != null && rawCode !== ''
+                ? String(rawCode)
+                : `KT-${addedIdx + 1}`;
+            // Dedupe key: ưu tiên code, fallback tên (chuẩn hoá).
+            const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
+            if (seenCodes.has(dedupeKey)) continue;
+            seenCodes.add(dedupeKey);
+
             const clean = { type: g.type, coordinates: _stripZ(g.coordinates) };
             const eeGeom = nonWgs84
                 ? ee.Geometry(clean, projLbl, false)
                 : ee.Geometry(clean);
-            const p = f.properties || {};
-            const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_EN || null;
-            // File có thể có placeholder "xa 1..N" — vẫn giữ để hiển thị
-            // được cho tới khi có data đúng. Không placeholder → gán index.
-            const name    = rawName || `Huyện ${idx + 1}`;
-            const rawCode = p.CODE_2002 || p.ADM2_CODE || p.OBJECTID || null;
-            const code    = rawCode != null ? String(rawCode) : `KT-${idx + 1}`;
-            return ee.Feature(eeGeom, {
+            const nameEn = p.NAME_EN || p.VARNAME_2 || null;
+            const type2  = p.TYPE_2 || p.ENGTYPE_2 || null;
+            eeFeats.push(ee.Feature(eeGeom, {
                 ADM2_CODE: code,
                 ADM2_NAME: name,
-                NAME_EN:   p.NAME_EN || null,
+                NAME_EN:   nameEn,
                 NAME_VN:   name,
+                TYPE_2:    type2,
                 source:    projLbl ? `LOCAL_${projLbl}` : 'LOCAL_WGS84',
-            });
-        }).filter(Boolean);
+            }));
+            addedIdx += 1;
+        }
         if (eeFeats.length === 0) return null;
         return {
             fc:     ee.FeatureCollection(eeFeats),

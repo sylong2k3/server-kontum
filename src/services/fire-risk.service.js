@@ -164,12 +164,10 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCas
         // Convert pixel counts to ha: 1 pixel at 500m scale = 25 ha.
         const pixelHa = (SCALE / 1000) ** 2 * 100; // km² → ha
         const levelDist = {};
-        let totalForestHa = 0;
         // Level 0 = no observation; include for coverage totals but exclude from risk.
         for (let l = 0; l <= 5; l++) {
             const ha = (hist[String(l)] || 0) * pixelHa;
             levelDist[l] = Math.round(ha * 100) / 100;
-            if (l >= 1) totalForestHa += ha;
         }
         return {
             unitCode:          p.ADM2_CODE  || null,
@@ -193,7 +191,6 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCas
                 medium: Math.round((confHist['2'] || 0) * pixelHa * 100) / 100,
                 high:   Math.round((confHist['3'] || 0) * pixelHa * 100) / 100,
             },
-            totalForestHa: Math.round(totalForestHa * 100) / 100,
             pNesterovMean: Math.round((p.pNesterov_mean || 0) * 100) / 100,
             s2Coverage:    Math.round((p.s2Obs_mean || 0) * 1000) / 1000,
         };
@@ -287,28 +284,34 @@ async function publishRaster(analysisDate, gcsPath) {
  * Aggregate provinceSummary trực tiếp từ mảng districtStats — thay cho
  * reduceRegion province riêng biệt. Tiết kiệm 1 evaluate() (~24s) và loại
  * bỏ bug: reduceRegion province từng trả riskLevelDist=0 khi geodesic/CRS
- * lệch với reduceRegions của districts (dẫn tới avgRiskLevel=null,
- * totalForestHa=0 dù districtStats có số thực).
+ * lệch với reduceRegions của districts.
+ *
+ * Trọng số weightHa = Σ(riskLevelDist[1..5]) — diện tích ha thực có kết quả
+ * phân loại (level ≥ 1). Chỉ dùng nội bộ để tính avgRiskLevel, s2Cov, pNest,
+ * KHÔNG expose ra response vì trùng khái niệm với "sinh khối rừng" dễ gây
+ * hiểu nhầm ở FE.
  *
  * @param {Array<object>} districtStats — output của computeDistrictStats
- * @returns {object} shape giống computeProvinceSummary cũ
+ * @returns {object} shape giống computeProvinceSummary cũ (không có totalForestHa)
  */
 function aggregateProvinceFromDistricts(districtStats) {
     const riskLevelDist = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     const blendCaseHa   = { withInput: 0, withoutInput: 0 };
     const confidenceHa  = { none: 0, low: 0, medium: 0, high: 0 };
-    let totalForestHa   = 0;
     let weightedRiskSum = 0; // Σ(level × ha) — dùng tính avgRiskLevel
-    let weightedPSum    = 0; // Σ(pNesterovMean × totalForestHa)
-    let weightedS2Sum   = 0; // Σ(s2Coverage × totalForestHa)
+    let weightedPSum    = 0; // Σ(pNesterovMean × weightHa)
+    let weightedS2Sum   = 0; // Σ(s2Coverage × weightHa)
 
     for (const d of districtStats || []) {
-        const dTotal = Number(d.totalForestHa) || 0;
-        totalForestHa += dTotal;
+        const dist = d.riskLevelDist || {};
+        let dWeight = 0;
         for (let l = 0; l <= 5; l++) {
-            const ha = Number(d.riskLevelDist?.[l]) || 0;
+            const ha = Number(dist[l]) || 0;
             riskLevelDist[l] += ha;
-            if (l >= 1) weightedRiskSum += l * ha;
+            if (l >= 1) {
+                weightedRiskSum += l * ha;
+                dWeight += ha;
+            }
         }
         blendCaseHa.withInput    += Number(d.blendCaseHa?.withInput)    || 0;
         blendCaseHa.withoutInput += Number(d.blendCaseHa?.withoutInput) || 0;
@@ -316,14 +319,16 @@ function aggregateProvinceFromDistricts(districtStats) {
         confidenceHa.low         += Number(d.confidenceHa?.low)    || 0;
         confidenceHa.medium      += Number(d.confidenceHa?.medium) || 0;
         confidenceHa.high        += Number(d.confidenceHa?.high)   || 0;
-        if (dTotal > 0) {
-            weightedPSum  += (Number(d.pNesterovMean) || 0) * dTotal;
-            weightedS2Sum += (Number(d.s2Coverage)    || 0) * dTotal;
+        if (dWeight > 0) {
+            weightedPSum  += (Number(d.pNesterovMean) || 0) * dWeight;
+            weightedS2Sum += (Number(d.s2Coverage)    || 0) * dWeight;
         }
     }
 
     let maxLevel = 0;
     for (let l = 5; l >= 1; l--) if ((riskLevelDist[l] || 0) > 0) { maxLevel = l; break; }
+    const totalWeight = riskLevelDist[1] + riskLevelDist[2] + riskLevelDist[3]
+                      + riskLevelDist[4] + riskLevelDist[5];
     const round2 = (n) => Math.round(n * 100) / 100;
     const round3 = (n) => Math.round(n * 1000) / 1000;
 
@@ -332,9 +337,8 @@ function aggregateProvinceFromDistricts(districtStats) {
         riskLevelDist: Object.fromEntries(
             Object.entries(riskLevelDist).map(([k, v]) => [k, round2(v)]),
         ),
-        totalForestHa: round2(totalForestHa),
-        avgRiskLevel:  totalForestHa > 0
-            ? Math.round((weightedRiskSum / totalForestHa) * 100) / 100
+        avgRiskLevel: totalWeight > 0
+            ? Math.round((weightedRiskSum / totalWeight) * 100) / 100
             : null,
         blendCaseHa: {
             withInput:    round2(blendCaseHa.withInput),
@@ -346,8 +350,8 @@ function aggregateProvinceFromDistricts(districtStats) {
             medium: round2(confidenceHa.medium),
             high:   round2(confidenceHa.high),
         },
-        pNesterovProvMean: totalForestHa > 0 ? round2(weightedPSum  / totalForestHa) : 0,
-        s2CoverageRatio:   totalForestHa > 0 ? round3(weightedS2Sum / totalForestHa) : 0,
+        pNesterovProvMean: totalWeight > 0 ? round2(weightedPSum  / totalWeight) : 0,
+        s2CoverageRatio:   totalWeight > 0 ? round3(weightedS2Sum / totalWeight) : 0,
     };
 }
 
@@ -386,7 +390,6 @@ function buildFeaturesFromDistrictStats(snapshotId, districtStats) {
                     s2Coverage: s2Cov,
                     centroid,
                     scope:      'district',
-                    totalForestHa: d.totalForestHa,
                 },
                 geojson: geoJsonText,
             });
@@ -505,7 +508,7 @@ async function runAnalysis(analysisDate, {
 
         const provinceSummary = aggregateProvinceFromDistricts(districtStats);
         log.mark('Province summary (aggregated)',
-            `maxLevel=${provinceSummary.maxLevel} totalHa=${provinceSummary.totalForestHa} avgLvl=${provinceSummary.avgRiskLevel} pMean=${provinceSummary.pNesterovProvMean} s2Cov=${provinceSummary.s2CoverageRatio}`);
+            `maxLevel=${provinceSummary.maxLevel} avgLvl=${provinceSummary.avgRiskLevel} pMean=${provinceSummary.pNesterovProvMean} s2Cov=${provinceSummary.s2CoverageRatio}`);
 
         const pNesterovStats = await log.run(
             'EVALUATE P Nesterov percentile stats (province-level)',

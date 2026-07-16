@@ -43,11 +43,12 @@ CREATE TABLE IF NOT EXISTS fire.fire_risk_snapshots (
     -- Tham số model được dùng khi tính toán (version, window, thresholds…).
     model_params         JSONB       NOT NULL DEFAULT '{}',
 
-    -- Tổng hợp toàn tỉnh: { totalForestHa, avgRiskScore, riskLevelDist:{1..5} }
+    -- Tổng hợp toàn tỉnh: { maxLevel, avgRiskLevel, riskLevelDist:{0..5},
+    --   pNesterovProvMean, s2CoverageRatio, blendCaseHa, confidenceHa }
     province_summary     JSONB,
 
-    -- Thống kê theo huyện: [{unitCode, name, riskLevelDist, avgRiskScore,
-    --   forestHaByLevel:{1..5}, pNesterovMean, s2Coverage}]
+    -- Thống kê theo huyện: [{unitCode, name, riskLevelDist:{0..5},
+    --   pNesterovMean, s2Coverage, blendCaseHa, confidenceHa}]
     district_stats       JSONB,
 
     -- Phân phối P Nesterov toàn tỉnh: {mean, max, pctBelow5k, pctAbove20k}
