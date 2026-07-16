@@ -453,8 +453,8 @@ async function runAnalysis(analysisDate, {
         // Region tính toán = polygon tỉnh Kon Tum (RanhGioiTinh_Polygon.geojson,
         // WGS84 MultiPolygon 2 mảnh). Đọc + strip Z trong `getKonTumBoundaryGeometry()`.
         //
-        // Districts = polygon huyện (`RanhGioiHuyen_WGS84.geojson` nếu có, fallback
-        // `RanhGioiHuyen_Polygon.geojson` UTM 48N — util tự pass projection cho GEE).
+        // Districts = polygon huyện (`RanhGioiHuyen_Polygon.geojson` GADM v2 WGS84,
+        // fallback FAO/GAUL/2015/level2 — util tự log source).
         // reduceRegions output geometry EPSG:4326 → an toàn để persist PostGIS.
         // ─────────────────────────────────────────────────────────────────
         const region = await log.run(
@@ -472,6 +472,25 @@ async function runAnalysis(analysisDate, {
         const districtsSource = getKonTumDistrictsSource();
         log.mark('Districts source', `source=${districtsSource}` +
             (districtsSource === 'FAO_GAUL_2015_LEVEL2' ? ' ⚠ dùng FAO fallback, cân nhắc copy file local' : ''));
+
+        // Diagnostic — evaluate size() + first feature properties trực tiếp
+        // từ ee.FeatureCollection để CHỨNG THỰC collection nào đang được truyền
+        // vào reduceRegions. Nếu size = 1 và properties null → biết ngay là
+        // GEE-side có vấn đề với ee.Feature build (không phải file).
+        try {
+            const [ dcount, sample ] = await Promise.all([
+                eeEvaluate(districts.size()),
+                eeEvaluate(districts.first().toDictionary(['ADM2_CODE', 'ADM2_NAME', 'source'])),
+            ]);
+            log.mark('Districts FC verify',
+                `ee.size=${dcount} firstProps=${JSON.stringify(sample)}`);
+            if (dcount <= 1) {
+                console.warn(`[FIRE-RISK] ⚠ ee.FeatureCollection có ${dcount} feature — ` +
+                    'reduceRegions sẽ ra 1 row. Kiểm tra log [GEE-SAT#DISTRICTS] phía trên.');
+            }
+        } catch (err) {
+            console.warn(`[FIRE-RISK] Districts FC verify lỗi (non-fatal): ${err.message}`);
+        }
 
         const provinceGeoJson  = loadLocalProvinceGeoJson();
         const provinceCentroid = computeCentroid(provinceGeoJson);

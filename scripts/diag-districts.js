@@ -13,7 +13,6 @@ const path = require('path');
 const DATA_DIR = path.resolve(__dirname, '../data');
 const paths = [
     process.env.KON_TUM_DISTRICTS_GEOJSON,
-    path.join(DATA_DIR, 'RanhGioiHuyen_WGS84.geojson'),
     path.join(DATA_DIR, 'RanhGioiHuyen_Polygon.geojson'),
 ].filter(Boolean);
 
