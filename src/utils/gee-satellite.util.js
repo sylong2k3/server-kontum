@@ -199,24 +199,60 @@ function getKonTumDistricts() {
     };
 
     for (const p of [KON_TUM_DISTRICTS_PATH_WGS84, KON_TUM_DISTRICTS_PATH_RAW]) {
+        const exists = fs.existsSync(p);
+        console.log(`[GEE-SAT] Districts try path: ${p} (exists=${exists})`);
+        if (!exists) continue;
         try {
+            // Diagnostic: đo size + đếm features + sample first feature.
+            const stat = fs.statSync(p);
+            const raw = fs.readFileSync(p, 'utf8');
+            let doc;
+            try { doc = JSON.parse(raw); }
+            catch (e) {
+                console.warn(`[GEE-SAT] File JSON parse fail (${p}): ${e.message}`);
+                continue;
+            }
+            const featCount = Array.isArray(doc?.features) ? doc.features.length : 0;
+            const emptyCoordCount = (doc?.features || []).filter((f) => {
+                const c = f?.geometry?.coordinates;
+                return !c || (Array.isArray(c) && c.length === 0);
+            }).length;
+            const sample = doc?.features?.[0]?.properties || {};
+            console.log(`[GEE-SAT] Districts file diag: size=${stat.size}B, featCount=${featCount}, emptyCoords=${emptyCoordCount}, sampleProps=${JSON.stringify(sample).slice(0, 200)}`);
+            if (emptyCoordCount === featCount && featCount > 0) {
+                console.warn(`[GEE-SAT] ⚠ TẤT CẢ ${featCount} feature đều có coordinates rỗng — file bị cắt/hỏng, bỏ qua.`);
+                continue;
+            }
             const loaded = tryLoad(p);
             if (loaded) {
+                console.log(`[GEE-SAT] ✓ Districts loaded từ ${p} → source=${loaded.source}`);
                 _cachedDistrictsFC     = loaded.fc;
                 _cachedDistrictsSource = loaded.source;
                 return _cachedDistrictsFC;
             }
+            console.warn(`[GEE-SAT] tryLoad trả null cho ${p} — không tạo được ee.Feature nào.`);
         } catch (err) {
             console.warn(`[GEE-SAT] Lỗi đọc ${p}: ${err.message}`);
         }
     }
 
-    console.warn('[GEE-SAT] Không tìm được file huyện local — fallback FAO/GAUL/2015 (8 huyện cũ 2015).');
+    console.warn('[GEE-SAT] ⚠ Không tìm được file huyện local hợp lệ — fallback FAO/GAUL/2015 (8 huyện cũ 2015). ' +
+        'reduceRegions sẽ chạy trên 8 features từ FAO. Nếu thấy "1 district" trong log tiếp theo → check file path env KON_TUM_DISTRICTS_GEOJSON.');
     _cachedDistrictsFC = ee.FeatureCollection('FAO/GAUL/2015/level2')
         .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
         .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
     _cachedDistrictsSource = 'FAO_GAUL_2015_LEVEL2';
     return _cachedDistrictsFC;
+}
+
+/**
+ * Xoá cache districts — dùng khi thay file huyện mà không muốn restart process.
+ * Lần gọi `getKonTumDistricts()` tiếp theo sẽ đọc lại file từ đĩa.
+ */
+function invalidateKonTumDistricts() {
+    _cachedDistrictsFC = null;
+    _cachedDistrictsSource = null;
+    console.log('[GEE-SAT] Districts cache invalidated — next call sẽ đọc lại file.');
 }
 
 /**
@@ -572,6 +608,7 @@ module.exports = {
     getKonTumRegion,
     getKonTumDistricts,
     getKonTumDistrictsSource,
+    invalidateKonTumDistricts,
     getKonTumBoundaryGeometry,
     getKonTumBoundarySource,
     logGeeGeometrySources,

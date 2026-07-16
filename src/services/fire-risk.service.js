@@ -504,7 +504,20 @@ async function runAnalysis(analysisDate, {
                 blendCase, modelConfidenceClass, districts, region),
             { note: 'scale=500m tileScale=8' },
         );
-        log.mark('District stats', `rows=${districtStats.length}`);
+        // NOTE — log per-row snapshot để chẩn đoán khi số row bất thường
+        // (VD chỉ 1 row với unitCode=null → loader không load được ADM
+        // properties, hoặc file huyện có 1 feature duy nhất).
+        log.mark('District stats',
+            `rows=${districtStats.length} ` +
+            `codes=[${districtStats.map((d) => d.unitCode ?? 'null').join(',')}]`);
+        if (districtStats.length <= 1 || districtStats.every((d) => d.unitCode == null)) {
+            console.warn(
+                `[FIRE-RISK] ⚠ districtStats bất thường — rows=${districtStats.length}, ` +
+                `codes null=${districtStats.filter((d) => d.unitCode == null).length}. ` +
+                `Kiểm tra file huyện + env KON_TUM_DISTRICTS_GEOJSON. ` +
+                `Sample row 0: ${JSON.stringify(districtStats[0] || null).slice(0, 300)}`,
+            );
+        }
 
         const provinceSummary = aggregateProvinceFromDistricts(districtStats);
         log.mark('Province summary (aggregated)',
