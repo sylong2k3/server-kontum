@@ -8,10 +8,19 @@
  * All functions accept/return EE objects unless noted with "→ JS value".
  */
 
+const fs   = require('fs');
+const path = require('path');
 const { ee } = require('../configs/gge');
 
 // Default timeout for .evaluate() calls (5 minutes).
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.GEE_TIMEOUT_MS, 10) || 5 * 60 * 1000;
+
+// Local Kon Tum province polygon (higher-fidelity than FAO/GAUL).
+// Used only as a fallback when the request omits `params.geometry`;
+// user-supplied ROIs are always clipped to as-is.
+// Override the file path with the KON_TUM_BOUNDARY_GEOJSON env var.
+const KON_TUM_BOUNDARY_PATH = process.env.KON_TUM_BOUNDARY_GEOJSON
+    || path.resolve(__dirname, '../../data/RanhGioiTinh_Polygon.geojson');
 
 // ── GEE async helpers ─────────────────────────────────────────────────────────
 
@@ -73,27 +82,317 @@ function getEeMapId(eeImage, vizParams = {}) {
 
 // ── Region helpers ────────────────────────────────────────────────────────────
 
-const GAUL_ADM0  = 'Viet Nam';
-const GAUL_ADM1  = 'Kon Tum';
-
 function getKonTumRegion() {
-    return ee.FeatureCollection('FAO/GAUL/2015/level1')
-        .filter(ee.Filter.eq('ADM0_NAME', GAUL_ADM0))
-        .filter(ee.Filter.eq('ADM1_NAME', GAUL_ADM1));
+    return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
 }
 
+// Đường dẫn file polygon huyện — CHỈ 1 file duy nhất.
+// GADM v2 WGS84 (`RanhGioiHuyen_Polygon.geojson`), có thể override qua env
+// `KON_TUM_DISTRICTS_GEOJSON`. Không còn fallback WGS84 riêng vì file duy nhất
+// đã ở WGS84.
+const KON_TUM_DISTRICTS_PATH = process.env.KON_TUM_DISTRICTS_GEOJSON
+    || path.resolve(__dirname, '../../data/RanhGioiHuyen_Polygon.geojson');
+
+let _cachedDistrictsFC = null;
+let _cachedDistrictsSource = null;
+
+/**
+ * Districts (huyện) của Kon Tum. Chỉ dùng 1 file:
+ *   • `data/RanhGioiHuyen_Polygon.geojson` — GADM v2 WGS84 (10 huyện Kon Tum,
+ *     properties `ID_2/NAME_2/VARNAME_2/TYPE_2/NAME_1`, có duplicate 18→9).
+ *   • Override qua env `KON_TUM_DISTRICTS_GEOJSON` khi cần.
+ *
+ * Fallback FAO/GAUL/2015/level2 (8 huyện cũ, đã lỗi thời) khi file local
+ * KHÔNG tồn tại HOẶC parse fail HOẶC không có feature hợp lệ. Fallback in
+ * cảnh báo rõ ràng để ops biết.
+ *
+ * Trả về ee.FeatureCollection dùng cho reduceRegions(). reduceRegions output
+ * feature.geometry sẽ ở EPSG:4326 (GEE mặc định) — an toàn để persist PostGIS
+ * + tính centroid client-side.
+ *
+ * Output ee.Feature properties (consumer-facing, KHÔNG đổi tên để tương
+ * thích fire-risk.service.js + forest-classification.service.js):
+ *   - ADM2_CODE  → mã huyện (string), unique
+ *   - ADM2_NAME  → tên tiếng Việt có dấu (VD "Đăk Glei"), hoặc placeholder
+ *   - NAME_EN    → tên English (VD "Dak Glei"), có thể null
+ *   - NAME_VN    → alias của ADM2_NAME
+ *   - TYPE_2     → "Huyện" / "Thi xa" / "Thành phố" (từ TYPE_2 của GADM)
+ *   - source     → nhãn debug (LOCAL_WGS84 hoặc LOCAL_EPSG:XXXX)
+ */
 function getKonTumDistricts() {
-    return ee.FeatureCollection('FAO/GAUL/2015/level2')
-        .filter(ee.Filter.eq('ADM0_NAME', GAUL_ADM0))
-        .filter(ee.Filter.eq('ADM1_NAME', GAUL_ADM1));
+    if (_cachedDistrictsFC) {
+        console.log(`[GEE-SAT#DISTRICTS] ↺ cache HIT → source=${_cachedDistrictsSource}`);
+        return _cachedDistrictsFC;
+    }
+    console.log('[GEE-SAT#DISTRICTS] ── LOADER START ──────────────────────────────');
+    console.log(`[GEE-SAT#DISTRICTS] path = ${KON_TUM_DISTRICTS_PATH}`);
+    console.log(`[GEE-SAT#DISTRICTS] env KON_TUM_DISTRICTS_GEOJSON = ${process.env.KON_TUM_DISTRICTS_GEOJSON || '(not set)'}`);
+
+    const loadResult = _tryLoadDistrictsFile(KON_TUM_DISTRICTS_PATH);
+    if (loadResult) {
+        _cachedDistrictsFC     = loadResult.fc;
+        _cachedDistrictsSource = loadResult.source;
+        console.log(`[GEE-SAT#DISTRICTS] ✓ LOADED — ${loadResult.count} ee.Feature từ file, source=${loadResult.source}`);
+        console.log('[GEE-SAT#DISTRICTS] ── LOADER END ────────────────────────────────');
+        return _cachedDistrictsFC;
+    }
+
+    console.warn(
+        '[GEE-SAT#DISTRICTS] ⚠ Không load được file local → fallback FAO/GAUL/2015/level2 ' +
+        '(8 huyện cũ 2015, ADM2_NAME English, không có Ia Hdrai). ' +
+        'Nếu thấy "District rows — 1" sau này → check log ở trên xem lý do loader thất bại.',
+    );
+    _cachedDistrictsFC = ee.FeatureCollection('FAO/GAUL/2015/level2')
+        .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
+        .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
+    _cachedDistrictsSource = 'FAO_GAUL_2015_LEVEL2';
+    console.log('[GEE-SAT#DISTRICTS] ── LOADER END (FAO fallback) ─────────────────');
+    return _cachedDistrictsFC;
+}
+
+/**
+ * Đọc file huyện + build ee.FeatureCollection. Trả về null nếu file lỗi.
+ * TÁCH riêng để log rõ từng bước và catch từng loại lỗi.
+ */
+function _tryLoadDistrictsFile(filePath) {
+    if (!fs.existsSync(filePath)) {
+        console.warn(`[GEE-SAT#DISTRICTS] ✗ file KHÔNG tồn tại: ${filePath}`);
+        return null;
+    }
+    let stat;
+    let raw;
+    try {
+        stat = fs.statSync(filePath);
+        raw = fs.readFileSync(filePath, 'utf8');
+    } catch (err) {
+        console.warn(`[GEE-SAT#DISTRICTS] ✗ đọc file lỗi (${filePath}): ${err.message}`);
+        return null;
+    }
+    console.log(`[GEE-SAT#DISTRICTS] file size = ${(stat.size / 1024).toFixed(1)} KB`);
+
+    let doc;
+    try { doc = JSON.parse(raw); }
+    catch (err) {
+        console.warn(`[GEE-SAT#DISTRICTS] ✗ JSON parse lỗi: ${err.message}`);
+        return null;
+    }
+    if (doc?.type !== 'FeatureCollection' || !Array.isArray(doc.features)) {
+        console.warn(`[GEE-SAT#DISTRICTS] ✗ file không phải GeoJSON FeatureCollection (type=${doc?.type})`);
+        return null;
+    }
+
+    const featCount = doc.features.length;
+    const crsName = doc.crs?.properties?.name;
+    const epsg    = _parseEpsgCode(crsName);
+    const projLbl = epsg ? `EPSG:${epsg}` : null;
+    const nonWgs84 = epsg && epsg !== '4326';
+    console.log(`[GEE-SAT#DISTRICTS] featCount=${featCount}, crs=${crsName || '(none)'} → projLbl=${projLbl || 'WGS84 default'}`);
+
+    // Đếm coords rỗng để phát hiện file bị cắt.
+    const emptyCoordCount = doc.features.filter((f) => {
+        const c = f?.geometry?.coordinates;
+        return !c || (Array.isArray(c) && c.length === 0);
+    }).length;
+    if (emptyCoordCount === featCount && featCount > 0) {
+        console.warn(`[GEE-SAT#DISTRICTS] ✗ TẤT CẢ ${featCount} feature có coords rỗng — file bị cắt`);
+        return null;
+    }
+    if (emptyCoordCount > 0) {
+        console.warn(`[GEE-SAT#DISTRICTS] ⚠ ${emptyCoordCount}/${featCount} feature có coords rỗng — sẽ skip.`);
+    }
+
+    // Log unique property keys để dev thấy schema thực tế.
+    const keySet = new Set();
+    for (const f of doc.features) {
+        for (const k of Object.keys(f?.properties || {})) keySet.add(k);
+    }
+    console.log(`[GEE-SAT#DISTRICTS] unique property keys = [${Array.from(keySet).sort().join(', ')}]`);
+
+    // Build ee.Feature per doc.feature (có dedupe theo ID_2).
+    const seenCodes = new Set();
+    const eeFeats = [];
+    let addedIdx = 0;
+    let skippedNoGeom = 0;
+    let skippedDup = 0;
+    for (const f of doc.features) {
+        const g = f?.geometry;
+        if (!g || !Array.isArray(g.coordinates) || g.coordinates.length === 0) {
+            skippedNoGeom += 1;
+            continue;
+        }
+        const p = f.properties || {};
+        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2 || p.NAME_EN || null;
+        const name    = rawName || `Huyện ${addedIdx + 1}`;
+        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
+        const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${addedIdx + 1}`;
+        const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
+        if (seenCodes.has(dedupeKey)) { skippedDup += 1; continue; }
+        seenCodes.add(dedupeKey);
+
+        const clean = { type: g.type, coordinates: _stripZ(g.coordinates) };
+        const eeGeom = nonWgs84
+            ? ee.Geometry(clean, projLbl, false)
+            : ee.Geometry(clean);
+        eeFeats.push(ee.Feature(eeGeom, {
+            ADM2_CODE: code,
+            ADM2_NAME: name,
+            NAME_EN:   p.NAME_EN || p.VARNAME_2 || null,
+            NAME_VN:   name,
+            TYPE_2:    p.TYPE_2 || p.ENGTYPE_2 || null,
+            source:    projLbl ? `LOCAL_${projLbl}` : 'LOCAL_WGS84',
+        }));
+        console.log(`[GEE-SAT#DISTRICTS]   + [${addedIdx}] code="${code}" name="${name}"`);
+        addedIdx += 1;
+    }
+    console.log(`[GEE-SAT#DISTRICTS] built ${eeFeats.length} ee.Features (skipped: noGeom=${skippedNoGeom}, dup=${skippedDup})`);
+    if (eeFeats.length === 0) {
+        console.warn('[GEE-SAT#DISTRICTS] ✗ không tạo được ee.Feature nào.');
+        return null;
+    }
+    return {
+        fc:     ee.FeatureCollection(eeFeats),
+        count:  eeFeats.length,
+        source: projLbl ? `LOCAL_RANHGIOIHUYEN_${projLbl}` : 'LOCAL_RANHGIOIHUYEN_WGS84',
+    };
+}
+
+/**
+ * Xoá cache districts — dùng khi thay file huyện mà không muốn restart process.
+ * Lần gọi `getKonTumDistricts()` tiếp theo sẽ đọc lại file từ đĩa.
+ */
+function invalidateKonTumDistricts() {
+    _cachedDistrictsFC = null;
+    _cachedDistrictsSource = null;
+    console.log('[GEE-SAT] Districts cache invalidated — next call sẽ đọc lại file.');
+}
+
+/**
+ * Nguồn thực tế của getKonTumDistricts đã cache — dùng để log / debug.
+ * Trả về `null` nếu getKonTumDistricts() chưa được gọi.
+ */
+function getKonTumDistrictsSource() {
+    return _cachedDistrictsSource;
+}
+
+// ── Local Kon Tum boundary polygon ────────────────────────────────────────────
+
+// Recursively strip Z/M components so ee.Geometry accepts the coords —
+// the source file stores [x, y, 0] triplets which GEE rejects.
+function _stripZ(coords) {
+    if (typeof coords[0] === 'number') return coords.slice(0, 2);
+    return coords.map(_stripZ);
+}
+
+// Extract the numeric EPSG code from either "EPSG:XXXX" or a CRS URN
+// like "urn:ogc:def:crs:EPSG::XXXX".
+function _parseEpsgCode(crsName) {
+    const m = String(crsName || '').match(/EPSG:*:*(\d+)$/i);
+    return m ? m[1] : null;
+}
+
+let _cachedBoundaryGeom = null;
+let _cachedBoundarySource = null;
+
+/**
+ * Load the Kon Tum province polygon.
+ * Priority:
+ *   1. Local geojson (KON_TUM_BOUNDARY_PATH / RanhGioiTinh_Polygon.geojson)
+ *   2. FAO/GAUL/2015/level1 (dissolved) — fallback nếu file local vắng mặt
+ *      trên production. Kém chi tiết hơn ranh giới thực nhưng đủ cho tính stats.
+ *
+ * Lazily evaluated + cached singleton. Source hiển thị qua `getKonTumBoundarySource()`.
+ */
+function getKonTumBoundaryGeometry() {
+    if (_cachedBoundaryGeom) return _cachedBoundaryGeom;
+
+    // Try local file first — preferred.
+    if (fs.existsSync(KON_TUM_BOUNDARY_PATH)) {
+        try {
+            const raw = fs.readFileSync(KON_TUM_BOUNDARY_PATH, 'utf8');
+            const doc = JSON.parse(raw);
+            const feature = doc.type === 'FeatureCollection'
+                ? doc.features?.[0]
+                : (doc.type === 'Feature' ? doc : null);
+            const geom = feature?.geometry
+                || (doc.type === 'Polygon' || doc.type === 'MultiPolygon' ? doc : null);
+            if (!geom) throw new Error('Không thấy polygon geometry hợp lệ');
+
+            const crsName   = doc.crs?.properties?.name;
+            const epsg      = _parseEpsgCode(crsName);
+            const projLabel = epsg ? `EPSG:${epsg}` : 'EPSG:4326';
+            const cleanGeom = {
+                type: geom.type,
+                coordinates: _stripZ(geom.coordinates),
+            };
+            _cachedBoundaryGeom = epsg && epsg !== '4326'
+                ? ee.Geometry(cleanGeom, projLabel, false)
+                : ee.Geometry(cleanGeom);
+            _cachedBoundarySource = `LOCAL_${projLabel}`;
+            console.log(`[GEE-SAT] ✓ Province polygon: ${_cachedBoundarySource} (${KON_TUM_BOUNDARY_PATH})`);
+            return _cachedBoundaryGeom;
+        } catch (err) {
+            console.warn(`[GEE-SAT] Lỗi đọc province polygon ${KON_TUM_BOUNDARY_PATH}: ${err.message}`);
+        }
+    } else {
+        console.warn(`[GEE-SAT] Province polygon file KHÔNG tồn tại: ${KON_TUM_BOUNDARY_PATH}`);
+    }
+
+    // Fallback: FAO/GAUL/2015/level1 (dissolved to province).
+    console.warn('[GEE-SAT] ⚠ Fallback province polygon: FAO/GAUL/2015/level1 (Kon Tum). ' +
+        'Copy data/RanhGioiTinh_Polygon.geojson lên server để dùng ranh giới thực.');
+    const faoFC = ee.FeatureCollection('FAO/GAUL/2015/level1')
+        .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
+        .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
+    _cachedBoundaryGeom  = faoFC.geometry();
+    _cachedBoundarySource = 'FAO_GAUL_2015_LEVEL1';
+    return _cachedBoundaryGeom;
+}
+
+/**
+ * Nguồn thực tế của getKonTumBoundaryGeometry đã cache — dùng để log / debug.
+ * Trả về `null` nếu getKonTumBoundaryGeometry() chưa được gọi.
+ */
+function getKonTumBoundarySource() {
+    return _cachedBoundarySource;
+}
+
+/**
+ * Diagnostic tại startup — kiểm tra file local nào có sẵn để cảnh báo sớm
+ * thay vì đợi first API request. Không throw, chỉ log.
+ */
+function logGeeGeometrySources() {
+    console.log('[GEE-SAT] ── Kiểm tra file geometry local ─────────────────');
+    const files = [
+        ['Province',  KON_TUM_BOUNDARY_PATH],
+        ['Districts', KON_TUM_DISTRICTS_PATH],
+    ];
+    let allOk = true;
+    for (const [label, filePath] of files) {
+        const exists = fs.existsSync(filePath);
+        const mark   = exists ? '✓' : '✗';
+        let sizeKb = '';
+        if (exists) {
+            try { sizeKb = ` (${(fs.statSync(filePath).size / 1024).toFixed(1)} KB)`; }
+            catch (_) { /* ignore */ }
+        }
+        console.log(`[GEE-SAT]  ${mark} ${label}: ${filePath}${sizeKb}`);
+        if (!exists) allOk = false;
+    }
+    if (!allOk) {
+        console.log('[GEE-SAT] ⚠ File thiếu — sẽ dùng FAO/GAUL làm fallback.');
+        console.log('[GEE-SAT]   Fix: copy `data/RanhGioiHuyen_Polygon.geojson` + `data/RanhGioiTinh_Polygon.geojson` lên server.');
+    }
+    console.log('[GEE-SAT] ──────────────────────────────────────────────────');
 }
 
 /**
  * Parse a geometry parameter (GeoJSON object or bbox array [minX,minY,maxX,maxY])
- * into an ee.Geometry. Falls back to Kon Tum province if null.
+ * into an ee.Geometry. Falls back to RanhGioiTinh_Polygon.geojson when omitted.
  */
 function toEeGeometry(geometry) {
-    if (!geometry) return getKonTumRegion().geometry();
+    if (!geometry) {
+        return getKonTumBoundaryGeometry();
+    }
     if (Array.isArray(geometry) && geometry.length === 4) {
         const [minX, minY, maxX, maxY] = geometry;
         return ee.Geometry.BBox(minX, minY, maxX, maxY);
@@ -175,7 +474,7 @@ function maskS2FireRisk(image) {
 function makeComposite(year, startMonth, endMonth, region) {
     const startDate = ee.Date.fromYMD(year, startMonth, 1);
     const endDate   = ee.Date.fromYMD(year, endMonth, 1).advance(1, 'month');
-    const bounds    = region || getKonTumRegion();
+    const bounds    = region || getKonTumBoundaryGeometry();
 
     const l5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2')
         .filterBounds(bounds).filterDate(startDate, endDate)
@@ -272,7 +571,7 @@ function medianOrFallback(collection, bands, fallbackValues) {
 
 /** Return elevation/slope/aspect from SRTM for the given region. */
 function getDemBands(region) {
-    const dem       = ee.Image('USGS/SRTMGL1_003').clip(region || getKonTumRegion());
+    const dem       = ee.Image('USGS/SRTMGL1_003').clip(region || getKonTumBoundaryGeometry());
     const elevation = dem.rename('elevation');
     const slope     = ee.Terrain.slope(dem).rename('slope');
     const aspect    = ee.Terrain.aspect(dem).rename('aspect');
@@ -280,6 +579,33 @@ function getDemBands(region) {
 }
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Generate a temporary GEE download URL for a satellite image (GeoTIFF).
+ * Returns null if the image is too large or GEE rejects the request.
+ */
+async function getEeDownloadUrl(eeImage, region, vizParams = {}) {
+    try {
+        const visImage = Object.keys(vizParams).length > 0
+            ? eeImage.visualize(vizParams)
+            : eeImage;
+        return await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(null), 20_000);
+            visImage.getDownloadURL({
+                name: 'satellite',
+                scale: 100,
+                region,
+                fileFormat: 'GeoTIFF',
+                maxPixels: 1e8,
+            }, (url, err) => {
+                clearTimeout(timer);
+                resolve(err ? null : url);
+            });
+        });
+    } catch (e) {
+        return null;
+    }
+}
 
 /** Current date as 'YYYY-MM-DD' string (UTC). */
 const todayUtc = () => new Date().toISOString().slice(0, 10);
@@ -293,8 +619,14 @@ const fmtDate = (d) => {
 module.exports = {
     eeEval,
     getEeMapId,
+    getEeDownloadUrl,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumDistrictsSource,
+    invalidateKonTumDistricts,
+    getKonTumBoundaryGeometry,
+    getKonTumBoundarySource,
+    logGeeGeometrySources,
     toEeGeometry,
     maskLandsatC2,
     prepL57,
@@ -307,6 +639,4 @@ module.exports = {
     getDemBands,
     todayUtc,
     fmtDate,
-    GAUL_ADM0,
-    GAUL_ADM1,
 };

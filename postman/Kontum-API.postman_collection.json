@@ -5857,7 +5857,7 @@
                 }
               ]
             },
-            "description": "Trả về snapshot cháy rừng mới nhất đã tính xong:\n- provinceSummary: tổng hợp toàn tỉnh (tổng ha rừng theo level, P Nesterov trung bình)\n- districtStats: thống kê theo từng huyện\n- pNesterovStats: phân phối P Nesterov\n- features: danh sách vùng rủi ro\n\nstale=true khi đang tính hoặc GEE lỗi."
+            "description": "Trả về snapshot cháy rừng mới nhất đã tính xong:\n- provinceSummary: tổng hợp toàn tỉnh (avgRiskLevel, maxLevel, riskLevelDist 1-5, P Nesterov trung bình, S2 coverage)\n- districtStats: thống kê theo từng huyện\n- pNesterovStats: phân phối P Nesterov (mean/p10/p50/p90/max)\n- features: danh sách vùng rủi ro\n\nstale=true khi đang tính hoặc GEE lỗi."
           }
         },
         {

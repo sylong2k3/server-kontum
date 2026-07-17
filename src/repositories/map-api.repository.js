@@ -52,9 +52,26 @@ const findByPrefixWithSecret = async (keyPrefix) => {
     return rows[0] || null;
 };
 
-const list = async ({ limit = 50, offset = 0, layer_id = null, is_active = null } = {}) => {
+const _escapeLike = (value) => String(value).replace(/[\\%_]/g, '\\$&');
+
+const list = async ({ limit = 50, offset = 0, q = null, layer_id = null, is_active = null } = {}) => {
     const params = [];
     const where = [];
+    if (q) {
+        params.push(`%${_escapeLike(q)}%`);
+        const qi = params.length;
+        where.push(`(
+            CAST(a.id AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR a.name ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(a.key_prefix, '') ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(a.key_last4, '') ILIKE $${qi} ESCAPE '\\'
+            OR CAST(a.request_count AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(l.code, '') ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(l.name_vi, '') ILIKE $${qi} ESCAPE '\\'
+            OR to_char(a.created_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${qi} ESCAPE '\\'
+            OR to_char(a.updated_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${qi} ESCAPE '\\'
+        )`);
+    }
     if (layer_id) { params.push(layer_id); where.push(`a.layer_id = $${params.length}`); }
     if (typeof is_active === 'boolean') { params.push(is_active); where.push(`a.is_active = $${params.length}`); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';

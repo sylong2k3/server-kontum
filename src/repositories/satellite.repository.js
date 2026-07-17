@@ -83,21 +83,26 @@ const upsert = async ({
 };
 
 /**
- * Update GeoServer publish state for a result.
+ * Update GeoServer publish state for a result. All fields are optional —
+ * only supplied columns are written, so callers can update just gee_task_id
+ * without accidentally NULL-ing status.
  */
-const updatePublish = async (id, { status, gee_task_id, minio_key, geoserver_layer, geoserver_store, publish_error }) => {
-    const sets = ['status = $2'];
-    const vals = [id, status];
-    let idx = 3;
+const updatePublish = async (id, { status, gee_task_id, minio_key, geoserver_layer, geoserver_store, publish_error } = {}) => {
+    const sets = [];
+    const vals = [id];
+    let idx = 2;
 
     const add = (col, val) => {
         if (val !== undefined) { sets.push(`${col} = $${idx++}`); vals.push(val ?? null); }
     };
+    add('status',          status);
     add('gee_task_id',     gee_task_id);
     add('minio_key',       minio_key);
     add('geoserver_layer', geoserver_layer);
     add('geoserver_store', geoserver_store);
     add('publish_error',   publish_error);
+
+    if (sets.length === 0) return getById(id);
 
     const { rows } = await db.query(
         `UPDATE satellite.image_results SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,

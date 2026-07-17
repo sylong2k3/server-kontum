@@ -545,3 +545,83 @@ Pipeline: S2 NDVI/NDMI/NBR + MODIS LST + ERA5 weather → P-Nesterov index → r
 | `getDemBands(region?)` | SRTM elevation/slope/aspect |
 | `todayUtc()` | Current date as `YYYY-MM-DD` (UTC) |
 | `fmtDate(d)` | Format Date/string as `YYYY-MM-DD` |
+| `getKonTumBoundarySource()` | Nguồn thực tế đã cache của boundary (`LOCAL_EPSG:xxxx` hoặc `FAO_GAUL_2015_LEVEL1`) |
+| `getKonTumDistrictsSource()` | Nguồn thực tế đã cache của districts |
+| `logGeeGeometrySources()` | Startup diagnostic — log file local có/thiếu |
+
+---
+
+## Troubleshooting
+
+### Lỗi `GEE_GCS_BUCKET not configured — cannot export raster`
+
+**Trước v8.1.1** — cả analysis crash 500. **Từ v8.1.1** — chỉ raster export bị bỏ qua,
+snapshot + GEE tile URL vẫn được tạo. Nếu vẫn cần raster export, cấu hình:
+
+```bash
+# Trong file .env của server
+GEE_GCS_BUCKET=your-gcs-bucket-name
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+```
+
+**Kiểm tra:** khi start server, log sẽ hiển thị:
+
+```
+[FIRE-RISK] ✓ GEE_GCS_BUCKET=... — raster export sẽ chạy
+```
+hoặc
+```
+[FIRE-RISK] ⚠ GEE_GCS_BUCKET chưa cấu hình — raster export sẽ bỏ qua
+```
+
+Nếu không cần GeoServer raster (chỉ dùng GEE tile URL trực tiếp), có thể để trống —
+DB snapshot + district stats + `gee_tile_url` vẫn hoạt động bình thường.
+
+### Districts trả về tên tiếng Anh (`Kon Plong`, `Kon Ray`, …) thay vì tên tiếng Việt
+
+Nghĩa là server đang dùng fallback **FAO/GAUL/2015 level-2** thay vì file local
+`RanhGioiHuyen_WGS84.geojson` / `RanhGioiHuyen_Polygon.geojson`.
+
+**Sửa:** copy nội dung folder `server/data/` từ dev sang production:
+
+```bash
+# Từ máy dev (Windows)
+scp -r D:/Code/@kt_web_GIS/server/data/* administrator@prod:/path/to/server/data/
+
+# Hoặc rsync trên Linux
+rsync -av server/data/ user@prod:~/server-kontum/data/
+```
+
+Khi start server đã cấu hình đúng, log sẽ hiển thị:
+
+```
+[GEE-SAT] ── Kiểm tra file geometry local ──
+[GEE-SAT]  ✓ Province: /.../RanhGioiTinh_Polygon.geojson
+[GEE-SAT]  ✓ Districts (WGS84): /.../RanhGioiHuyen_WGS84.geojson
+[GEE-SAT]  ✓ Districts (raw): /.../RanhGioiHuyen_Polygon.geojson
+```
+
+Trong log của mỗi request fire-risk sẽ có:
+
+```
+[FIRE-RISK#YYYY-MM-DD][•] • Province source — source=LOCAL_EPSG:4326
+[FIRE-RISK#YYYY-MM-DD][•] • Districts source — source=LOCAL_RANHGIOIHUYEN_EPSG:32648
+```
+
+Nếu source hiển thị `FAO_GAUL_2015_LEVEL1` hoặc `FAO_GAUL_2015_LEVEL2` → file local
+thiếu, đang dùng fallback.
+
+### Snapshot cũ có `avgRiskLevel=null` nhưng district stats non-zero
+
+Snapshot cũ được tạo bởi phiên bản trước khi sửa `aggregateProvinceFromDistricts`.
+Chạy `POST /fire-risk/refresh` để tạo snapshot mới với dữ liệu nhất quán.
+
+### Feature `geometry: null` trong response `/latest` hoặc `/map`
+
+Do file district local dùng UTM 48N (EPSG:32648) với properties placeholder
+(`xa 1`, `xa 2`, …). `reduceRegions` output vẫn có geometry — nếu null tức là:
+
+1. Districts đang dùng FAO fallback → xem section trên
+2. Đã reprocess với v8.1.1+ nhưng snapshot còn cũ → refresh lại
+
+---

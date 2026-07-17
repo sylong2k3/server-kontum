@@ -42,7 +42,15 @@ const buildWhere = ({ q, docType, isPublic, publicOnly = true } = {}, startIdx =
         const qi = idx++;
         conditions.push(
             `(dt_eff.title ILIKE $${qi} ESCAPE '\\'` +
-            ` OR dt_eff.description ILIKE $${qi} ESCAPE '\\')`
+            ` OR COALESCE(dt_eff.description, '') ILIKE $${qi} ESCAPE '\\'` +
+            ` OR CAST(d.id AS TEXT) ILIKE $${qi} ESCAPE '\\'` +
+            ` OR d.doc_type ILIKE $${qi} ESCAPE '\\'` +
+            ` OR COALESCE(d.file_name, '') ILIKE $${qi} ESCAPE '\\'` +
+            ` OR COALESCE(d.mime_type, '') ILIKE $${qi} ESCAPE '\\'` +
+            ` OR CAST(d.file_size AS TEXT) ILIKE $${qi} ESCAPE '\\'` +
+            ` OR COALESCE(u.full_name, '') ILIKE $${qi} ESCAPE '\\'` +
+            ` OR to_char(d.created_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${qi} ESCAPE '\\'` +
+            ` OR to_char(d.updated_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${qi} ESCAPE '\\')`
         );
     }
 
@@ -113,6 +121,7 @@ const countAll = async ({ filter = {}, publicOnly = true, lang = 'vi' }) => {
         `SELECT COUNT(*)::int AS total
          FROM cms.documents d
          ${translationJoin('$1', '$2')}
+         LEFT JOIN auth.users u ON u.id = d.uploaded_by
          WHERE ${where}
            AND dt_eff.id IS NOT NULL`,
         queryParams

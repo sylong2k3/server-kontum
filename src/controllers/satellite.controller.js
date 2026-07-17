@@ -28,17 +28,16 @@ const getClassified = async (req, res) => {
     OK(res, t('get_detail_success', req.lang), result);
 };
 
-// ── POST /satellite/compare ───────────────────────────────────────────────────
-const getCompare = async (req, res) => {
-    const result = await svc.getCompare(req.body);
+// ── POST /satellite/fire-risk ────────────────────────────────────────────────
+// On-demand fire warning tile (v8.1). Body accepts:
+//   analysisDate | endDate  — anchor date (required)
+//   geometry                — optional custom ROI
+//   enableRf                — override cfg.ENABLE_RF
+//   inputFireAssetId        — override cfg.INPUT_FIRE_ASSET_ID
+//   fireLayer               — 'riskLevel' | 'score' | 'priorityWarning' | 'confidence'
+const getFireRisk = async (req, res) => {
+    const result = await svc.getFireRisk(req.body);
     OK(res, t('get_detail_success', req.lang), result);
-};
-
-// ── GET /satellite/tiles/:resultId/:z/:x/:y ───────────────────────────────────
-// Proxies GEE tiles server-side: hides GEE tokens from client, enables CORS.
-const proxyTile = async (req, res) => {
-    const { resultId, z, x, y } = req.params;
-    await svc.streamTile(resultId, z, x, y, res);
 };
 
 // ── POST /satellite/publish ───────────────────────────────────────────────────
@@ -52,4 +51,4 @@ const publishToGeoServer = async (req, res) => {
     CREATED(res, 'Đã gửi tác vụ xuất GeoTIFF.', { result: updated });
 };
 
-module.exports = { getRgb, getNdvi, getHeatmap, getClassified, getCompare, proxyTile, publishToGeoServer };
+module.exports = { getRgb, getNdvi, getHeatmap, getClassified, getFireRisk, publishToGeoServer };

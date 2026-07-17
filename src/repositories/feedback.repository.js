@@ -35,7 +35,24 @@ const buildWhere = (filter = {}, startIdx = 1) => {
     if (filter.q) {
         params.push(`%${_escapeLike(filter.q)}%`);
         const qi = idx++;
-        conditions.push(`(f.title ILIKE $${qi} ESCAPE '\\' OR f.description ILIKE $${qi} ESCAPE '\\')`);
+        conditions.push(`(
+            CAST(f.id AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR CAST(f.user_id AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(f.anonymous_id, '') ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(f.client_uuid, '') ILIKE $${qi} ESCAPE '\\'
+            OR f.category ILIKE $${qi} ESCAPE '\\'
+            OR f.title ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(f.description, '') ILIKE $${qi} ESCAPE '\\'
+            OR f.status ILIKE $${qi} ESCAPE '\\'
+            OR f.priority ILIKE $${qi} ESCAPE '\\'
+            OR CAST(f.lng AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR CAST(f.lat AS TEXT) ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(u.full_name, '') ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(cu.full_name, '') ILIKE $${qi} ESCAPE '\\'
+            OR COALESCE(uu.full_name, '') ILIKE $${qi} ESCAPE '\\'
+            OR to_char(f.created_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${qi} ESCAPE '\\'
+            OR to_char(f.updated_at, 'YYYY-MM-DD HH24:MI:SS') ILIKE $${qi} ESCAPE '\\'
+        )`);
     }
     if (filter.from) {
         params.push(filter.from);
@@ -142,7 +159,10 @@ const findAll = async ({ limit, offset, filter = {}, sortBy, sortOrder }) => {
 const countAll = async ({ filter = {} }) => {
     const { where, params } = buildWhere(filter, 1);
     const result = await db.query(
-        `SELECT COUNT(*)::int AS total FROM field.feedback f WHERE ${where}`,
+        `SELECT COUNT(*)::int AS total
+         FROM field.feedback f
+         ${joinUsers}
+         WHERE ${where}`,
         params
     );
     return result.rows[0]?.total || 0;

@@ -1,6 +1,8 @@
 const app = require("./src/app");
 const db = require("./src/configs/database");
 const { initializeEarthEngine, isInitialized } = require("./src/configs/gge");
+const { logGeeGeometrySources } = require("./src/utils/gee-satellite.util");
+const fireRiskCfg = require("./src/configs/fire-risk");
 const { initMinio, healthCheck: minioHealthCheck } = require("./src/configs/minioClient");
 const geoserverClient = require("./src/utils/geoserver.client");
 
@@ -9,6 +11,7 @@ const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
 const weatherJob = require("./src/jobs/weather.job");
 const fireRiskJob            = require("./src/jobs/fire-risk.job");
 const forestClassificationJob = require("./src/jobs/forest-classification.job");
+const satelliteJob           = require("./src/jobs/satellite.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const geoImportWorker       = require("./src/workers/geoImport.worker");
 const {
@@ -86,6 +89,7 @@ async function gracefulShutdown(signal) {
   weatherJob.stop();
   fireRiskJob.stop();
   forestClassificationJob.stop();
+  satelliteJob.stop();
   imageProcessingWorker.stopWorker();
   geoImportWorker.stopWorker();
   closeWebSocketServer();
@@ -140,6 +144,16 @@ const initializeAndStartServer = async () => {
 
     server = app.listen(PORT, HOST, () => {
       printStartupBanner({ dbStatus, minioStatus, earthEngineStatus, geoserverStatus });
+      // Kiểm tra file geometry local + trạng thái GCS ngay khi startup —
+      // cảnh báo sớm nếu production thiếu file để fallback FAO / thiếu bucket
+      // để bỏ raster export.
+      logGeeGeometrySources();
+      if (fireRiskCfg.isGcsConfigured()) {
+        console.log(`[FIRE-RISK] ✓ GEE_GCS_BUCKET=${fireRiskCfg.GCS_BUCKET} — raster export sẽ chạy`);
+      } else {
+        console.log('[FIRE-RISK] ⚠ GEE_GCS_BUCKET chưa cấu hình — raster export sẽ bỏ qua ' +
+          '(DB snapshot + GEE tile vẫn tạo bình thường)');
+      }
     });
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
@@ -150,6 +164,7 @@ const initializeAndStartServer = async () => {
       weatherJob.start();
       fireRiskJob.start();
       forestClassificationJob.start();
+      satelliteJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
     }
@@ -184,6 +199,16 @@ const initializeAndStartServer = async () => {
 
     server = app.listen(PORT, HOST, () => {
       printStartupBanner({ dbStatus, minioStatus, earthEngineStatus, geoserverStatus });
+      // Kiểm tra file geometry local + trạng thái GCS ngay khi startup —
+      // cảnh báo sớm nếu production thiếu file để fallback FAO / thiếu bucket
+      // để bỏ raster export.
+      logGeeGeometrySources();
+      if (fireRiskCfg.isGcsConfigured()) {
+        console.log(`[FIRE-RISK] ✓ GEE_GCS_BUCKET=${fireRiskCfg.GCS_BUCKET} — raster export sẽ chạy`);
+      } else {
+        console.log('[FIRE-RISK] ⚠ GEE_GCS_BUCKET chưa cấu hình — raster export sẽ bỏ qua ' +
+          '(DB snapshot + GEE tile vẫn tạo bình thường)');
+      }
     });
     initWebSocketServer(server, { path: WS_PATH });
 
@@ -193,6 +218,7 @@ const initializeAndStartServer = async () => {
       weatherJob.start();
       fireRiskJob.start();
       forestClassificationJob.start();
+      satelliteJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
     }

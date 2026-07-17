@@ -86,6 +86,19 @@ const SNAPSHOT_GRACE_MONTHS = parseInt(process.env.FC_SNAPSHOT_GRACE_MONTHS, 10)
 // ── GEE timeout ──────────────────────────────────────────────────────────────
 const GEE_TIMEOUT_MS = parseInt(process.env.GEE_TIMEOUT_MS, 10) || 5 * 60 * 1000;
 
+// ── Lite mode (on-demand /satellite/classified) ──────────────────────────────
+// The full v3 pipeline (dry+wet composites × 8 indices × 4 Landsat + S2 + DW +
+// WorldCover + JRC + 100 samples × 11 classes + 200 trees) is too heavy for
+// interactive tile rendering — getMapId consistently hits GEE "Please try
+// again" around 200 s. Lite mode preserves the essence (11-class RF from
+// Landsat/S2 + threshold pseudo-labels) but drops the expensive parts.
+const LITE_SAMPLES_PER_CLASS = parseInt(process.env.FC_LITE_SAMPLES_PER_CLASS, 10) || 30;
+const LITE_SAMPLE_SCALE_M    = parseInt(process.env.FC_LITE_SAMPLE_SCALE_M,    10) || 100;
+const LITE_RF_TREES          = parseInt(process.env.FC_LITE_RF_TREES,          10) || 80;
+// Skip Dynamic World + ESA WorldCover + JRC GSW dataset labels in lite mode.
+// The threshold pseudo-label alone still yields all 11 classes.
+const LITE_USE_DATASET_LABELS = process.env.FC_LITE_USE_DATASET_LABELS === 'true';
+
 const isGcsConfigured = () => Boolean(GCS_BUCKET);
 
 module.exports = {
@@ -114,5 +127,9 @@ module.exports = {
     EXPORT_SCALE_M,
     SNAPSHOT_GRACE_MONTHS,
     GEE_TIMEOUT_MS,
+    LITE_SAMPLES_PER_CLASS,
+    LITE_SAMPLE_SCALE_M,
+    LITE_RF_TREES,
+    LITE_USE_DATASET_LABELS,
     isGcsConfigured,
 };
