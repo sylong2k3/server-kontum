@@ -95,7 +95,16 @@ Quy ước:
 
 **Tổng M-EP-05: ~67h (~11 ngày)**
 
-## M-EP-06 — Field-update kiểm lâm (EP-10 server)
+## M-EP-06 — ⚠️ Field-update kiểm lâm (EP-10 server) — STALE, server đã gỡ
+
+> **Cảnh báo (2026-07-13):** bảng `field.field_updates` đã bị `DROP` ở migration 027;
+> route `/mobile/*` (`POST /mobile/field-updates`, `GET /mobile/sync`) **không còn tồn
+> tại** trên server. Toàn bộ epic này đang mô tả một API đã gỡ — đừng code theo epic
+> này nữa. Nhu cầu nghiệp vụ tương tự (kiểm lâm ghi nhận hiện trạng ngoài thực địa) nay
+> được thay bằng **M-EP-11 — Đo đạc thực địa & theo dõi biến động** (dựa trên
+> `gis.field_measurements`, xem [07-field-measurement-design.md](./07-field-measurement-design.md))
+> — khác model dữ liệu, khác API, không tương thích ngược với các task MB-070..074 bên
+> dưới. Giữ lại phần dưới để tham khảo lịch sử, không triển khai.
 
 | ID | Task | Chi tiết | Ưu tiên | Ước lượng | Phụ thuộc |
 |---|---|---|---|---|---|
@@ -158,6 +167,27 @@ Quy ước:
 
 **Tổng M-EP-10: ~60h (~10 ngày)**
 
+## M-EP-11 — Đo đạc thực địa & theo dõi biến động (Sở NN&MT)
+
+> Thiết kế chi tiết: [07-field-measurement-design.md](./07-field-measurement-design.md).
+> Thay thế nhu cầu nghiệp vụ của M-EP-06 (đã stale) bằng model dữ liệu mới
+> `gis.field_measurements` / `gis.monitored_areas`. Server đã có đủ API, đã test thật
+> qua `apikontum.tourismpj.pro.vn` (2026-07-13).
+
+| ID | Task | Chi tiết | Ưu tiên | Ước lượng | Phụ thuộc |
+|---|---|---|---|---|---|
+| MB-120 | Model + repo đo đạc | freezed `FieldMeasurement`, `MonitoredArea`, `GpsPoint`; repo gọi `/field-measurements`, `/monitored-areas`; unit test mock dio | P0 | 8h | MB-006 |
+| MB-121 | Bảng drift `gps_walk_draft` | lưu điểm GPS đang ghi (chưa khép vùng) cục bộ, sống sót qua app restart; xoá sau khi khép vùng thành công | P0 | 5h | MB-008 |
+| MB-122 | Màn ghi điểm GPS (SCR-H01, H02) | vị trí hiện tại + vòng accuracy màu (cảnh báo, không chặn — ngưỡng cấu hình); nút Ghi điểm/Sửa/Xoá điểm/Khép vùng; diện tích tạm tính turf-dart; gọi `suggest/by-point` khi vị trí đổi đáng kể | P0 | 12h | MB-121, MB-035, MB-034 |
+| MB-123 | Tạo & xác nhận phiên đo (SCR-H03) | "Khép vùng" → ghi outbox → `POST /field-measurements`; hiển thị `affectedFeatures`, gợi ý `suggest/by-geom`, form xác nhận/sửa `oldLandUse`, nhập `newLandUse` + ghi chú | P0 | 10h | MB-120, MB-060 |
+| MB-124 | Danh sách & chi tiết phiên đo (SCR-H04, H05) | tab theo status; chi tiết: minimap polygon, ảnh, `reviewNote`; nút Sửa/Xoá/Gửi báo cáo chỉ hiện đúng trạng thái; **test E2E offline: ghi điểm mất mạng → có mạng lại → sync đúng** | P0 | 10h | MB-123 |
+| MB-125 | Upload ảnh hiện trường | tái dùng MB-061 (camera + nén); chỉ gọi được khi phiên đo đã có `id` và còn editable | P0 | 5h | MB-124, MB-061 |
+| MB-126 | Gửi báo cáo + nhận thông báo | `POST .../submit`; lắng nghe push `field_measurement_verified`/`field_measurement_rejected` (tái dùng MB-082) → deep-link vào SCR-H05 | P0 | 5h | MB-124, MB-082 |
+| MB-127 | Khu vực theo dõi + timeline (SCR-H06) | danh sách `KV-xxx`, chi tiết hiện dòng thời gian các lần đo (diện tích/loại đất/ảnh qua từng mốc) | P1 | 8h | MB-120 |
+| MB-128 | Xác thực (system_admin) (SCR-H07) | danh sách `submitted` chờ duyệt; nút Xác thực/Trả lại (bắt buộc lý do); gate role `system_admin` | P0 | 6h | MB-124, MB-010 |
+
+**Tổng M-EP-11: ~69h (~12 ngày)**
+
 ---
 
 ## Tổng hợp
@@ -170,9 +200,10 @@ Quy ước:
 | M-EP-03 | Thời tiết | 23h | P1 |
 | M-EP-04 | Tin tức/Văn bản | 33h | P0 |
 | M-EP-05 | Phản ánh + offline | 67h | P0 |
-| M-EP-06 | Field-update kiểm lâm | 37h | P0 |
+| M-EP-06 | ~~Field-update kiểm lâm~~ ⚠️ stale, server đã gỡ — không tính vào tổng | ~~37h~~ | thay bằng M-EP-11 |
 | M-EP-07 | Thông báo & FCM | 33h | P0 |
 | M-EP-08 | Thống kê | 26h | P1 |
 | M-EP-09 | Cảnh báo cháy | 25h | ⛔ chờ server |
 | M-EP-10 | QA & release | 60h | P0 |
-| **Tổng** | | **~529h ≈ 88 ngày công** | 2 dev ≈ 9–10 tuần |
+| M-EP-11 | Đo đạc thực địa & biến động | 69h | P0 |
+| **Tổng** | (không tính M-EP-06 đã stale) | **~561h ≈ 94 ngày công** | 2 dev ≈ 9–10 tuần |
