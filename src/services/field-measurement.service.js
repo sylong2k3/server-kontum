@@ -188,12 +188,14 @@ const requireOwnedEditable = async (actor, id, lang) => {
 
 const updateMeasurement = async (actor, id, payload, lang) => {
     await requireOwnedEditable(actor, id, lang);
-    const updated = await repo.updateEditable(id, {
-        area_id: payload.areaId,
-        old_land_use: payload.oldLandUse,
-        new_land_use: payload.newLandUse,
-        note: payload.note,
-    });
+    // Chỉ đưa vào patch những trường client thực sự gửi — PATCH là cập nhật một phần,
+    // gán "undefined" cho các trường còn lại sẽ bị pg đổi thành NULL và xoá mất dữ liệu cũ.
+    const patch = {};
+    if (payload.areaId !== undefined) { patch.area_id = payload.areaId; }
+    if (payload.oldLandUse !== undefined) { patch.old_land_use = payload.oldLandUse; }
+    if (payload.newLandUse !== undefined) { patch.new_land_use = payload.newLandUse; }
+    if (payload.note !== undefined) { patch.note = payload.note; }
+    const updated = await repo.updateEditable(id, patch);
     if (!updated) { throw new Api404Error(t('field_measurement_not_found', lang)); }
     return toMeasurementItem(updated);
 };
