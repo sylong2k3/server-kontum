@@ -47,11 +47,9 @@ const RISK_LEVEL_VIZ = {
     palette: ['ffffff', '00a65a', 'f6e84a', 'f39c12', 'e74c3c', '7b241c'],
 };
 
-// Đường dẫn polygon tỉnh Kon Tum (RanhGioiTinh_Polygon.geojson) — dùng cho
-// stats scope tỉnh cùng client render outline. Có thể override qua env
-// `KON_TUM_BOUNDARY_GEOJSON` (chia sẻ với gee-satellite.util).
-const KON_TUM_PROVINCE_PATH = process.env.KON_TUM_BOUNDARY_GEOJSON
-    || path.resolve(__dirname, '../../data/RanhGioiTinh_Polygon.geojson');
+// NOTE — HARD-CODED, KHÔNG dùng env override.
+// User đã quyết định 1 file duy nhất tại `data/RanhGioiTinh_Polygon.geojson`.
+const KON_TUM_PROVINCE_PATH = path.resolve(__dirname, '../../data/RanhGioiTinh_Polygon.geojson');
 let _cachedProvinceGeoJson = null;
 
 /**
@@ -473,24 +471,6 @@ async function runAnalysis(analysisDate, {
         log.mark('Districts source', `source=${districtsSource}` +
             (districtsSource === 'FAO_GAUL_2015_LEVEL2' ? ' ⚠ dùng FAO fallback, cân nhắc copy file local' : ''));
 
-        // Diagnostic — evaluate size() + first feature properties trực tiếp
-        // từ ee.FeatureCollection để CHỨNG THỰC collection nào đang được truyền
-        // vào reduceRegions. Nếu size = 1 và properties null → biết ngay là
-        // GEE-side có vấn đề với ee.Feature build (không phải file).
-        try {
-            const [ dcount, sample ] = await Promise.all([
-                eeEvaluate(districts.size()),
-                eeEvaluate(districts.first().toDictionary(['ADM2_CODE', 'ADM2_NAME', 'source'])),
-            ]);
-            log.mark('Districts FC verify',
-                `ee.size=${dcount} firstProps=${JSON.stringify(sample)}`);
-            if (dcount <= 1) {
-                console.warn(`[FIRE-RISK] ⚠ ee.FeatureCollection có ${dcount} feature — ` +
-                    'reduceRegions sẽ ra 1 row. Kiểm tra log [GEE-SAT#DISTRICTS] phía trên.');
-            }
-        } catch (err) {
-            console.warn(`[FIRE-RISK] Districts FC verify lỗi (non-fatal): ${err.message}`);
-        }
 
         const provinceGeoJson  = loadLocalProvinceGeoJson();
         const provinceCentroid = computeCentroid(provinceGeoJson);
@@ -533,7 +513,7 @@ async function runAnalysis(analysisDate, {
             console.warn(
                 `[FIRE-RISK] ⚠ districtStats bất thường — rows=${districtStats.length}, ` +
                 `codes null=${districtStats.filter((d) => d.unitCode == null).length}. ` +
-                `Kiểm tra file huyện + env KON_TUM_DISTRICTS_GEOJSON. ` +
+                `Kiểm tra file huyện ${KON_TUM_PROVINCE_PATH.replace('RanhGioiTinh', 'RanhGioiHuyen')}. ` +
                 `Sample row 0: ${JSON.stringify(districtStats[0] || null).slice(0, 300)}`,
             );
         }
@@ -567,6 +547,44 @@ async function runAnalysis(analysisDate, {
             console.warn(`[FIRE-RISK] getEeMapId failed (non-fatal): ${err.message}`);
         }
 
+        // Download URL clip theo ranh giới tỉnh Kon Tum (RanhGioiTinh_Polygon).
+        // GEE `image.getDownloadURL` trả 1 GeoTIFF nén .zip, valid ~24h.
+        // Region = province polygon (WGS84 2D). Scale 500m matches raster gốc.
+        // Non-fatal: nếu lỗi (image quá lớn hoặc GEE timeout), snapshot vẫn
+        // completed, chỉ thiếu link download — user có thể refresh sau.
+        //
+        // Dùng callback API vì `image.getDownloadURL()` trong Node SDK là
+        // async callback, không phải Promise.
+        let geeDownloadUrl = null;
+        try {
+            geeDownloadUrl = await log.run(
+                'Generate GEE download URL (riskLevel clip → RanhGioiTinh_Polygon)',
+                () => new Promise((resolve) => {
+                    const timer = setTimeout(() => resolve(null), 30_000);
+                    riskLevel.clip(region.geometry()).toInt8().getDownloadURL(
+                        {
+                            name:      `fire_risk_kontum_${analysisDate.replace(/-/g, '')}`,
+                            scale:     cfg.EXPORT_SCALE_M || 500,
+                            region:    region.geometry(),
+                            crs:       'EPSG:4326',
+                            format:    'GEO_TIFF',
+                            maxPixels: 1e9,
+                        },
+                        (url, err) => {
+                            clearTimeout(timer);
+                            if (err) {
+                                console.warn(`[FIRE-RISK] getDownloadURL err: ${err.message || err}`);
+                            }
+                            resolve(err ? null : url);
+                        },
+                    );
+                }),
+                { note: 'getDownloadURL — clip theo province polygon, ZIP GeoTIFF ~24h TTL' },
+            );
+        } catch (err) {
+            console.warn(`[FIRE-RISK] getDownloadURL failed (non-fatal): ${err.message}`);
+        }
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary:  provinceSummary,
@@ -577,6 +595,7 @@ async function runAnalysis(analysisDate, {
                 gee_map_id:        geeMapId,
                 gee_tile_url:      geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
+                gee_download_url:  geeDownloadUrl,
             }));
 
         const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);

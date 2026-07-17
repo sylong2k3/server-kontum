@@ -212,6 +212,103 @@ const truncateGwcLayer = async (geoserverLayerName, format = 'image/png', zoomSt
     );
 };
 
+/**
+ * Publish 1 GeoTIFF nằm trên MinIO/S3 qua CoverageStore type `S3GeoTiff`.
+ * Yêu cầu extension `gs-s3-geotiff` đã cài trên GeoServer + file properties
+ * `.s3.properties` trong GEOSERVER_DATA_DIR trỏ endpoint MinIO nếu không phải AWS.
+ *
+ * @param {object} args
+ * @param {string} args.storeName    — tên CoverageStore + Coverage (thường trùng)
+ * @param {string} args.s3Bucket
+ * @param {string} args.s3Key
+ * @param {string} args.title
+ * @param {boolean} [args.enabled]
+ * @returns {Promise<string>} — 'workspace:storeName'
+ */
+const publishS3GeoTiffLayer = async ({
+    storeName, s3Bucket, s3Key, title, enabled = true,
+}) => {
+    const config    = assertGeoserverConfigured();
+    const workspace = config.workspace;
+    const s3Url     = `s3://${s3Bucket}/${s3Key}`;
+    const t0        = Date.now();
+    const dbg       = (process.env.RASTER_INGEST_DEBUG === 'true'
+                        || process.env.NODE_ENV === 'development')
+        ? (msg) => console.debug(`[GEOSERVER-S3] ${msg}`) : () => {};
+
+    dbg(`publish store=${storeName} ws=${workspace} url=${s3Url}`);
+
+    // 1. CoverageStore. Upsert: POST tạo mới, nếu đã tồn tại thì PUT cập nhật
+    // URL — cần thiết cho re-ingest (URL S3 có thể trỏ file khác) — nếu bỏ qua,
+    // GeoServer sẽ serve raster cũ mãi mãi.
+    const storeBody = JSON.stringify({
+        coverageStore: {
+            name: storeName,
+            type: 'S3GeoTiff',
+            enabled,
+            workspace: { name: workspace },
+            url: s3Url,
+        },
+    });
+
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: storeBody,
+            }
+        );
+        dbg(`store CREATED (POST)`);
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) {
+            console.error(`[GEOSERVER-S3] store CREATE FAILED store=${storeName} status=${err.status}: ${err.message}`);
+            throw err;
+        }
+        // Đã tồn tại → PUT cập nhật URL. GeoServer trả 200 kể cả khi URL trùng.
+        dbg(`store exists → PUT update URL`);
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores/${storeName}`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: storeBody,
+            }
+        );
+        dbg(`store URL UPDATED (PUT)`);
+    }
+
+    // 2. Coverage.
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores/${storeName}/coverages`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    coverage: {
+                        name:  storeName,
+                        title: title || storeName,
+                        enabled,
+                    },
+                }),
+            }
+        );
+        dbg(`coverage CREATED`);
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) {
+            console.error(`[GEOSERVER-S3] coverage CREATE FAILED store=${storeName} status=${err.status}: ${err.message}`);
+            throw err;
+        }
+        dbg(`coverage already exists — kept`);
+    }
+
+    const layerName = `${workspace}:${storeName}`;
+    dbg(`done → ${layerName} (${Date.now() - t0}ms)`);
+    return layerName;
+};
+
 const harvestGeoTiff = async (coverageStore, tifPath) => {
     const config = assertGeoserverConfigured();
     const fileUrl = tifPath.startsWith('file://') ? tifPath : `file://${tifPath}`;
@@ -244,6 +341,7 @@ module.exports = {
     DEFAULT_ALLOWED_PARAMS,
     publishVectorLayer,
     publishRasterLayer,
+    publishS3GeoTiffLayer,
     publishTimelapseLayer,
     unpublishLayer,
     setLayerEnabled,

@@ -18,9 +18,9 @@ const DEFAULT_TIMEOUT_MS = parseInt(process.env.GEE_TIMEOUT_MS, 10) || 5 * 60 * 
 // Local Kon Tum province polygon (higher-fidelity than FAO/GAUL).
 // Used only as a fallback when the request omits `params.geometry`;
 // user-supplied ROIs are always clipped to as-is.
-// Override the file path with the KON_TUM_BOUNDARY_GEOJSON env var.
-const KON_TUM_BOUNDARY_PATH = process.env.KON_TUM_BOUNDARY_GEOJSON
-    || path.resolve(__dirname, '../../data/RanhGioiTinh_Polygon.geojson');
+// NOTE — HARD-CODED, KHÔNG dùng env override.
+// User đã quyết định 1 file duy nhất tại `data/RanhGioiTinh_Polygon.geojson`.
+const KON_TUM_BOUNDARY_PATH = path.resolve(__dirname, '../../data/RanhGioiTinh_Polygon.geojson');
 
 // ── GEE async helpers ─────────────────────────────────────────────────────────
 
@@ -86,12 +86,10 @@ function getKonTumRegion() {
     return ee.FeatureCollection([ee.Feature(getKonTumBoundaryGeometry())]);
 }
 
-// Đường dẫn file polygon huyện — CHỈ 1 file duy nhất.
-// GADM v2 WGS84 (`RanhGioiHuyen_Polygon.geojson`), có thể override qua env
-// `KON_TUM_DISTRICTS_GEOJSON`. Không còn fallback WGS84 riêng vì file duy nhất
-// đã ở WGS84.
-const KON_TUM_DISTRICTS_PATH = process.env.KON_TUM_DISTRICTS_GEOJSON
-    || path.resolve(__dirname, '../../data/RanhGioiHuyen_Polygon.geojson');
+// NOTE — HARD-CODED, KHÔNG dùng env override.
+// User đã quyết định 1 file duy nhất tại `data/RanhGioiHuyen_Polygon.geojson`.
+// GADM v2 WGS84 (10 huyện Kon Tum, properties `ID_2/NAME_2/VARNAME_2/TYPE_2`).
+const KON_TUM_DISTRICTS_PATH = path.resolve(__dirname, '../../data/RanhGioiHuyen_Polygon.geojson');
 
 let _cachedDistrictsFC = null;
 let _cachedDistrictsSource = null;
@@ -100,7 +98,7 @@ let _cachedDistrictsSource = null;
  * Districts (huyện) của Kon Tum. Chỉ dùng 1 file:
  *   • `data/RanhGioiHuyen_Polygon.geojson` — GADM v2 WGS84 (10 huyện Kon Tum,
  *     properties `ID_2/NAME_2/VARNAME_2/TYPE_2/NAME_1`, có duplicate 18→9).
- *   • Override qua env `KON_TUM_DISTRICTS_GEOJSON` khi cần.
+ *   • Path HARD-CODED, không dùng env override.
  *
  * Fallback FAO/GAUL/2015/level2 (8 huyện cũ, đã lỗi thời) khi file local
  * KHÔNG tồn tại HOẶC parse fail HOẶC không có feature hợp lệ. Fallback in
@@ -120,33 +118,21 @@ let _cachedDistrictsSource = null;
  *   - source     → nhãn debug (LOCAL_WGS84 hoặc LOCAL_EPSG:XXXX)
  */
 function getKonTumDistricts() {
-    if (_cachedDistrictsFC) {
-        console.log(`[GEE-SAT#DISTRICTS] ↺ cache HIT → source=${_cachedDistrictsSource}`);
-        return _cachedDistrictsFC;
-    }
-    console.log('[GEE-SAT#DISTRICTS] ── LOADER START ──────────────────────────────');
-    console.log(`[GEE-SAT#DISTRICTS] path = ${KON_TUM_DISTRICTS_PATH}`);
-    console.log(`[GEE-SAT#DISTRICTS] env KON_TUM_DISTRICTS_GEOJSON = ${process.env.KON_TUM_DISTRICTS_GEOJSON || '(not set)'}`);
+    if (_cachedDistrictsFC) return _cachedDistrictsFC;
 
     const loadResult = _tryLoadDistrictsFile(KON_TUM_DISTRICTS_PATH);
     if (loadResult) {
         _cachedDistrictsFC     = loadResult.fc;
         _cachedDistrictsSource = loadResult.source;
-        console.log(`[GEE-SAT#DISTRICTS] ✓ LOADED — ${loadResult.count} ee.Feature từ file, source=${loadResult.source}`);
-        console.log('[GEE-SAT#DISTRICTS] ── LOADER END ────────────────────────────────');
+        console.log(`[GEE-SAT] Districts ✓ ${loadResult.count} features (${loadResult.source})`);
         return _cachedDistrictsFC;
     }
 
-    console.warn(
-        '[GEE-SAT#DISTRICTS] ⚠ Không load được file local → fallback FAO/GAUL/2015/level2 ' +
-        '(8 huyện cũ 2015, ADM2_NAME English, không có Ia Hdrai). ' +
-        'Nếu thấy "District rows — 1" sau này → check log ở trên xem lý do loader thất bại.',
-    );
+    console.warn('[GEE-SAT] Districts ⚠ fallback FAO/GAUL/2015/level2 (8 huyện cũ, thiếu Ia Hdrai). Xem log lỗi phía trên.');
     _cachedDistrictsFC = ee.FeatureCollection('FAO/GAUL/2015/level2')
         .filter(ee.Filter.eq('ADM0_NAME', 'Viet Nam'))
         .filter(ee.Filter.eq('ADM1_NAME', 'Kon Tum'));
     _cachedDistrictsSource = 'FAO_GAUL_2015_LEVEL2';
-    console.log('[GEE-SAT#DISTRICTS] ── LOADER END (FAO fallback) ─────────────────');
     return _cachedDistrictsFC;
 }
 
@@ -156,28 +142,23 @@ function getKonTumDistricts() {
  */
 function _tryLoadDistrictsFile(filePath) {
     if (!fs.existsSync(filePath)) {
-        console.warn(`[GEE-SAT#DISTRICTS] ✗ file KHÔNG tồn tại: ${filePath}`);
+        console.warn(`[GEE-SAT] Districts file KHÔNG tồn tại: ${filePath}`);
         return null;
     }
-    let stat;
     let raw;
-    try {
-        stat = fs.statSync(filePath);
-        raw = fs.readFileSync(filePath, 'utf8');
-    } catch (err) {
-        console.warn(`[GEE-SAT#DISTRICTS] ✗ đọc file lỗi (${filePath}): ${err.message}`);
+    try { raw = fs.readFileSync(filePath, 'utf8'); }
+    catch (err) {
+        console.warn(`[GEE-SAT] Districts đọc file lỗi: ${err.message}`);
         return null;
     }
-    console.log(`[GEE-SAT#DISTRICTS] file size = ${(stat.size / 1024).toFixed(1)} KB`);
-
     let doc;
     try { doc = JSON.parse(raw); }
     catch (err) {
-        console.warn(`[GEE-SAT#DISTRICTS] ✗ JSON parse lỗi: ${err.message}`);
+        console.warn(`[GEE-SAT] Districts JSON parse lỗi: ${err.message}`);
         return null;
     }
     if (doc?.type !== 'FeatureCollection' || !Array.isArray(doc.features)) {
-        console.warn(`[GEE-SAT#DISTRICTS] ✗ file không phải GeoJSON FeatureCollection (type=${doc?.type})`);
+        console.warn(`[GEE-SAT] Districts file không phải GeoJSON FeatureCollection (type=${doc?.type})`);
         return null;
     }
 
@@ -186,29 +167,9 @@ function _tryLoadDistrictsFile(filePath) {
     const epsg    = _parseEpsgCode(crsName);
     const projLbl = epsg ? `EPSG:${epsg}` : null;
     const nonWgs84 = epsg && epsg !== '4326';
-    console.log(`[GEE-SAT#DISTRICTS] featCount=${featCount}, crs=${crsName || '(none)'} → projLbl=${projLbl || 'WGS84 default'}`);
 
-    // Đếm coords rỗng để phát hiện file bị cắt.
-    const emptyCoordCount = doc.features.filter((f) => {
-        const c = f?.geometry?.coordinates;
-        return !c || (Array.isArray(c) && c.length === 0);
-    }).length;
-    if (emptyCoordCount === featCount && featCount > 0) {
-        console.warn(`[GEE-SAT#DISTRICTS] ✗ TẤT CẢ ${featCount} feature có coords rỗng — file bị cắt`);
-        return null;
-    }
-    if (emptyCoordCount > 0) {
-        console.warn(`[GEE-SAT#DISTRICTS] ⚠ ${emptyCoordCount}/${featCount} feature có coords rỗng — sẽ skip.`);
-    }
-
-    // Log unique property keys để dev thấy schema thực tế.
-    const keySet = new Set();
-    for (const f of doc.features) {
-        for (const k of Object.keys(f?.properties || {})) keySet.add(k);
-    }
-    console.log(`[GEE-SAT#DISTRICTS] unique property keys = [${Array.from(keySet).sort().join(', ')}]`);
-
-    // Build ee.Feature per doc.feature (có dedupe theo ID_2).
+    // Build ee.Feature per doc.feature (có dedupe theo ID_2 vì file GADM v2
+    // có duplicate 18 → 9 huyện unique).
     const seenCodes = new Set();
     const eeFeats = [];
     let addedIdx = 0;
@@ -241,12 +202,15 @@ function _tryLoadDistrictsFile(filePath) {
             TYPE_2:    p.TYPE_2 || p.ENGTYPE_2 || null,
             source:    projLbl ? `LOCAL_${projLbl}` : 'LOCAL_WGS84',
         }));
-        console.log(`[GEE-SAT#DISTRICTS]   + [${addedIdx}] code="${code}" name="${name}"`);
         addedIdx += 1;
     }
-    console.log(`[GEE-SAT#DISTRICTS] built ${eeFeats.length} ee.Features (skipped: noGeom=${skippedNoGeom}, dup=${skippedDup})`);
+    // Chỉ log 1 dòng tổng kết khi có warning (skippedDup/noGeom > 0) hoặc lỗi
+    // (0 features). Trường hợp bình thường không log — log tổng ở caller đã đủ.
+    if (skippedDup > 0 || skippedNoGeom > 0) {
+        console.log(`[GEE-SAT] Districts: ${featCount} raw → ${eeFeats.length} unique (skipped noGeom=${skippedNoGeom}, dup=${skippedDup})`);
+    }
     if (eeFeats.length === 0) {
-        console.warn('[GEE-SAT#DISTRICTS] ✗ không tạo được ee.Feature nào.');
+        console.warn('[GEE-SAT] Districts ✗ không tạo được ee.Feature nào từ file.');
         return null;
     }
     return {

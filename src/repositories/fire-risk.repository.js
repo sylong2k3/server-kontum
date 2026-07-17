@@ -86,6 +86,7 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gee_map_id',           extra.gee_map_id);
     addField('gee_tile_url',         extra.gee_tile_url);
     addField('gee_tile_generated_at',extra.gee_tile_generated_at);
+    addField('gee_download_url',     extra.gee_download_url);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);

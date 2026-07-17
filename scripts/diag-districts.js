@@ -11,19 +11,16 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = path.resolve(__dirname, '../data');
+// HARD-CODED paths — không dùng env override nữa.
 const paths = [
-    process.env.KON_TUM_DISTRICTS_GEOJSON,
     path.join(DATA_DIR, 'RanhGioiHuyen_Polygon.geojson'),
-].filter(Boolean);
+];
 
 console.log('\n══════════════════════════════════════════════════════════════');
 console.log('  DISTRICTS FILE DIAGNOSTIC');
 console.log('══════════════════════════════════════════════════════════════\n');
 
-console.log('Env KON_TUM_DISTRICTS_GEOJSON =', process.env.KON_TUM_DISTRICTS_GEOJSON || '(not set)');
-console.log('Env KON_TUM_BOUNDARY_GEOJSON  =', process.env.KON_TUM_BOUNDARY_GEOJSON  || '(not set)');
-console.log('Env GEE_GCS_BUCKET            =', process.env.GEE_GCS_BUCKET             || '(not set)');
-console.log();
+console.log('(HARD-CODED paths — không dùng env override)\n');
 
 for (const p of paths) {
     console.log('─── Check:', p);

@@ -14,6 +14,7 @@ const forestClassificationJob = require("./src/jobs/forest-classification.job");
 const satelliteJob           = require("./src/jobs/satellite.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const geoImportWorker       = require("./src/workers/geoImport.worker");
+const rasterIngestWorker    = require("./src/workers/rasterIngest.worker");
 const {
   initWebSocketServer,
   closeWebSocketServer,
@@ -92,6 +93,7 @@ async function gracefulShutdown(signal) {
   satelliteJob.stop();
   imageProcessingWorker.stopWorker();
   geoImportWorker.stopWorker();
+  rasterIngestWorker.stopWorker();
   closeWebSocketServer();
 
   if (server) {
@@ -167,6 +169,7 @@ const initializeAndStartServer = async () => {
       satelliteJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
+      rasterIngestWorker.startWorker();
     }
 
     process.on("unhandledRejection", (error) => {
@@ -221,6 +224,7 @@ const initializeAndStartServer = async () => {
       satelliteJob.start();
       imageProcessingWorker.startWorker();
       geoImportWorker.startWorker();
+      rasterIngestWorker.startWorker();
     }
 
     process.on("unhandledRejection", (error) => {

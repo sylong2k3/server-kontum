@@ -11,14 +11,22 @@ const getLatest = async (req, res) => {
         snapshot, features, stale, computing,
         geeTileUrl, geeMapId, riskLevelViz,
     } = await svc.getLatest({ minRiskLevel });
+    // NOTE — strip `geometry` field khỏi districtStats items để response gọn.
+    // Polygon huyện đã có ở endpoint `/map` (fire_risk_features.geom), không
+    // cần lặp trong `/latest`. Giữ centroid + stats.
+    const districtStatsSlim = Array.isArray(snapshot.district_stats)
+        ? snapshot.district_stats.map(({ geometry, ...rest }) => rest)
+        : snapshot.district_stats;
+
     OK(res, t('get_detail_success', req.lang), {
         snapshot: {
             id:                  snapshot.id,
             analysisDate:        snapshot.analysis_date,
             status:              snapshot.status,
             provinceSummary:     snapshot.province_summary,
-            // districtStats đã gỡ — bây giờ tính cấp cảnh báo trên polygon tỉnh
-            // (RanhGioiTinh_Polygon), không phân theo huyện nữa.
+            // districtStats — thống kê per-huyện (unitCode, name, riskLevelDist,
+            // pNesterovMean, s2Coverage, centroid). Đã strip geometry (xem trên).
+            districtStats:       districtStatsSlim,
             pNesterovStats:      snapshot.p_nesterov_stats,
             s2CoverageRatio:     snapshot.s2_coverage_ratio,
             geoserverLayer:      snapshot.geoserver_layer || null,
@@ -26,6 +34,9 @@ const getLatest = async (req, res) => {
             geeTileUrl:          snapshot.gee_tile_url || null,
             geeMapId:            snapshot.gee_map_id || null,
             geeTileGeneratedAt:  snapshot.gee_tile_generated_at || null,
+            // GEE getDownloadURL clip theo RanhGioiTinh_Polygon — trả GeoTIFF
+            // .zip valid ~24h. Client dùng để tải raster đầy đủ về máy.
+            geeDownloadUrl:      snapshot.gee_download_url || null,
             computedAt:          snapshot.computed_at,
             publishedAt:         snapshot.published_at,
         },
