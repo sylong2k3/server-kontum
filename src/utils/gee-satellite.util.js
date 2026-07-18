@@ -546,26 +546,52 @@ function getDemBands(region) {
 
 /**
  * Generate a temporary GEE download URL for a satellite image (GeoTIFF).
- * Returns null if the image is too large or GEE rejects the request.
+ * Returns `{ url, filename }` (filename = `${name}_${date}.zip`) hoặc null nếu
+ * ảnh quá lớn / GEE reject. Client dùng filename cho `<a download>`.
+ *
+ * @param {object} eeImage
+ * @param {object} region
+ * @param {object} [vizParams] — nếu truyền → visualize() trước → GeoTIFF màu (RGB).
+ *                              Bỏ trống → giữ nguyên band (ảnh khoa học, có thể đen trắng).
+ * @param {object} [opts]
+ * @param {string} [opts.name]      — base filename, ví dụ "satellite_rgb". Default 'gee_export'.
+ * @param {string} [opts.date]      — YYYY-MM-DD, append vào filename. Default nay UTC.
+ * @param {number} [opts.scale]     — pixel scale (m). Default 100.
+ * @param {number} [opts.maxPixels] — Default 1e8.
+ * @param {number} [opts.timeoutMs] — Default 20s.
  */
-async function getEeDownloadUrl(eeImage, region, vizParams = {}) {
+async function getEeDownloadUrl(eeImage, region, vizParams = {}, opts = {}) {
+    const {
+        name = 'gee_export',
+        date = todayUtc(),
+        scale = 100,
+        maxPixels = 1e8,
+        timeoutMs = 20_000,
+    } = opts;
     try {
         const visImage = Object.keys(vizParams).length > 0
             ? eeImage.visualize(vizParams)
             : eeImage;
-        return await new Promise((resolve) => {
-            const timer = setTimeout(() => resolve(null), 20_000);
+        // `name` param của GEE sẽ nằm trong Content-Disposition header của URL trả về,
+        // browser dùng khi user Save As. Format: <name>_<YYYYMMDD>.
+        const safeName    = String(name).replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+        const compactDate = String(date).replace(/-/g, '');
+        const fileBase    = `${safeName}_${compactDate}`;
+        const url = await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(null), timeoutMs);
             visImage.getDownloadURL({
-                name: 'satellite',
-                scale: 100,
+                name: fileBase,
+                scale,
                 region,
                 fileFormat: 'GeoTIFF',
-                maxPixels: 1e8,
-            }, (url, err) => {
+                maxPixels,
+            }, (u, err) => {
                 clearTimeout(timer);
-                resolve(err ? null : url);
+                resolve(err ? null : u);
             });
         });
+        if (!url) return null;
+        return { url, filename: `${fileBase}.zip` };
     } catch (e) {
         return null;
     }

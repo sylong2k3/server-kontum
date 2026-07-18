@@ -555,32 +555,41 @@ async function runAnalysis(analysisDate, {
         //
         // Dùng callback API vì `image.getDownloadURL()` trong Node SDK là
         // async callback, không phải Promise.
-        let geeDownloadUrl = null;
+        // Ảnh trước đây `.toInt8()` (band đơn 0-5) → download về xem là ĐEN TRẮNG
+        // vì không có palette metadata trong GeoTIFF. Chuyển sang `.visualize()` với
+        // cùng palette dùng cho tile → GeoTIFF 3 band RGB uint8, mở ra là ảnh MÀU.
+        let geeDownloadUrl      = null;
+        let geeDownloadFilename = null;
         try {
+            const fileBase = `fire_risk_kontum_${analysisDate.replace(/-/g, '')}`;
             geeDownloadUrl = await log.run(
-                'Generate GEE download URL (riskLevel clip → RanhGioiTinh_Polygon)',
+                'Generate GEE download URL (riskLevel visualize → GeoTIFF RGB)',
                 () => new Promise((resolve) => {
                     const timer = setTimeout(() => resolve(null), 30_000);
-                    riskLevel.clip(region.geometry()).toInt8().getDownloadURL(
-                        {
-                            name:      `fire_risk_kontum_${analysisDate.replace(/-/g, '')}`,
-                            scale:     cfg.EXPORT_SCALE_M || 500,
-                            region:    region.geometry(),
-                            crs:       'EPSG:4326',
-                            format:    'GEO_TIFF',
-                            maxPixels: 1e9,
-                        },
-                        (url, err) => {
-                            clearTimeout(timer);
-                            if (err) {
-                                console.warn(`[FIRE-RISK] getDownloadURL err: ${err.message || err}`);
-                            }
-                            resolve(err ? null : url);
-                        },
-                    );
+                    riskLevel
+                        .visualize(RISK_LEVEL_VIZ)
+                        .clip(region.geometry())
+                        .getDownloadURL(
+                            {
+                                name:      fileBase,
+                                scale:     cfg.EXPORT_SCALE_M || 500,
+                                region:    region.geometry(),
+                                crs:       'EPSG:4326',
+                                format:    'GEO_TIFF',
+                                maxPixels: 1e9,
+                            },
+                            (url, err) => {
+                                clearTimeout(timer);
+                                if (err) {
+                                    console.warn(`[FIRE-RISK] getDownloadURL err: ${err.message || err}`);
+                                }
+                                resolve(err ? null : url);
+                            },
+                        );
                 }),
-                { note: 'getDownloadURL — clip theo province polygon, ZIP GeoTIFF ~24h TTL' },
+                { note: 'getDownloadURL — visualize RGB (colored), clip theo province polygon, ZIP GeoTIFF ~24h TTL' },
             );
+            if (geeDownloadUrl) geeDownloadFilename = `${fileBase}.zip`;
         } catch (err) {
             console.warn(`[FIRE-RISK] getDownloadURL failed (non-fatal): ${err.message}`);
         }

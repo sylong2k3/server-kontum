@@ -563,7 +563,8 @@ async function processRequest(imageType, rawParams) {
                 // trung chuyển Node.js. Proxy `tileUrl` cũ đã gỡ.
                 geeTileUrl:  cached.tile_url,
                 geoserverLayer: cached.geoserver_layer || null,
-                downloadUrl: cached.metadata?.downloadUrl || null,
+                downloadUrl:      cached.metadata?.downloadUrl || null,
+                downloadFilename: cached.metadata?.downloadFilename || null,
                 stats:       cached.stats,
                 legend:      cached.legend,
                 metadata:    cached.metadata,
@@ -581,8 +582,14 @@ async function processRequest(imageType, rawParams) {
     const { mapId, tileUrl } = await getEeMapId(eeImage, vizParams);
     dbgTime('PROCESS', `mapId obtained mapId=${mapId?.slice(0, 12)}…`, t0);
 
-    // Generate download URL (best-effort; null if image is too large or GEE rejects).
-    const downloadUrl = await getEeDownloadUrl(eeImage, region, vizParams);
+    // Generate download URL (best-effort; null nếu ảnh quá lớn / GEE reject).
+    // Filename format: <type>_<startDate>.zip — dùng cho <a download> ở FE.
+    const dl = await getEeDownloadUrl(eeImage, region, vizParams, {
+        name: `satellite_${normalType}`,
+        date: params.startDate || params.analysisDate,
+    });
+    const downloadUrl      = dl?.url || null;
+    const downloadFilename = dl?.filename || null;
 
     const saved = await repo.upsert({
         request_hash: hash,
@@ -594,7 +601,7 @@ async function processRequest(imageType, rawParams) {
         tile_url:     tileUrl,
         map_id:       mapId || null,
         stats, legend,
-        metadata: { ...metadata, downloadUrl },
+        metadata: { ...metadata, downloadUrl, downloadFilename },
     }).catch((err) => {
         console.warn('[SATELLITE] Cache write failed:', err.message);
         return { id: null, tile_url: tileUrl, geoserver_layer: null };
@@ -607,6 +614,7 @@ async function processRequest(imageType, rawParams) {
         geeTileUrl:     tileUrl,
         geoserverLayer: null,
         downloadUrl,
+        downloadFilename,   // gợi ý FE dùng cho <a download>
         stats, legend, metadata,
         cached: false,
     };

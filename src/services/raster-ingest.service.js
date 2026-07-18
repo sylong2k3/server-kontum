@@ -285,6 +285,18 @@ async function runJob(job) {
         });
         await rasterRepo.updateStatus(job.id, { status: 'completed', progress: 100 });
 
+        // ── 6. Back-link linked resource (fire_risk snapshot, forest, ...) ──
+        // Nếu enqueue có `params.linkedResource = { type, id }` → cập nhật
+        // bảng nguồn để user thấy `geoserver_layer` gán vào lịch sử snapshot.
+        try {
+            await _backLinkResource(params.linkedResource, {
+                geoserverLayer, geoserverStore: storeName,
+                minioBucket: cfg.MINIO_BUCKET, minioKey: objectKey,
+            });
+        } catch (err) {
+            console.warn(`[RASTER-INGEST] backlink FAILED job=${job.id}: ${err.message}`);
+        }
+
         console.log(`[RASTER-INGEST] job=${job.id} COMPLETED layer=${geoserverLayer} size=${fmtMB(cog.size)} dl=${fmtMB(dlInfo.bytes)} mode=${cog.mode} reingest=${isReingest} total=${Date.now() - jobStart}ms`);
     } catch (err) {
         await _fail(job, err);
@@ -313,6 +325,44 @@ function _sha256File(filePath) {
         stream.on('data',  (c) => hash.update(c));
         stream.on('end',   () => resolve(hash.digest('hex')));
     });
+}
+
+// Back-link: cập nhật `geoserver_layer` + `minio_key` cho snapshot của module
+// gốc (fire_risk / forest / satellite). Support qua allow-list để tránh SQL
+// injection và giới hạn scope.
+async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minioBucket, minioKey }) {
+    if (!linked?.type || !linked?.id) return;
+    const idNum = Number(linked.id);
+    if (!Number.isFinite(idNum)) return;
+
+    const targets = {
+        fire_risk: {
+            table:  'fire.fire_risk_snapshots',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'published_at'],
+            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`, new Date()],
+        },
+        forest: {
+            table:  'forest.forest_snapshots',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'published_at'],
+            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`, new Date()],
+        },
+        satellite: {
+            table:  'satellite.image_results',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'status'],
+            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`, 'published'],
+        },
+    };
+    const target = targets[linked.type];
+    if (!target) {
+        console.warn(`[RASTER-INGEST] unknown linkedResource.type=${linked.type} — skip back-link`);
+        return;
+    }
+    const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+    await db.query(
+        `UPDATE ${target.table} SET ${setClauses} WHERE id = $${target.cols.length + 1}`,
+        [...target.values, idNum],
+    );
+    console.log(`[RASTER-INGEST] backlink ok ${linked.type}#${idNum} → ${geoserverLayer}`);
 }
 
 async function _upsertRasterLayer({ job, params, storeName, geoserverLayer, objectKey, sha }) {
