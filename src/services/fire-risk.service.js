@@ -484,27 +484,32 @@ async function runAnalysis(analysisDate, {
         // analysisDate). Merge zones (polygon) + points (buffered → polygon)
         // thành 1 FeatureCollection duy nhất truyền vào pipeline làm inline
         // input burn overlay (thay thế bước upload GEE asset thủ công).
-        const gtSvc = require('./fire-gt.service');
-        const gtData = await log.run(
-            `Fetch ground truth (window ${gtWindowDays}d)`,
-            () => gtSvc.getGtForAnalysis(analysisDate, gtWindowDays),
-        );
-        log.mark('Ground truth', `zones=${gtData.counts.zones} points=${gtData.counts.points}`);
-
-        // Convert points → polygon feature (buffer 500m) để cùng schema với
-        // zones. Chỉ merge nếu có GT — pipeline sẽ fallback về (none/asset) nếu rỗng.
+        //
+        // Wrap trong try/catch riêng: migration 032 chưa chạy → table thiếu →
+        // SQL error 42P01. Fallback không GT thay vì kill toàn bộ pipeline.
         let inputFireGeoJson = null;
-        if (gtData.counts.zones + gtData.counts.points > 0) {
-            inputFireGeoJson = {
-                type: 'FeatureCollection',
-                features: [
-                    ...gtData.zones.features,
-                    // Points chuyển sang buffered polygon inline — pipeline sẽ
-                    // buffer thêm INPUT_BUFFER_M nữa. Ở đây giữ raw point để
-                    // GEE tự buffer, đơn giản hơn.
-                    ...gtData.points.features,
-                ],
-            };
+        try {
+            const gtSvc = require('./fire-gt.service');
+            const gtData = await log.run(
+                `Fetch ground truth (window ${gtWindowDays}d)`,
+                () => gtSvc.getGtForAnalysis(analysisDate, gtWindowDays),
+            );
+            log.mark('Ground truth', `zones=${gtData.counts.zones} points=${gtData.counts.points}`);
+
+            if (gtData.counts.zones + gtData.counts.points > 0) {
+                inputFireGeoJson = {
+                    type: 'FeatureCollection',
+                    features: [
+                        ...gtData.zones.features,
+                        // Points giữ raw để pipeline tự buffer INPUT_BUFFER_M.
+                        ...gtData.points.features,
+                    ],
+                };
+            }
+        } catch (gtErr) {
+            const code = gtErr.code || gtErr.name || '';
+            console.warn(`[FIRE-RISK] GT query FAILED (${code}) — fallback không GT: ${gtErr.message}`);
+            log.mark('Ground truth', `SKIPPED (${code}) — chạy migration 032 để enable`);
         }
 
         // runFireRiskAnalysis đã được instrument sẵn — các sub-stage của

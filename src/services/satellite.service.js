@@ -398,7 +398,14 @@ async function buildClassified(params, region) {
             sampleQuotas:    quotas,
             areaByClass,
         },
-        legend: areaByClass.map((c) => ({ color: c.color, label: `${c.classId} – ${c.name}` })),
+        // Legend giờ enrich thêm `areaHa` để UI hiển thị diện tích ngay tại chú
+        // giải (không phải render 2 bảng: legend + stats). Null khi chưa compute.
+        legend: areaByClass.map((c) => ({
+            color:  c.color,
+            label:  `${c.classId} – ${c.name}`,
+            areaHa: c.areaHa,
+            classId: c.classId,
+        })),
         metadata: {
             year,
             startDate:  params.startDate,

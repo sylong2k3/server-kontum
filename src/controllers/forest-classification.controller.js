@@ -81,10 +81,15 @@ const getSnapshot = async (req, res) => {
     const result = await svc.getSnapshotById(id);
     if (!result) return res.status(404).json({ message: 'Không tìm thấy snapshot.' });
 
+    // BUG-FIX (2026-07-19): trước đây `!['completed','published'].includes(status)`
+    // trả TRUE cho cả `failed` → UI hiện "Đang phân tích..." mãi cho snapshot đã
+    // lỗi. Whitelist các state thực sự đang xử lý → snapshot `failed` giờ trả
+    // computing=false, UI dừng poll và hiển thị lỗi rõ ràng.
+    const activeStates = ['computing', 'exporting', 'pending'];
     OK(res, t('get_detail_success', req.lang), {
         snapshot:      formatSnapshot(result.snapshot),
         districtAreas: result.districtAreas,
-        computing:     !['completed', 'published'].includes(result.snapshot.status),
+        computing:     activeStates.includes(result.snapshot.status),
     });
 };
 

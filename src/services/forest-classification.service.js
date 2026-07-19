@@ -153,26 +153,14 @@ async function runAnalysis(year, month, {
     });
     const startMs = Date.now();
 
-    // Query GT từ PostGIS trong cửa sổ (analysisEnd - gtWindowDays, analysisEnd).
-    // analysisEnd = ngày cuối tháng phân tích. Merge zones + points → 1
-    // FeatureCollection inline truyền vào runRfClassification.
-    const gtSvc = require('./forest-gt.service');
-    const analysisEndDate = new Date(Date.UTC(year, month, 0));  // ngày cuối tháng
-    const gtData = await log.run(
-        `Fetch ground truth (window ${gtWindowDays}d before ${analysisEndDate.toISOString().slice(0, 10)})`,
-        () => gtSvc.getGtForAnalysis(analysisEndDate, gtWindowDays),
-    );
-    log.mark('Ground truth',
-        `zones=${gtData.counts.zones} points=${gtData.counts.points} byClass=${JSON.stringify(gtData.counts.byClass)}`);
-
+    // NOTE (033): GT query moved INTO try/catch below (line ~200) — nếu
+    // migration 033 chưa chạy, `getGtForAnalysis` throw ở tầng ngoài sẽ khiến
+    // không tạo được snapshot → UI treo. Giờ snapshot LUÔN được tạo trước,
+    // GT fail sẽ đi vào catch → status=failed + error_message rõ ràng.
+    let gtData = { counts: { zones: 0, points: 0, byClass: {} }, zones: { features: [] }, points: { features: [] } };
     let groundTruthGeoJson = null;
-    if (gtData.counts.zones + gtData.counts.points > 0) {
-        groundTruthGeoJson = {
-            type: 'FeatureCollection',
-            features: [...gtData.zones.features, ...gtData.points.features],
-        };
-    }
-    const hasGT = Boolean(groundTruthGeoJson || groundTruthAssetId);
+    // hasGT computed lại sau khi query xong; hiện tại chỉ dựa asset ID.
+    let hasGT = Boolean(groundTruthAssetId);
 
     await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
 
@@ -199,6 +187,35 @@ async function runAnalysis(year, month, {
         }));
 
     try {
+        // ── GT query MOVED HERE (033 safety) ──────────────────────────────
+        // Snapshot đã tạo → nếu GT fail sẽ đi vào catch bên dưới, set
+        // status=failed + error_message thay vì crash silently.
+        // Migration 033 chưa chạy → try/catch riêng để không kill toàn bộ
+        // pipeline: log warning + tiếp tục với GT rỗng (fallback về dataset).
+        try {
+            const gtSvc = require('./forest-gt.service');
+            const analysisEndDate = new Date(Date.UTC(year, month, 0));
+            gtData = await log.run(
+                `Fetch ground truth (window ${gtWindowDays}d before ${analysisEndDate.toISOString().slice(0, 10)})`,
+                () => gtSvc.getGtForAnalysis(analysisEndDate, gtWindowDays),
+            );
+            log.mark('Ground truth',
+                `zones=${gtData.counts.zones} points=${gtData.counts.points} byClass=${JSON.stringify(gtData.counts.byClass)}`);
+            if (gtData.counts.zones + gtData.counts.points > 0) {
+                groundTruthGeoJson = {
+                    type: 'FeatureCollection',
+                    features: [...gtData.zones.features, ...gtData.points.features],
+                };
+                hasGT = true;
+            }
+        } catch (gtErr) {
+            // Migration 033 chưa chạy (table thiếu) → 42P01. Không block
+            // pipeline: giữ hasGT=false, pipeline fallback về dataset blend.
+            const code = gtErr.code || gtErr.name || '';
+            console.warn(`[FOREST-CLS] GT query FAILED (${code}) — fallback không GT: ${gtErr.message}`);
+            log.mark('Ground truth', `SKIPPED (${code}) — chạy migration 033 để enable`);
+        }
+
         const region    = await log.run('Load Kon Tum region polygon',
             () => Promise.resolve(getKonTumRegion()));
         const districts = await log.run('Load Kon Tum districts collection',
