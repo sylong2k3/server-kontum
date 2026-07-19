@@ -125,8 +125,10 @@ const start = () => {
         return;
     }
 
-    analysisTask = cron.schedule(ANALYSIS_CRON, runMonthlyAnalysis, { missedExecutionTolerance: 30000 });
-    pollTask     = cron.schedule(POLL_CRON,     runPollExports,     { missedExecutionTolerance: 30000 });
+    // Cùng nguyên tắc như fire-risk: cron string theo VN tz.
+    const cronOpts = { timezone: process.env.FC_CRON_TZ || 'Asia/Ho_Chi_Minh' };
+    analysisTask = cron.schedule(ANALYSIS_CRON, runMonthlyAnalysis, cronOpts);
+    pollTask     = cron.schedule(POLL_CRON,     runPollExports,     cronOpts);
 
     console.log(
         `[FOREST] STARTED analysis="${ANALYSIS_CRON}" poll="${POLL_CRON}" ` +

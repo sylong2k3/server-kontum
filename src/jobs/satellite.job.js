@@ -88,7 +88,8 @@ const start = () => {
         return;
     }
 
-    pollTask = cron.schedule(POLL_CRON, runPollPublishes, { missedExecutionTolerance: 30000 });
+    pollTask = cron.schedule(POLL_CRON, runPollPublishes,
+        { timezone: process.env.SATELLITE_CRON_TZ || 'Asia/Ho_Chi_Minh' });
     console.log(`[SATELLITE] STARTED poll="${POLL_CRON}" debug=${DEBUG}`);
     console.log(`  ✓ Satellite export poll job scheduled (${POLL_CRON})`);
 };

@@ -93,7 +93,9 @@ const GCS_KEY_FILE                = process.env.GOOGLE_APPLICATION_CREDENTIALS |
 
 // ── Cron & cache ──────────────────────────────────────────────────────────────
 // Default: hàng ngày lúc 06:00 giờ VN = 23:00 UTC ngày hôm trước.
-const CRON                        = process.env.FIRE_RISK_CRON || '0 23 * * *';
+// Mặc định 06:00 sáng VN (job đã set timezone Asia/Ho_Chi_Minh). Env override
+// giữ nguyên nếu bạn cố ý muốn UTC-based schedule.
+const CRON                        = process.env.FIRE_RISK_CRON || '0 6 * * *';
 
 // Thời gian cache cho /latest (giây). Mặc định 6 giờ vì GEE tính ~5-10 phút.
 const CACHE_TTL_SECONDS           = parseInt(process.env.FIRE_RISK_CACHE_TTL, 10) || 6 * 3600;

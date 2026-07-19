@@ -1,3 +1,10 @@
+// ── Timezone: khoá về VN (+07:00) ────────────────────────────────────────────
+// PHẢI set trước MỌI `require` khác — vì Date/logger cache TZ lúc khởi tạo.
+// Ảnh hưởng: log timestamp, cron string ("0 6 * * *" → 06:00 VN thực),
+// analysisDate/computed_at hiển thị theo VN. TIMESTAMPTZ trong DB vẫn store
+// UTC (không đổi), chỉ affect cách Node.js FORMAT thôi.
+process.env.TZ = process.env.TZ || 'Asia/Ho_Chi_Minh';
+
 const app = require("./src/app");
 const db = require("./src/configs/database");
 const { initializeEarthEngine, isInitialized } = require("./src/configs/gge");

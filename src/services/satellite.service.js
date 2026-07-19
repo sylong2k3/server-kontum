@@ -356,11 +356,34 @@ async function buildClassified(params, region) {
     const nClasses  = fcCfg.CLASS_NAMES.length;
     const vizParams = { bands: ['classification'], min: 0, max: nClasses - 1, palette };
 
-    // Skip computeAreaStats (reduceRegion over Kon Tum at 60m would take > 5 min).
-    // Return class list without areas so the cache and client both know the shape.
-    const areaByClass = CLASSIFIED_CLASSES.map((c) => ({
-        classId: c.id, name: c.name, color: c.color, areaHa: null,
-    }));
+    // Compute areaByClass ở scale COARSE (200m) → reduceRegion chỉ mất ~10-20s
+    // thay vì 5+ phút ở 60m. Chấp nhận sai số ±3% cho preview on-demand — nếu
+    // cần số chính xác, dùng batch cron `/forest-classification/refresh`.
+    // Param `computeArea` cho phép caller opt-out (default TRUE giờ).
+    const shouldComputeArea = params.computeArea !== false;
+    let areaByClass;
+    if (shouldComputeArea) {
+        try {
+            dbg('CLASSIFIED', `computing areaByClass at scale=200m (coarse preview)`);
+            const rawStats = await computeAreaStats(eeImage, region, nClasses, 200);
+            areaByClass = CLASSIFIED_CLASSES.map((c) => ({
+                classId: c.id, name: c.name, color: c.color,
+                areaHa: rawStats[c.id] != null ? Number(rawStats[c.id]) : 0,
+            }));
+            dbgTime('CLASSIFIED', `areaByClass done totalHa=${
+                Object.values(rawStats).reduce((s, v) => s + Number(v), 0).toFixed(0)
+            }`, t0);
+        } catch (err) {
+            console.warn(`[SATELLITE:CLASSIFIED] areaStats FAILED (non-fatal) — ${err.message}`);
+            areaByClass = CLASSIFIED_CLASSES.map((c) => ({
+                classId: c.id, name: c.name, color: c.color, areaHa: null,
+            }));
+        }
+    } else {
+        areaByClass = CLASSIFIED_CLASSES.map((c) => ({
+            classId: c.id, name: c.name, color: c.color, areaHa: null,
+        }));
+    }
     dbgTime('CLASSIFIED', `vizParams built`, t0);
 
     return {
@@ -555,7 +578,14 @@ async function processRequest(imageType, rawParams) {
             && (cached.metadata?.classCount !== expectedClasses
                 || !Array.isArray(cached.stats?.areaByClass)
                 || cached.stats.areaByClass.length !== expectedClasses);
-        if (!isStaleClassified) {
+        // NEW (2026-07-19): cache cũ (trước fix filePerBand/computeArea) có
+        // downloadUrl=null hoặc areaHa=null → recompute để user thấy giá trị mới.
+        const missingDownload = normalType === 'classified'
+            && !cached.metadata?.downloadUrl;
+        const missingAreaHa = normalType === 'classified'
+            && cached.stats?.areaByClass?.every?.((c) => c.areaHa == null);
+        const shouldInvalidate = isStaleClassified || missingDownload || missingAreaHa;
+        if (!shouldInvalidate) {
             dbgTime('PROCESS', `cache HIT id=${cached.id}`, t0);
             return {
                 resultId:    cached.id,
@@ -571,7 +601,14 @@ async function processRequest(imageType, rawParams) {
                 cached:      true,
             };
         }
-        dbg('PROCESS', `classified cache STALE (${cached.stats?.areaByClass?.length ?? 0} classes ≠ ${expectedClasses}) — recomputing`);
+        const staleReason = isStaleClassified
+            ? `classCount ≠ ${expectedClasses}`
+            : missingDownload
+                ? 'downloadUrl=null'
+                : missingAreaHa
+                    ? 'all areaHa=null'
+                    : 'unknown';
+        dbg('PROCESS', `classified cache STALE (${staleReason}) — recomputing`);
     }
 
     dbg('PROCESS', 'cache MISS — computing via GEE');

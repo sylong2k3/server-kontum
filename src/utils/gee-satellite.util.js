@@ -583,7 +583,11 @@ async function getEeDownloadUrl(eeImage, region, vizParams = {}, opts = {}) {
                 name: fileBase,
                 scale,
                 region,
-                fileFormat: 'GeoTIFF',
+                fileFormat:  'GeoTIFF',
+                // KHÔNG chia band ra 3 file — trả 1 file GeoTIFF 3-band RGB
+                // duy nhất trong zip. Unzip xong là 1 ảnh màu đủ, không phải
+                // 3 file per-band (red/green/blue) rời rạc.
+                filePerBand: false,
                 maxPixels,
             }, (u, err) => {
                 clearTimeout(timer);

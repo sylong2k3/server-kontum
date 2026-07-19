@@ -24,8 +24,10 @@ const cfg  = require('../configs/fire-risk');
 const svc  = require('../services/fire-risk.service');
 const repo = require('../repositories/fire-risk.repository');
 
-// Daily analysis cron (default 23:00 UTC = 06:00 VN +7).
-const ANALYSIS_CRON = cfg.CRON;
+// Daily analysis cron: mặc định 06:00 sáng VN. Cron string đọc theo TZ đã set
+// ở lifecycle.start (FIRE_RISK_CRON_TZ, mặc định Asia/Ho_Chi_Minh).
+// Nếu env FIRE_RISK_CRON không set, mặc định "0 6 * * *" (06:00 VN).
+const ANALYSIS_CRON = process.env.FIRE_RISK_CRON || cfg.CRON || '0 6 * * *';
 
 // Poll export tasks every 30 min.
 const POLL_CRON     = process.env.FIRE_RISK_POLL_CRON || '*/30 * * * *';
@@ -121,10 +123,10 @@ const start = () => {
         return;
     }
 
-    // timezone explicit: mặc định server-tz (có thể là TZ Linux/PM2). Cron
-    // string dùng 23:00 UTC = 06:00 VN+7 → set timezone: 'UTC' để tránh
-    // "0 23 * * *" bị parse local tz (Central Daylight Time trên máy user).
-    const cronOpts = { timezone: process.env.FIRE_RISK_CRON_TZ || 'UTC' };
+    // Timezone: mặc định Asia/Ho_Chi_Minh — cron string "0 6 * * *" nghĩa là
+    // 06:00 sáng VN thực. Override bằng FIRE_RISK_CRON_TZ nếu triển khai đa
+    // region cần tz khác.
+    const cronOpts = { timezone: process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh' };
 
     analysisTask = cron.schedule(ANALYSIS_CRON, runDailyAnalysis, cronOpts);
     pollTask     = cron.schedule(POLL_CRON,     runPollExports,   cronOpts);
