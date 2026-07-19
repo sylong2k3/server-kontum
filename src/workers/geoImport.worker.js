@@ -95,7 +95,7 @@ const tick = async () => {
 const startWorker = () => {
     if (cronJob) { return; }
     console.log(t('geo_worker_started', WORKER_LANG, { workerId: WORKER_ID, cron: POLL_INTERVAL }));
-    cronJob = cron.schedule(POLL_INTERVAL, tick);
+    cronJob = cron.schedule(POLL_INTERVAL, tick, { suppressMissedWarning: true });
 };
 
 const stopWorker = () => {

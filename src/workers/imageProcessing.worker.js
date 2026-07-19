@@ -302,8 +302,9 @@ let cronTask = null;
 const startWorker = () => {
     if (cronTask) { return; }
     cronTask = cron.schedule(POLL_INTERVAL, runWorkerCycle, {
-        scheduled: true,
-        timezone:  'Asia/Ho_Chi_Minh',
+        scheduled:            true,
+        timezone:             'Asia/Ho_Chi_Minh',
+        suppressMissedWarning: true,
     });
     console.info(t('worker_started', WORKER_LANG, { interval: POLL_INTERVAL }));
 };

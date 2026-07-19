@@ -93,7 +93,9 @@ const startWorker = () => {
         `bucket=${cfg.MINIO_BUCKET} s3Endpoint=${cfg.S3_ENDPOINT || '(inferred)'} ` +
         `s3Configured=${s3ok ? 'yes' : 'NO — worker sẽ từ chối job'} debug=${DEBUG}`,
     );
-    cronJob = cron.schedule(cfg.WORKER_POLL_CRON, tick);
+    // suppressMissedWarning: ẩn log spam khi GC pause block event loop ~25s.
+    // missedExecutionTolerance không đủ vì node-cron v4 yêu cầu lateBy < gap (15s).
+    cronJob = cron.schedule(cfg.WORKER_POLL_CRON, tick, { suppressMissedWarning: true });
 };
 
 const stopWorker = () => {
