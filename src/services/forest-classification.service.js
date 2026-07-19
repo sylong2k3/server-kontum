@@ -143,13 +143,36 @@ async function runAnalysis(year, month, {
     groundTruthAssetId = process.env.FC_GROUND_TRUTH_ASSET_ID || '',
     gtBufferM          = parseInt(process.env.FC_GT_BUFFER_M, 10) || 60,
     minFieldTest       = parseInt(process.env.FC_MIN_FIELD_TEST, 10) || 10,
+    // NEW (033): cửa sổ query GT trước analysis. Mặc định 180 ngày (đủ đa dạng
+    // sample cho RF 11 class). Env FC_GT_WINDOW_DAYS override.
+    gtWindowDays       = Number(process.env.FC_GT_WINDOW_DAYS) || 180,
 } = {}) {
     // Logger đánh dấu A → Z: khi bị time-out, log này cho biết đứng lại ở bước nào.
     const log = makeStageLogger('FOREST-CLS', {
         correlationId: `${year}-${String(month).padStart(2, '0')}`,
     });
     const startMs = Date.now();
-    const hasGT   = Boolean(groundTruthAssetId);
+
+    // Query GT từ PostGIS trong cửa sổ (analysisEnd - gtWindowDays, analysisEnd).
+    // analysisEnd = ngày cuối tháng phân tích. Merge zones + points → 1
+    // FeatureCollection inline truyền vào runRfClassification.
+    const gtSvc = require('./forest-gt.service');
+    const analysisEndDate = new Date(Date.UTC(year, month, 0));  // ngày cuối tháng
+    const gtData = await log.run(
+        `Fetch ground truth (window ${gtWindowDays}d before ${analysisEndDate.toISOString().slice(0, 10)})`,
+        () => gtSvc.getGtForAnalysis(analysisEndDate, gtWindowDays),
+    );
+    log.mark('Ground truth',
+        `zones=${gtData.counts.zones} points=${gtData.counts.points} byClass=${JSON.stringify(gtData.counts.byClass)}`);
+
+    let groundTruthGeoJson = null;
+    if (gtData.counts.zones + gtData.counts.points > 0) {
+        groundTruthGeoJson = {
+            type: 'FeatureCollection',
+            features: [...gtData.zones.features, ...gtData.points.features],
+        };
+    }
+    const hasGT = Boolean(groundTruthGeoJson || groundTruthAssetId);
 
     await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
 
@@ -197,6 +220,7 @@ async function runAnalysis(year, month, {
             {
                 seed: year * 1000 + month,
                 groundTruthAssetId,
+                groundTruthGeoJson,   // NEW (033): inline GT có ưu tiên hơn asset
                 gtBufferM,
                 minFieldTest,
                 logger: log,
@@ -249,6 +273,9 @@ async function runAnalysis(year, month, {
                 gee_map_id:       geeMapId,
                 gee_tile_url:     geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
+                gt_zone_count:    gtData.counts.zones,
+                gt_point_count:   gtData.counts.points,
+                gt_window_days:   gtWindowDays,
             }));
 
         await log.run('Persist district area rows',

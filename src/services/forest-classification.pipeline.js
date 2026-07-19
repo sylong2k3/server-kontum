@@ -310,6 +310,9 @@ function buildExclusionMask(groundTruthFC, bufferM, region) {
 async function runRfClassification(year, region, regionGeom, opts = {}) {
     const {
         seed, groundTruthAssetId = '', gtBufferM = 60, minFieldTest = 10,
+        // NEW (033): inline GeoJSON FeatureCollection từ PostGIS. Ưu tiên hơn
+        // `groundTruthAssetId` nếu có. Feature.properties phải có `class` (0-10).
+        groundTruthGeoJson = null,
         // Skip blocking eeEval calls (OOB accuracy, test metrics).
         // Use for on-demand tile generation where metadata is not critical.
         skipStats = false,
@@ -324,7 +327,8 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         liteMode = false,
     } = opts;
     const rfSeed  = seed ?? year;
-    const hasGT   = Boolean(groundTruthAssetId);
+    // GT chỉ true khi có ít nhất 1 nguồn (inline GeoJSON hoặc asset).
+    const hasGT   = Boolean(groundTruthGeoJson?.features?.length || groundTruthAssetId);
     const total   = liteMode ? cfg.LITE_SAMPLES_PER_CLASS : cfg.SAMPLES_PER_CLASS;
     const useDatasetLabels = !liteMode || cfg.LITE_USE_DATASET_LABELS;
 
@@ -376,11 +380,29 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     let exclusionMask     = null;
 
     if (hasGT) {
+        // Nguồn GT: inline GeoJSON có ưu tiên hơn asset. Nếu cả 2 cùng có,
+        // chỉ dùng inline (asset thường là backup manual từ trước).
+        const gtSourceDesc = groundTruthGeoJson
+            ? `inlineGeoJson(${groundTruthGeoJson.features.length} features)`
+            : `asset=${groundTruthAssetId}`;
         await log.run(
-            `Build ground-truth pool (asset=${groundTruthAssetId}) [LAZY]`,
+            `Build ground-truth pool (${gtSourceDesc}) [LAZY]`,
             async () => {
-                const gtFC = ee.FeatureCollection(groundTruthAssetId)
-                    .filter(ee.Filter.notNull(['class']));
+                let gtFC;
+                if (groundTruthGeoJson) {
+                    // Convert inline GeoJSON → ee.FeatureCollection. Points có
+                    // geometry Point, zones có Polygon/MultiPolygon — cả 2 đều
+                    // work với sampleRegions() dùng Point sampling.
+                    const eeFeats = groundTruthGeoJson.features.map((f) => {
+                        const p = f.properties || {};
+                        return ee.Feature(f.geometry, { class: p.class ?? p.classId ?? p.class_id });
+                    });
+                    gtFC = ee.FeatureCollection(eeFeats)
+                        .filter(ee.Filter.notNull(['class']));
+                } else {
+                    gtFC = ee.FeatureCollection(groundTruthAssetId)
+                        .filter(ee.Filter.notNull(['class']));
+                }
                 const gtWithSplit = gtFC.randomColumn('split_random', rfSeed + 101);
                 const gtTrainFC   = gtWithSplit.filter(ee.Filter.lt('split_random', 0.7));
                 const gtTestFC    = gtWithSplit.filter(ee.Filter.gte('split_random', 0.7));

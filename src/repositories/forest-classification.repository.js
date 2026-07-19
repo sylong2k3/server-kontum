@@ -90,6 +90,9 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gee_map_id',           extra.gee_map_id);
     addField('gee_tile_url',         extra.gee_tile_url);
     addField('gee_tile_generated_at',extra.gee_tile_generated_at);
+    addField('gt_zone_count',        extra.gt_zone_count);
+    addField('gt_point_count',       extra.gt_point_count);
+    addField('gt_window_days',       extra.gt_window_days);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
