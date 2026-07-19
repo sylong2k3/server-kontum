@@ -3,6 +3,7 @@
 const { Router } = require('express');
 const asyncHandler = require('../helpers/async-handler');
 const ctrl = require('../controllers/fire-risk.controller');
+const gtCtrl = require('../controllers/fire-gt.controller');
 const { optionalAuth, verifyToken, requirePermission } = require('../middlewares/auth.middleware');
 
 const router = Router();
@@ -23,5 +24,21 @@ router.post('/refresh', verifyToken, requirePermission('fire_risk', 'manage'), a
 router.post('/snapshots/:id/publish-raster',
     verifyToken, requirePermission('map_layers', 'ingest_raster'),
     asyncHandler(ctrl.publishRaster));
+
+// ── Ground truth ────────────────────────────────────────────────────────────
+// Quyền `fire_risk.ground_truth` (migration 032) — chỉ system_admin + so_nnmt.
+const gt = (h) => [verifyToken, requirePermission('fire_risk', 'ground_truth'), asyncHandler(h)];
+
+// Zones
+router.post  ('/ground-truth/zones',       ...gt(gtCtrl.createZone));
+router.post  ('/ground-truth/zones/bulk',  ...gt(gtCtrl.bulkZone));
+router.get   ('/ground-truth/zones',       ...gt(gtCtrl.listZones));
+router.delete('/ground-truth/zones/:id',   ...gt(gtCtrl.deleteZone));
+
+// Points
+router.post  ('/ground-truth/points',      ...gt(gtCtrl.createPoint));
+router.post  ('/ground-truth/points/bulk', ...gt(gtCtrl.bulkPoint));
+router.get   ('/ground-truth/points',      ...gt(gtCtrl.listPoints));
+router.delete('/ground-truth/points/:id',  ...gt(gtCtrl.deletePoint));
 
 module.exports = router;

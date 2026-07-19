@@ -12,11 +12,66 @@
  */
 
 const repo = require('../repositories/statistics.repository');
+const fireRiskRepo = require('../repositories/fire-risk.repository');
 const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 
 const round = (n, d = 2) => (n == null ? null : Number(Number(n).toFixed(d)));
 const DASHBOARD_TTL = Number(process.env.STATS_DASHBOARD_TTL_SECONDS) || 600; // 10 phút
+
+// ── Fire-risk dashboard block ─────────────────────────────────────────────────
+// Trích min/max/avg + hotspot count từ snapshot mới nhất trong `fire.fire_risk_snapshots`.
+const _buildFireRiskDashboard = async () => {
+    try {
+        const { items } = await fireRiskRepo.listCompleted({ page: 1, limit: 1 });
+        const snap = items?.[0];
+        if (!snap) {
+            return { available: false, note: 'Chưa có snapshot fire-risk.' };
+        }
+        const summary = snap.province_summary || {};
+        const dist    = summary.riskLevelDist || {};
+
+        // Min level = cấp thấp nhất >= 1 có ha > 0 (bỏ cấp 0 = thiếu ảnh)
+        let minLevel = null, maxLevel = null;
+        for (let l = 1; l <= 5; l++) {
+            if ((Number(dist[l]) || 0) > 0) {
+                if (minLevel == null) minLevel = l;
+                maxLevel = l;
+            }
+        }
+
+        // Hotspot districts = huyện có riskLevel ≥ 3 với ha > 0 (đồng nghĩa
+        // với định nghĩa client-side `HOTSPOT_MIN_LEVEL = 3`).
+        const HOTSPOT_MIN = 3;
+        const districtStats = Array.isArray(snap.district_stats) ? snap.district_stats : [];
+        let hotspotCount = 0;
+        for (const d of districtStats) {
+            const dDist = d.riskLevelDist || {};
+            for (let l = HOTSPOT_MIN; l <= 5; l++) {
+                if ((Number(dDist[l]) || 0) > 0) { hotspotCount++; break; }
+            }
+        }
+
+        return {
+            available:    true,
+            snapshotId:   snap.id,
+            analysisDate: snap.analysis_date,
+            avgLevel:     round(summary.avgRiskLevel),
+            minLevel,
+            maxLevel,
+            riskLevelDist: dist,
+            s2CoverageRatio: round(summary.s2CoverageRatio),
+            hotspotDistrictCount: hotspotCount,
+            hotspotMinLevel:      HOTSPOT_MIN,
+            geoserverLayer:       snap.geoserver_layer || null,
+            geeDownloadUrl:       snap.gee_download_url || null,
+            publishedAt:          snap.published_at || null,
+        };
+    } catch (err) {
+        console.warn('[STATS] fire-risk dashboard build failed:', err.message);
+        return { available: false, note: err.message };
+    }
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  US-060 — Diện tích lớp phủ theo huyện
@@ -165,13 +220,22 @@ const getDashboard = async ({ lang, force = false, role } = {}) => {
         }));
     }
 
+    // ── Fire risk: min/max/mean cấp cảnh báo từ snapshot completed mới nhất ─
+    // Không có trường "điểm số"; dùng riskLevel 1-5 làm proxy. Trả:
+    //   - avgLevel: `avg_risk_level` (weighted theo pixel)
+    //   - maxLevel: cấp cao nhất có ha > 0
+    //   - minLevel: cấp thấp nhất có ha > 0 (bỏ qua Cấp 0 = thiếu ảnh)
+    //   - riskLevelDist: breakdown ha theo cấp (0-5)
+    //   - hotspotDistrictCount: số huyện có maxLevel ≥ 3 (định nghĩa "điểm nóng")
+    //   - snapshotId + analysisDate + link để admin bấm publish
+    const fireAlerts = await _buildFireRiskDashboard();
+
     const payload = {
         scope,
         year: latestYear,
         forest,
         feedback,
-        // Cảnh báo cháy: EP-06 chưa hiện thực — để placeholder cho FE.
-        fireAlerts: { available: false, note: 'EP-06 (fire risk) chưa triển khai' },
+        fireAlerts,
     };
 
     await repo.setCache(cacheKey, payload, DASHBOARD_TTL);

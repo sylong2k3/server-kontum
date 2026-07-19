@@ -497,8 +497,21 @@ function computeFixedThresholdScore(currentPredictors, fuelK) {
 
 // ── Input asset (optional user-supplied fire hotspots) ───────────────────────
 
-function buildInputImages(region, forestMask, assetId) {
-    if (!assetId) {
+/**
+ * Build input burn overlay từ 1 trong 2 nguồn:
+ *   (a) `source.assetId` — GEE FeatureCollection asset (cách cũ)
+ *   (b) `source.geojson` — GeoJSON FeatureCollection inline (cách mới — dùng
+ *       cho ground truth từ PostGIS, không cần upload asset).
+ *
+ * Cả 2 đều expect properties: { severity 1-5, occurredAt }. Score được suy
+ * từ severity (`(severity-1)/4` → 0-1) nếu không có `input_score` explicit.
+ */
+function buildInputImages(region, forestMask, source) {
+    // Backward compat: nếu source là string → coi như assetId cũ.
+    const assetId = typeof source === 'string' ? source : source?.assetId;
+    const inlineGeoJson = typeof source === 'object' && source?.geojson;
+
+    if (!assetId && !inlineGeoJson) {
         return {
             inputRiskScore:     ee.Image.constant(0).rename('InputRiskScore').toFloat().updateMask(forestMask).clip(region),
             inputCoverage:      ee.Image.constant(0).rename('InputCoverage').toByte().updateMask(forestMask).clip(region),
@@ -507,7 +520,26 @@ function buildInputImages(region, forestMask, assetId) {
         };
     }
 
-    const features = ee.FeatureCollection(assetId).filterBounds(region);
+    // Build features: từ asset hoặc từ inline GeoJSON.
+    let features;
+    if (inlineGeoJson) {
+        // Convert GeoJSON → ee.FeatureCollection. Đơn giản khi FC nhỏ (<1000).
+        const eeFeatures = inlineGeoJson.features.map((f) => {
+            const p = f.properties || {};
+            const severity = Number(p.severity) || 3;
+            const inputScore = Math.max(0, Math.min(1, (severity - 1) / 4));
+            return ee.Feature(f.geometry, {
+                input_score: inputScore,
+                severity,
+                confirmed:   1,   // GT được xác nhận field → confirmed=1
+                occurredAt:  p.occurredAt || null,
+                gt_id:       p.gt_id || null,
+            });
+        });
+        features = ee.FeatureCollection(eeFeatures).filterBounds(region);
+    } else {
+        features = ee.FeatureCollection(assetId).filterBounds(region);
+    }
     const buffered = features.map((f) => {
         const rawScore = ee.Number(ee.Algorithms.If(
             f.propertyNames().contains('input_score'),
@@ -642,13 +674,18 @@ function buildRiskProducts({
 function runFireRiskAnalysis(region, analysisDate, opts = {}) {
     const enableRf         = opts.enableRf ?? cfg.ENABLE_RF;
     const inputFireAssetId = opts.inputFireAssetId ?? cfg.INPUT_FIRE_ASSET_ID;
+    // NEW: inline GT từ PostGIS. Ưu tiên hơn assetId nếu present.
+    const inputFireGeoJson = opts.inputFireGeoJson || null;
 
     // Logger có thể được caller cung cấp để hợp nhất luồng A→Z của service +
     // pipeline. Nếu không, dựng logger cục bộ để pipeline vẫn có dấu vết.
     const log = opts.logger || makeStageLogger('FIRE-RISK-PL', { correlationId: analysisDate });
 
+    const inputSourceDesc = inputFireGeoJson
+        ? `inlineGT(${inputFireGeoJson.features?.length || 0} features)`
+        : (inputFireAssetId || '(none)');
     log.mark('Pipeline config',
-        `analysisDate=${analysisDate} enableRf=${enableRf} inputAsset=${inputFireAssetId || '(none)'}`);
+        `analysisDate=${analysisDate} enableRf=${enableRf} inputSource=${inputSourceDesc}`);
 
     // Toàn bộ khối "build" là graph EE lazy — timing chỉ đo dựng graph, không đo compute.
     const terrain = log.run('Build terrain bands (DEM + slope + aspect exposure) [LAZY]',
@@ -710,8 +747,12 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
         );
 
         const inputImages = await log.run(
-            'Build input asset overlay (buffered points → score/coverage/confirmed) [LAZY]',
-            () => Promise.resolve(buildInputImages(region, forestMask, inputFireAssetId)),
+            'Build input burn overlay (GT inline hoặc asset → score/coverage/confirmed) [LAZY]',
+            () => Promise.resolve(buildInputImages(region, forestMask,
+                inputFireGeoJson
+                    ? { geojson: inputFireGeoJson }
+                    : inputFireAssetId,
+            )),
         );
 
         const risk = await log.run(

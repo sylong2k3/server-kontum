@@ -98,8 +98,11 @@ const CRON                        = process.env.FIRE_RISK_CRON || '0 23 * * *';
 // Thời gian cache cho /latest (giây). Mặc định 6 giờ vì GEE tính ~5-10 phút.
 const CACHE_TTL_SECONDS           = parseInt(process.env.FIRE_RISK_CACHE_TTL, 10) || 6 * 3600;
 
-// Xóa snapshot cũ hơn N ngày khi dọn dẹp.
-const SNAPSHOT_GRACE_DAYS         = parseInt(process.env.FIRE_RISK_SNAPSHOT_GRACE_DAYS, 10) || 90;
+// DEPRECATED — cleanup cron đã bị bỏ (032). Chính sách hiện tại: giữ TOÀN
+// BỘ lịch sử snapshot để phục vụ audit + so sánh long-term. Export = 0 để
+// backward compat với `repo.deleteOld()` (nếu vẫn được gọi ngoài dự kiến,
+// sẽ trả 0 → no-op).
+const SNAPSHOT_GRACE_DAYS         = 0;
 
 // Thời gian tối đa (ms) chờ GEE evaluate() trả kết quả stats.
 const GEE_TIMEOUT_MS              = parseInt(process.env.FIRE_RISK_GEE_TIMEOUT_MS, 10) || 5 * 60 * 1000;

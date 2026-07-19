@@ -87,6 +87,9 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gee_tile_url',         extra.gee_tile_url);
     addField('gee_tile_generated_at',extra.gee_tile_generated_at);
     addField('gee_download_url',     extra.gee_download_url);
+    addField('gt_zone_count',        extra.gt_zone_count);
+    addField('gt_point_count',       extra.gt_point_count);
+    addField('gt_window_days',       extra.gt_window_days);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
@@ -149,9 +152,18 @@ const getById = async (id) => {
  */
 const listCompleted = async ({ page = 1, limit = 30 } = {}) => {
     const offset = (page - 1) * limit;
+    // Trả đầy đủ field admin cần cho "full snapshot payload" trong panel expand
+    // — trước đây chỉ lấy 8 cột nên UI thiếu gee_download_url, gee_tile_url,
+    // gee_map_id, p_nesterov_stats, district_stats, error_message, minio_key,
+    // geoserver_store. Bổ sung → back-link fire-risk sang admin đầy đủ.
     const { rows } = await db.query(
         `SELECT id, analysis_date, status, s2_coverage_ratio,
-                province_summary, computed_at, published_at, geoserver_layer,
+                province_summary, district_stats, p_nesterov_stats,
+                computed_at, published_at,
+                gee_map_id, gee_tile_url, gee_tile_generated_at,
+                gee_download_url, gee_task_id,
+                geoserver_layer, geoserver_store, minio_key,
+                error_message,
                 COUNT(*) OVER()::int AS total_count
          FROM fire.fire_risk_snapshots
          WHERE status IN ('completed','published')

@@ -411,6 +411,9 @@ async function runAnalysis(analysisDate, {
     submitExport      = cfg.isGcsConfigured(),
     enableRf          = cfg.ENABLE_RF,
     inputFireAssetId  = cfg.INPUT_FIRE_ASSET_ID,
+    // Cửa sổ query GT trước analysisDate (mặc định 30 ngày, cùng cửa sổ predictor S2).
+    // Bỏ qua override khi caller explicit pass qua env FIRE_RISK_GT_WINDOW_DAYS.
+    gtWindowDays      = Number(process.env.FIRE_RISK_GT_WINDOW_DAYS) || 30,
 } = {}) {
     // Logger A → Z: mọi bước dựng graph + mọi evaluate() đều được đánh dấu
     // để khi time-out xảy ra, ta biết chính xác bước nào bị nghẽn.
@@ -477,11 +480,39 @@ async function runAnalysis(analysisDate, {
         log.mark('Province polygon loaded',
             `type=${provinceGeoJson?.type} centroid=(${provinceCentroid?.lng?.toFixed(3)}, ${provinceCentroid?.lat?.toFixed(3)})`);
 
+        // Query ground truth từ PostGIS trong cửa sổ (analysisDate - gtWindowDays,
+        // analysisDate). Merge zones (polygon) + points (buffered → polygon)
+        // thành 1 FeatureCollection duy nhất truyền vào pipeline làm inline
+        // input burn overlay (thay thế bước upload GEE asset thủ công).
+        const gtSvc = require('./fire-gt.service');
+        const gtData = await log.run(
+            `Fetch ground truth (window ${gtWindowDays}d)`,
+            () => gtSvc.getGtForAnalysis(analysisDate, gtWindowDays),
+        );
+        log.mark('Ground truth', `zones=${gtData.counts.zones} points=${gtData.counts.points}`);
+
+        // Convert points → polygon feature (buffer 500m) để cùng schema với
+        // zones. Chỉ merge nếu có GT — pipeline sẽ fallback về (none/asset) nếu rỗng.
+        let inputFireGeoJson = null;
+        if (gtData.counts.zones + gtData.counts.points > 0) {
+            inputFireGeoJson = {
+                type: 'FeatureCollection',
+                features: [
+                    ...gtData.zones.features,
+                    // Points chuyển sang buffered polygon inline — pipeline sẽ
+                    // buffer thêm INPUT_BUFFER_M nữa. Ở đây giữ raw point để
+                    // GEE tự buffer, đơn giản hơn.
+                    ...gtData.points.features,
+                ],
+            };
+        }
+
         // runFireRiskAnalysis đã được instrument sẵn — các sub-stage của
         // pipeline sẽ chèn tiếp vào cùng bộ logger A→Z.
         const analysis = await runFireRiskAnalysis(region, analysisDate, {
             enableRf,
             inputFireAssetId,
+            inputFireGeoJson,
             logger: log,
         });
 
@@ -563,7 +594,7 @@ async function runAnalysis(analysisDate, {
         try {
             const fileBase = `fire_risk_kontum_${analysisDate.replace(/-/g, '')}`;
             geeDownloadUrl = await log.run(
-                'Generate GEE download URL (riskLevel visualize → GeoTIFF RGB)',
+                'Generate GEE download URL (riskLevel visualize → GeoTIFF RGB, filePerBand=false)',
                 () => new Promise((resolve) => {
                     const timer = setTimeout(() => resolve(null), 30_000);
                     riskLevel
@@ -571,12 +602,16 @@ async function runAnalysis(analysisDate, {
                         .clip(region.geometry())
                         .getDownloadURL(
                             {
-                                name:      fileBase,
-                                scale:     cfg.EXPORT_SCALE_M || 500,
-                                region:    region.geometry(),
-                                crs:       'EPSG:4326',
-                                format:    'GEO_TIFF',
-                                maxPixels: 1e9,
+                                name:        fileBase,
+                                scale:       cfg.EXPORT_SCALE_M || 500,
+                                region:      region.geometry(),
+                                crs:         'EPSG:4326',
+                                format:      'GEO_TIFF',
+                                // KHÔNG chia band ra 3 file — trả 1 GeoTIFF
+                                // 3-band RGB duy nhất (user chỉ cần unzip
+                                // 1 lần thấy 1 ảnh màu đủ, không phải 3 file).
+                                filePerBand: false,
+                                maxPixels:   1e9,
                             },
                             (url, err) => {
                                 clearTimeout(timer);
@@ -587,7 +622,7 @@ async function runAnalysis(analysisDate, {
                             },
                         );
                 }),
-                { note: 'getDownloadURL — visualize RGB (colored), clip theo province polygon, ZIP GeoTIFF ~24h TTL' },
+                { note: 'filePerBand=false → 1 file GeoTIFF RGB (không phải 3 file per band)' },
             );
             if (geeDownloadUrl) geeDownloadFilename = `${fileBase}.zip`;
         } catch (err) {
@@ -605,6 +640,9 @@ async function runAnalysis(analysisDate, {
                 gee_tile_url:      geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
                 gee_download_url:  geeDownloadUrl,
+                gt_zone_count:     gtData.counts.zones,
+                gt_point_count:    gtData.counts.points,
+                gt_window_days:    gtWindowDays,
             }));
 
         const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);
@@ -628,6 +666,18 @@ async function runAnalysis(analysisDate, {
         }
 
         log.summary();
+
+        // ── Auto ingest → MinIO → GeoServer (persistent COG) ──────────────
+        // Không cần admin bấm nút thủ công — cron chạy xong sẽ tự enqueue
+        // raster-ingest job. Job worker (poll 15s) tự pick up. Snapshot
+        // được back-link `geoserver_layer` khi ingest complete (queue service).
+        // KHÔNG throw nếu enqueue fail — không được chặn pipeline chính.
+        _safe(() => _autoIngestSnapshot(snapshot, geeDownloadUrl, analysisDate));
+
+        // ── Notification khi phân tích thành công ─────────────────────────
+        // Gửi broadcast tới role admin + sở NN&MT + UBND tỉnh.
+        _safe(() => _notifyFireRiskCompleted(snapshot, provinceSummary));
+
         return snapshot;
     } catch (err) {
         log.summary();
@@ -635,8 +685,92 @@ async function runAnalysis(analysisDate, {
         await repo.updateStatus(snapshot.id, 'failed', {
             error_message: err.message,
         });
+        _safe(() => _notifyFireRiskFailed(analysisDate, err.message));
         throw err;
     }
+}
+
+// ── Notification / auto-ingest helpers ──────────────────────────────────────
+const _safe = (fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn('[FIRE-RISK] async helper err:', e.message)); } catch (e) { console.warn('[FIRE-RISK] sync helper err:', e.message); } };
+
+async function _autoIngestSnapshot(snapshot, geeDownloadUrl, analysisDate) {
+    if (!geeDownloadUrl) {
+        console.log('[FIRE-RISK] auto-ingest SKIP — no gee_download_url');
+        return;
+    }
+    if (snapshot.geoserver_layer) {
+        console.log(`[FIRE-RISK] auto-ingest SKIP — snapshot=${snapshot.id} already has geoserver_layer=${snapshot.geoserver_layer}`);
+        return;
+    }
+    const ingestSvc = require('./raster-ingest.service');
+    const dateTag = String(analysisDate).slice(0, 10).replace(/-/g, '');
+    const layerCode = `fire_risk_${dateTag}`;
+    console.log(`[FIRE-RISK] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
+    const { job, deduplicated } = await ingestSvc.enqueue({
+        sourceUrl:  geeDownloadUrl,
+        layerCode,
+        nameVi:     `Cảnh báo cháy rừng ${analysisDate}`,
+        isPublic:   true,
+        category:   'fire_risk',
+        requestParams: {
+            linkedResource: { type: 'fire_risk', id: snapshot.id },
+            analysis_date:  analysisDate,
+            scale_m:        cfg.EXPORT_SCALE_M || 500,
+            autoIngested:   true,   // trace: enqueue tự động vs admin bấm
+        },
+        user: null,  // system-triggered
+        lang: 'vi',
+    });
+    console.log(`[FIRE-RISK] auto-ingest ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
+}
+
+async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
+    const notifSvc = require('./notification.service');
+    const dateStr  = (snapshot.analysis_date instanceof Date
+        ? snapshot.analysis_date.toISOString().slice(0, 10)
+        : String(snapshot.analysis_date).slice(0, 10));
+    const dist    = provinceSummary?.riskLevelDist || {};
+
+    // Min/max/avg từ province summary (đã tính trong pipeline).
+    let minLvl = null, maxLvl = null;
+    for (let l = 1; l <= 5; l++) {
+        if ((Number(dist[l]) || 0) > 0) { if (minLvl == null) minLvl = l; maxLvl = l; }
+    }
+    const avg = provinceSummary?.avgRiskLevel;
+
+    // Highest-priority level dictates notification severity.
+    const isHigh = (maxLvl || 0) >= 4;
+    const type   = isHigh ? 'fire_risk_high' : 'fire_risk_completed';
+    const title  = isHigh
+        ? `⚠ Cảnh báo cháy rừng cao ngày ${dateStr}`
+        : `Cảnh báo cháy rừng ${dateStr} hoàn thành`;
+    const body   = `Cấp: ${minLvl ?? '—'}–${maxLvl ?? '—'} (TB ${avg?.toFixed?.(2) ?? '—'}). `
+                 + `Xem chi tiết trong "Cảnh báo cháy rừng".`;
+    const data   = {
+        snapshotId: snapshot.id, analysisDate: dateStr,
+        avgLevel: avg, minLevel: minLvl, maxLevel: maxLvl,
+    };
+
+    // Gửi tới các role liên quan. Bỏ role phân quyền check ở đây — RBAC
+    // audience decoupled với việc tạo notification.
+    for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
+        await notifSvc.broadcastToRole(role, {
+            type, title, body, data,
+            channel: isHigh ? 'alert' : 'system',
+        }).catch((e) => console.warn(`[FIRE-RISK] notify role=${role} failed:`, e.message));
+    }
+}
+
+async function _notifyFireRiskFailed(analysisDate, errMsg) {
+    const notifSvc = require('./notification.service');
+    const dateStr  = String(analysisDate).slice(0, 10);
+    await notifSvc.broadcastToRole('system_admin', {
+        type:    'fire_risk_failed',
+        title:   `Phân tích cháy rừng ${dateStr} thất bại`,
+        body:    errMsg?.slice(0, 200) || 'Không rõ lỗi',
+        data:    { analysisDate: dateStr, error: errMsg },
+        channel: 'system',
+    }).catch(() => {});
 }
 
 /**
