@@ -5,6 +5,9 @@ module.exports = {
       script: './server.js',
       cwd: __dirname,
       interpreter: 'node',
+      // Giới hạn V8 old-gen heap ở 400MB — thấp hơn max_memory_restart (512M).
+      // GC chạy thường xuyên hơn nhưng mỗi lần pause ngắn (~1-2s thay vì 25s).
+      node_args: '--max-old-space-size=400',
 
       // Production runtime
       exec_mode: 'fork',

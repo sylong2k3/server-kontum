@@ -148,34 +148,41 @@ const findImages = async (filters = {}) => {
     const sortCol = SORTABLE[sort_by] || 'i.acquisition_date';
     const sortDir = sort_order === 'asc' ? 'ASC' : 'DESC';
 
-    const offset = (page - 1) * limit;
+    const whereClause = conditions.join(' AND ');
+    const offset      = (page - 1) * limit;
 
-    const sql = `
+    // Run count and data queries in parallel to avoid COUNT(*) OVER() full-scan
+    const countSql = `SELECT COUNT(*) AS total FROM raster.remote_sensing_images i WHERE ${whereClause}`;
+
+    const dataSql = `
         SELECT
             i.id, i.uuid, i.name, i.description, i.satellite, i.image_type,
             i.acquisition_date, i.cloud_percent, i.resolution_m,
             i.province_code, i.location_name,
             i.is_public, i.is_featured, i.status,
             ST_AsGeoJSON(i.bbox)::jsonb AS bbox_geojson,
-            -- Thumbnail URL (file role = thumbnail, is_active)
-            (
-                SELECT f.object_key
-                FROM   raster.remote_sensing_files f
-                WHERE  f.image_id = i.id AND f.file_role = 'thumbnail' AND f.is_active = true
-                LIMIT  1
-            ) AS thumbnail_object_key,
-            i.created_at, i.updated_at,
-            COUNT(*) OVER() AS total_count
+            thumb.object_key AS thumbnail_object_key,
+            i.created_at, i.updated_at
         FROM  raster.remote_sensing_images i
-        WHERE ${conditions.join(' AND ')}
+        LEFT JOIN LATERAL (
+            SELECT f.object_key
+            FROM   raster.remote_sensing_files f
+            WHERE  f.image_id = i.id AND f.file_role = 'thumbnail' AND f.is_active = true
+            LIMIT  1
+        ) thumb ON true
+        WHERE ${whereClause}
         ORDER BY ${sortCol} ${sortDir}
-        LIMIT  $${pi++} OFFSET $${pi++}
+        LIMIT  $${pi} OFFSET $${pi + 1}
     `;
-    params.push(limit, offset);
+    const dataParams = [...params, limit, offset];
 
-    const { rows } = await db.query(sql, params);
-    const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
-    return { rows, total, page, limit };
+    const [countResult, dataResult] = await Promise.all([
+        db.query(countSql, params),
+        db.query(dataSql, dataParams),
+    ]);
+
+    const total = Number(countResult.rows[0]?.total ?? 0);
+    return { rows: dataResult.rows, total, page, limit };
 };
 
 /**
