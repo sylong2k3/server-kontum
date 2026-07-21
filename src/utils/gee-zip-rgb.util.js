@@ -63,6 +63,30 @@ async function safeRmdir(dir) {
 }
 
 /**
+ * Đọc 4 byte đầu → phân biệt zip vs TIFF trần vs khác.
+ * GEE `getDownloadURL({filePerBand:false})` trên `.visualize()` output có thể
+ * trả về TIFF trần (Content-Type image/tiff) thay vì zip — phải handle cả 2.
+ *   zip:  PK\x03\x04 = 50 4B 03 04
+ *   TIFF little-endian: II*\0 = 49 49 2A 00
+ *   TIFF big-endian:    MM\0* = 4D 4D 00 2A
+ */
+async function detectFileKind(filePath) {
+    const fd = await fs.promises.open(filePath, 'r');
+    try {
+        const buf = Buffer.alloc(4);
+        await fd.read(buf, 0, 4, 0);
+        if (buf[0] === 0x50 && buf[1] === 0x4B) return 'zip';
+        if ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) ||
+            (buf[0] === 0x4D && buf[1] === 0x4D && buf[2] === 0x00 && buf[3] === 0x2A)) {
+            return 'tiff';
+        }
+        return 'unknown';
+    } finally {
+        await fd.close();
+    }
+}
+
+/**
  * Giải nén zip vào `outDir` bằng `tar -xf` — cross-platform.
  * Node.js ≥ 18 có bsdtar trên Windows và GNU tar/bsdtar trên Unix; cả 2
  * đều đọc .zip qua `tar -xf`.
@@ -120,27 +144,47 @@ async function processGeeZipToCog(zipPath, outCog, { gdalCacheMB = 512 } = {}) {
     const gdalEnv  = { ...process.env, GDAL_CACHEMAX: String(gdalCacheMB) };
 
     try {
-        await extractZip(zipPath, workDir);
-        const { tifs, byBand } = await classifyTifs(workDir);
+        // GEE với .visualize() + filePerBand:false thường trả TIFF trần, không zip.
+        // Phân biệt bằng magic bytes trước khi tar để tránh "Unrecognized archive format".
+        const kind = await detectFileKind(zipPath);
+        dbg(`detected kind=${kind} for ${zipPath}`);
 
-        const hasRgbBands = byBand.red && byBand.green && byBand.blue;
-        dbg(`classified tifs=${tifs.length} mode=${hasRgbBands ? 'rgb_merge' : 'passthrough'} `
-            + (hasRgbBands
-                ? `R=${byBand.red} G=${byBand.green} B=${byBand.blue}`
-                : `first=${tifs[0]} others=${byBand.others.length}`));
+        let hasRgbBands = false;
+        let vrtInputs   = [];
+
+        if (kind === 'zip') {
+            await extractZip(zipPath, workDir);
+            const { tifs, byBand } = await classifyTifs(workDir);
+
+            hasRgbBands = byBand.red && byBand.green && byBand.blue;
+            dbg(`classified tifs=${tifs.length} mode=${hasRgbBands ? 'rgb_merge' : 'passthrough'} `
+                + (hasRgbBands
+                    ? `R=${byBand.red} G=${byBand.green} B=${byBand.blue}`
+                    : `first=${tifs[0]} others=${byBand.others.length}`));
+
+            if (hasRgbBands) {
+                vrtInputs = RGB_ORDER.map((band) => path.join(workDir, byBand[band]));
+            } else {
+                const first = tifs.find((t) => !/aux\.xml$/i.test(t));
+                vrtInputs = [path.join(workDir, first)];
+            }
+        } else if (kind === 'tiff') {
+            // GEE trả trực tiếp GeoTIFF multi-band (RGB đã stack sẵn trong .visualize()).
+            // Skip unzip; feed thẳng vào gdalbuildvrt → gdal_translate → COG.
+            await safeMkdir(workDir);
+            vrtInputs = [zipPath];
+        } else {
+            throw new GeoTiffProcessError(
+                `File tải từ GEE không phải zip cũng không phải TIFF (magic=${kind}). Kiểm tra URL còn hạn không.`,
+                'UNKNOWN_FORMAT',
+            );
+        }
 
         // Build VRT.
         if (hasRgbBands) {
-            const args = ['-separate', vrtPath];
-            for (const band of RGB_ORDER) {
-                args.push(path.join(workDir, byBand[band]));
-            }
-            await _runCmd('gdalbuildvrt', args, { env: gdalEnv });
+            await _runCmd('gdalbuildvrt', ['-separate', vrtPath, ...vrtInputs], { env: gdalEnv });
         } else {
-            // 1+ file không phân biệt band — giả định file đầu tiên là raster mong muốn.
-            // Chỉ nhận band[1..3] nếu là multi-band, còn không lấy đúng như GEE trả.
-            const first = tifs.find((t) => !/aux\.xml$/i.test(t));
-            await _runCmd('gdalbuildvrt', [vrtPath, path.join(workDir, first)], { env: gdalEnv });
+            await _runCmd('gdalbuildvrt', [vrtPath, ...vrtInputs], { env: gdalEnv });
         }
 
         // Convert VRT → COG. -of COG tự sinh overview + tiled + compress.
@@ -168,4 +212,4 @@ async function processGeeZipToCog(zipPath, outCog, { gdalCacheMB = 512 } = {}) {
     }
 }
 
-module.exports = { processGeeZipToCog, extractZip, classifyTifs, GeoTiffProcessError };
+module.exports = { processGeeZipToCog, extractZip, classifyTifs, detectFileKind, GeoTiffProcessError };
