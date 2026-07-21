@@ -488,9 +488,12 @@ async function runAnalysis(analysisDate, {
         // Wrap trong try/catch riêng: migration 032 chưa chạy → table thiếu →
         // SQL error 42P01. Fallback không GT thay vì kill toàn bộ pipeline.
         let inputFireGeoJson = null;
+        // Hoisted: dùng lại ở stage AA (Update snapshot → gt_zone_count/gt_point_count).
+        // Default 0/0 để cả nhánh catch (bảng GT thiếu) vẫn ghi được snapshot completed.
+        let gtData = { counts: { zones: 0, points: 0 }, zones: { features: [] }, points: { features: [] } };
         try {
             const gtSvc = require('./fire-gt.service');
-            const gtData = await log.run(
+            gtData = await log.run(
                 `Fetch ground truth (window ${gtWindowDays}d)`,
                 () => gtSvc.getGtForAnalysis(analysisDate, gtWindowDays),
             );
