@@ -20,6 +20,9 @@ const MINIO_CONFIG = {
 
 const BUCKET_REMOTE_SENSING = process.env.MINIO_BUCKET_REMOTE_SENSING || 'remote-sensing-images';
 const BUCKET_FIELD_MEASUREMENTS = process.env.MINIO_BUCKET_FIELD_MEASUREMENTS || 'field-measurement-photos';
+// Bucket dùng bởi raster-ingest pipeline (GEE download URL → MinIO → GeoServer).
+// Giữ cùng default với configs/raster-ingest.js để tránh mismatch.
+const BUCKET_GEE_RASTER      = process.env.MINIO_BUCKET_GEE_RASTER || 'gee-rasters';
 const DEFAULT_REGION         = process.env.MINIO_REGION || 'us-east-1';
 
 const getLang = () => process.env.APP_LANG || process.env.LANG || 'vi';
@@ -58,6 +61,7 @@ const initMinio = async () => {
         const client = getClient();
         await ensureBucket(client, BUCKET_REMOTE_SENSING);
         await ensureBucket(client, BUCKET_FIELD_MEASUREMENTS);
+        await ensureBucket(client, BUCKET_GEE_RASTER);
         console.info(t('minio_connected', getLang()));
     } catch (err) {
         // Không crash server nếu MinIO chưa sẵn sàng — worker sẽ retry
@@ -85,5 +89,6 @@ module.exports = {
     healthCheck,
     BUCKET_REMOTE_SENSING,
     BUCKET_FIELD_MEASUREMENTS,
+    BUCKET_GEE_RASTER,
     MINIO_CONFIG,
 };
