@@ -7,15 +7,42 @@ const { OK, OK_LIST, CREATED } = require('../core/success.response');
 const { Api400Error, Api404Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 
-// Derive filename ổn định cho download GeoTIFF fire-risk. Trùng convention với
-// `name` truyền vào `getDownloadURL` trong service (`fire_risk_kontum_YYYYMMDD`).
-// FE dùng làm `download` attr cho `<a>` khi trigger blob download.
+// Derive filename ổn định cho download GeoTIFF fire-risk. GEE `getDownloadURL`
+// với `filePerBand:false` trên `.visualize()` trả TIFF trần (Content-Type
+// image/tiff), KHÔNG phải zip — đặt `.tif` để Windows Explorer nhận đúng loại
+// file (nếu đặt `.zip` như trước sẽ prompt "invalid archive" khi user double-click).
 const fireRiskFilename = (analysisDate) => {
     if (!analysisDate) return null;
     const d = analysisDate instanceof Date
         ? analysisDate.toISOString().slice(0, 10)
         : String(analysisDate).slice(0, 10);
-    return `fire_risk_kontum_${d.replace(/-/g, '')}.zip`;
+    return `fire_risk_kontum_${d.replace(/-/g, '')}.tif`;
+};
+
+// Build URL WCS GetCoverage trả GeoTIFF full-resolution từ GeoServer khi layer
+// đã publish. Ưu tiên hơn geeDownloadUrl vì:
+//   - Persistent (không expire 24h như GEE URL).
+//   - Full-resolution (COG nguyên gốc trong data_dir, không bị downsample).
+//   - Không phụ thuộc quota GEE khi user tải lại nhiều lần.
+// Trả null khi chưa có layer hoặc GEOSERVER_URL chưa cấu hình.
+const buildGeoserverDownloadUrl = (layerFqn) => {
+    if (!layerFqn) return null;
+    const base = (process.env.GEOSERVER_PUBLIC_URL || process.env.GEOSERVER_URL || '')
+        .trim().replace(/\/+$/, '');
+    if (!base) return null;
+    const [ws, name] = String(layerFqn).includes(':')
+        ? String(layerFqn).split(':')
+        : [process.env.GEOSERVER_WORKSPACE || 'kontum', String(layerFqn)];
+    // WCS 2.0 coverageId dùng `__` (double underscore) làm workspace separator.
+    const coverageId = `${ws}__${name}`;
+    const qs = new URLSearchParams({
+        service:    'WCS',
+        version:    '2.0.1',
+        request:    'GetCoverage',
+        coverageId,
+        format:     'image/tiff',
+    });
+    return `${base}/${ws}/wcs?${qs.toString()}`;
 };
 
 // ── GET /fire-risk/latest ─────────────────────────────────────────────────────
@@ -49,10 +76,15 @@ const getLatest = async (req, res) => {
             geeMapId:            snapshot.gee_map_id || null,
             geeTileGeneratedAt:  snapshot.gee_tile_generated_at || null,
             // GEE getDownloadURL clip theo RanhGioiTinh_Polygon — trả GeoTIFF
-            // .zip valid ~24h. Client dùng để tải raster đầy đủ về máy.
-            // downloadFilename: gợi ý tên file (client dùng cho <a download>)
-            // vì URL GEE mặc định trả `<hash>:getPixels.tiff` không đọc được.
+            // trần (image/tiff) valid ~24h. Client dùng để tải raster đầy đủ
+            // về máy. downloadFilename: gợi ý tên file cho `<a download>` (GEE
+            // default trả `<hash>:getPixels.tiff` không đọc được).
             geeDownloadUrl:      snapshot.gee_download_url || null,
+            // WCS GetCoverage — persistent, full-resolution, không expire.
+            // Client/admin nên ƯU TIÊN URL này khi có; fallback geeDownloadUrl.
+            geoserverDownloadUrl: buildGeoserverDownloadUrl(snapshot.geoserver_layer),
+            downloadFilename:    fireRiskFilename(snapshot.analysis_date),
+            // Giữ alias cũ `geeDownloadFilename` để không vỡ FE cũ.
             geeDownloadFilename: fireRiskFilename(snapshot.analysis_date),
             computedAt:          snapshot.computed_at,
             publishedAt:         snapshot.published_at,

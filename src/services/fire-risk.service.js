@@ -38,13 +38,15 @@ const {
     fmtDate,
 } = require('../utils/gee-satellite.util');
 
-// Palette + range của RiskLevel 0-5 — trùng với §22 trong docs/kontum_fire_warning_final.js.
-// riskPaletteExtended: 0=trắng (không đủ dữ liệu), 1-5 theo cấp cháy chính thức.
+// Palette + range của RiskLevel 1-5 — trùng với §22 trong docs/kontum_fire_warning_final.js.
+// Pixel level=0 (không đủ dữ liệu / ngoài rừng) SẼ BỊ MASK trước khi visualize
+// → GeoTIFF output có nodata → GeoServer render trong suốt, KHÔNG còn nền trắng
+// đè lên basemap. Palette bây giờ chỉ define 5 cấp thực sự.
 const RISK_LEVEL_VIZ = {
     bands:   ['RiskLevel'],
-    min:     0,
+    min:     1,
     max:     5,
-    palette: ['ffffff', '00a65a', 'f6e84a', 'f39c12', 'e74c3c', '7b241c'],
+    palette: ['00a65a', 'f6e84a', 'f39c12', 'e74c3c', '7b241c'],
 };
 
 // NOTE — HARD-CODED, KHÔNG dùng env override.
@@ -575,9 +577,13 @@ async function runAnalysis(analysisDate, {
         let geeMapId = null;
         let geeTileUrl = null;
         try {
+            // Mask level=0 (không đủ data / ngoài rừng) trước khi getMapId để
+            // tile PNG có alpha=0 tại pixel không dữ liệu → không đè trắng
+            // lên basemap khi client render overlay.
+            const riskLevelForViz = riskLevel.updateMask(riskLevel.gt(0));
             const mapInfo = await log.run(
                 'Register GEE map (riskLevel viz → geeTileUrl)',
-                () => getEeMapId(riskLevel, RISK_LEVEL_VIZ),
+                () => getEeMapId(riskLevelForViz, RISK_LEVEL_VIZ),
                 { note: 'ee.data.getMapId — tile URL for /latest response' },
             );
             geeMapId   = mapInfo.mapId  || null;
@@ -605,7 +611,12 @@ async function runAnalysis(analysisDate, {
                 'Generate GEE download URL (riskLevel visualize → GeoTIFF RGB, filePerBand=false)',
                 () => new Promise((resolve) => {
                     const timer = setTimeout(() => resolve(null), 30_000);
+                    // Mask pixel level=0 giống flow tile — output TIFF sẽ có
+                    // nodata tại các pixel không dữ liệu (GEE lưu ở alpha band
+                    // hoặc metadata). GeoServer coverage sẽ render trong suốt
+                    // cho các pixel này, không còn ô trắng phủ basemap.
                     riskLevel
+                        .updateMask(riskLevel.gt(0))
                         .visualize(RISK_LEVEL_VIZ)
                         .clip(region.geometry())
                         .getDownloadURL(
