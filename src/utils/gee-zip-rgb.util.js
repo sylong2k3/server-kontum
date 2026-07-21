@@ -149,41 +149,46 @@ async function processGeeZipToCog(zipPath, outCog, { gdalCacheMB = 512 } = {}) {
         const kind = await detectFileKind(zipPath);
         dbg(`detected kind=${kind} for ${zipPath}`);
 
-        let hasRgbBands = false;
-        let vrtInputs   = [];
+        // ── TIFF trần: GDAL-free fast-path ──────────────────────────────
+        // GEE .visualize() đã stack 3-band RGB uint8 sẵn — không cần merge
+        // hay xây COG. Copy thẳng file làm output. Trade-off: mất internal
+        // overview / tiled layout (COG features). Với ảnh cỡ chục KB → vài MB
+        // ở scale 500m, không ảnh hưởng hiệu năng render đáng kể.
+        if (kind === 'tiff') {
+            await safeMkdir(path.dirname(outCog));
+            await fs.promises.copyFile(zipPath, outCog);
+            const stat = await fs.promises.stat(outCog);
+            dbg(`tiff passthrough size=${(stat.size / 1048576).toFixed(2)}MB path=${outCog}`);
+            return { path: outCog, size: stat.size, mode: 'tiff_passthrough' };
+        }
 
-        if (kind === 'zip') {
-            await extractZip(zipPath, workDir);
-            const { tifs, byBand } = await classifyTifs(workDir);
-
-            hasRgbBands = byBand.red && byBand.green && byBand.blue;
-            dbg(`classified tifs=${tifs.length} mode=${hasRgbBands ? 'rgb_merge' : 'passthrough'} `
-                + (hasRgbBands
-                    ? `R=${byBand.red} G=${byBand.green} B=${byBand.blue}`
-                    : `first=${tifs[0]} others=${byBand.others.length}`));
-
-            if (hasRgbBands) {
-                vrtInputs = RGB_ORDER.map((band) => path.join(workDir, byBand[band]));
-            } else {
-                const first = tifs.find((t) => !/aux\.xml$/i.test(t));
-                vrtInputs = [path.join(workDir, first)];
-            }
-        } else if (kind === 'tiff') {
-            // GEE trả trực tiếp GeoTIFF multi-band (RGB đã stack sẵn trong .visualize()).
-            // Skip unzip; feed thẳng vào gdalbuildvrt → gdal_translate → COG.
-            await safeMkdir(workDir);
-            vrtInputs = [zipPath];
-        } else {
+        if (kind !== 'zip') {
             throw new GeoTiffProcessError(
                 `File tải từ GEE không phải zip cũng không phải TIFF (magic=${kind}). Kiểm tra URL còn hạn không.`,
                 'UNKNOWN_FORMAT',
             );
         }
 
-        // Build VRT.
+        // ── ZIP branch (GEE trả bundle 3 file .vis-red/green/blue) ──────
+        // Vẫn cần GDAL để merge RGB → COG. Nếu server chưa cài GDAL, path
+        // này sẽ throw GDAL_FAILED (spawn ENOENT) — tuỳ deploy quyết định
+        // cài OSGeo4W hay đổi getDownloadURL để luôn trả TIFF trần.
+        await extractZip(zipPath, workDir);
+        const { tifs, byBand } = await classifyTifs(workDir);
+
+        const hasRgbBands = byBand.red && byBand.green && byBand.blue;
+        dbg(`classified tifs=${tifs.length} mode=${hasRgbBands ? 'rgb_merge' : 'passthrough'} `
+            + (hasRgbBands
+                ? `R=${byBand.red} G=${byBand.green} B=${byBand.blue}`
+                : `first=${tifs[0]} others=${byBand.others.length}`));
+
+        let vrtInputs;
         if (hasRgbBands) {
+            vrtInputs = RGB_ORDER.map((band) => path.join(workDir, byBand[band]));
             await _runCmd('gdalbuildvrt', ['-separate', vrtPath, ...vrtInputs], { env: gdalEnv });
         } else {
+            const first = tifs.find((t) => !/aux\.xml$/i.test(t));
+            vrtInputs = [path.join(workDir, first)];
             await _runCmd('gdalbuildvrt', [vrtPath, ...vrtInputs], { env: gdalEnv });
         }
 
@@ -202,6 +207,13 @@ async function processGeeZipToCog(zipPath, outCog, { gdalCacheMB = 512 } = {}) {
         return { path: outCog, size: stat.size, mode: hasRgbBands ? 'rgb_merge' : 'passthrough' };
     } catch (err) {
         if (err instanceof GeoTiffProcessError) throw err;
+        // ENOENT = GDAL binary chưa cài trên PATH. Nêu rõ để ops biết fix nhanh.
+        if (err.code === 'ENOENT') {
+            throw new GeoTiffProcessError(
+                `GDAL không có trên PATH (spawn ENOENT). Cài OSGeo4W hoặc dùng flow TIFF (getDownloadURL filePerBand:false).`,
+                'GDAL_NOT_INSTALLED',
+            );
+        }
         throw new GeoTiffProcessError(
             `GDAL xử lý zip thất bại: ${err.stderr || err.message}`,
             'GDAL_FAILED',
