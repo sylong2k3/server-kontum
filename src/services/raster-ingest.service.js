@@ -1,20 +1,24 @@
 'use strict';
 
 /**
- * Orchestrator pipeline: GEE download URL → MinIO → GeoServer (S3GeoTiff).
+ * Orchestrator pipeline: GEE download URL → MinIO (archive) → GEOSERVER_DATA_DIR
+ * → GeoServer (FileSystem GeoTIFF CoverageStore).
  *
  * Bước:
  *   1. enqueue      — validate + dedupe + INSERT job pending
  *   2. runJob       — worker gọi khi claim được:
- *        downloading  → stream fetch zip → /tmp
- *        validating   → gdal unzip + build RGB COG
- *        uploading    → put COG lên MinIO (streaming)
- *        publishing   → GeoServer S3GeoTiff CoverageStore + upsert layer_registry
+ *        downloading  → stream fetch zip/tiff → /tmp
+ *        validating   → detect zip vs tiff → COG (nếu có GDAL) hoặc passthrough
+ *        uploading    → put COG/TIFF lên MinIO (streaming, archive)
+ *        publishing   → copy /tmp → GEOSERVER_DATA_DIR/gee-rasters/<store>.tif
+ *                       → tạo GeoTIFF CoverageStore + upsert layer_registry
  *        completed    → dọn tmp
  *   3. lỗi bất kỳ bước → tăng retry_count, quay về pending nếu chưa vượt max.
  *
- * Không dùng shared filesystem — GeoServer đọc thẳng object từ MinIO qua
- * `gs-s3-geotiff` extension.
+ * GHI CHÚ — trước đây flow này dùng `gs-s3-geotiff` community extension để
+ * GeoServer đọc thẳng từ MinIO, nhưng GeoServer 3.0.0 chưa port module này.
+ * Chuyển sang FileSystem GeoTIFF (yêu cầu GEOSERVER_DATA_DIR set + Node process
+ * ghi được vào đó). MinIO vẫn giữ làm archive nguồn.
  */
 
 const fs     = require('fs');
@@ -239,21 +243,33 @@ async function runJob(job) {
 
         await rasterRepo.updateStatus(job.id, { status: 'publishing', progress: 80 });
 
-        // ── 4. GeoServer S3GeoTiff CoverageStore ───────────────────────
+        // ── 4. GeoServer FileSystem GeoTIFF CoverageStore ──────────────
+        // GeoServer 3.0.0 chưa có community extension `gs-s3-geotiff`, nên
+        // chuyển sang publish qua path filesystem: copy COG từ /tmp sang
+        // GEOSERVER_DATA_DIR/gee-rasters/<store>.tif rồi tạo GeoTIFF store.
+        // MinIO vẫn giữ file làm archive/back-link để re-publish sau này.
         const t4 = Date.now();
         const storeName    = job.layer_code;
         const params       = job.request_params || {};
+        const gsDataDir    = process.env.GEOSERVER_DATA_DIR;
+        if (!gsDataDir) {
+            throw new Error('GEOSERVER_DATA_DIR chưa cấu hình — cần thiết cho publish GeoTIFF filesystem');
+        }
+        const publishDir   = path.join(gsDataDir, 'gee-rasters');
+        const publishPath  = path.join(publishDir, `${storeName}.tif`);
+        await fs.promises.mkdir(publishDir, { recursive: true });
+        await fs.promises.copyFile(cogPath, publishPath);
+        dbg('PUBLISH', `copied cog → ${publishPath}`);
 
         // Nhận biết re-ingest: cùng layer_code đã có geoserver_layer trong
         // layer_registry → cache GWC cần truncate sau khi PUT URL mới.
         const existingLayer = await layerRepo.findByCode(storeName);
         const isReingest    = Boolean(existingLayer?.geoserver_layer);
-        dbg('PUBLISH', `store=${storeName} isReingest=${isReingest} s3=s3://${cfg.MINIO_BUCKET}/${objectKey}`);
+        dbg('PUBLISH', `store=${storeName} isReingest=${isReingest} file=${publishPath}`);
 
-        const geoserverLayer = await geoserver.publishS3GeoTiffLayer({
+        const geoserverLayer = await geoserver.publishFsGeoTiffLayer({
             storeName,
-            s3Bucket: cfg.MINIO_BUCKET,
-            s3Key:    objectKey,
+            filePath: publishPath,
             title:    params.nameVi || storeName,
             enabled:  true,
         });

@@ -309,6 +309,89 @@ const publishS3GeoTiffLayer = async ({
     return layerName;
 };
 
+/**
+ * Publish 1 GeoTIFF nằm trên filesystem (đã copy vào GEOSERVER_DATA_DIR
+ * hoặc path GeoServer đọc được) qua CoverageStore type `GeoTIFF` — dùng cho
+ * môi trường không có community extension `gs-s3-geotiff` (VD GeoServer 3.0.0
+ * chưa port module).
+ *
+ * @param {object}  args
+ * @param {string}  args.storeName
+ * @param {string}  args.filePath   — path tuyệt đối tới .tif trên đĩa
+ * @param {string}  args.title
+ * @param {boolean} [args.enabled]
+ * @returns {Promise<string>} — 'workspace:storeName'
+ */
+const publishFsGeoTiffLayer = async ({
+    storeName, filePath, title, enabled = true,
+}) => {
+    const config    = assertGeoserverConfigured();
+    const workspace = config.workspace;
+    // pathToFileURL xử lý drive letter + backslash trên Windows đúng chuẩn
+    // (file:///C:/... thay vì file:C:\... — cái sau GeoServer từng parse sai).
+    const { pathToFileURL } = require('url');
+    const fileUrl   = pathToFileURL(filePath).href;
+    const t0        = Date.now();
+    const dbg       = (process.env.RASTER_INGEST_DEBUG === 'true'
+                        || process.env.NODE_ENV === 'development')
+        ? (msg) => console.debug(`[GEOSERVER-FS] ${msg}`) : () => {};
+
+    dbg(`publish store=${storeName} ws=${workspace} url=${fileUrl}`);
+
+    const storeBody = JSON.stringify({
+        coverageStore: {
+            name: storeName,
+            type: 'GeoTIFF',
+            enabled,
+            workspace: { name: workspace },
+            url: fileUrl,
+        },
+    });
+
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: storeBody },
+        );
+        dbg('store CREATED (POST)');
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) {
+            console.error(`[GEOSERVER-FS] store CREATE FAILED store=${storeName} status=${err.status}: ${err.message}`);
+            throw err;
+        }
+        dbg('store exists → PUT update URL');
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores/${storeName}`,
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: storeBody },
+        );
+        dbg('store URL UPDATED (PUT)');
+    }
+
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores/${storeName}/coverages`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    coverage: { name: storeName, title: title || storeName, enabled },
+                }),
+            },
+        );
+        dbg('coverage CREATED');
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) {
+            console.error(`[GEOSERVER-FS] coverage CREATE FAILED store=${storeName} status=${err.status}: ${err.message}`);
+            throw err;
+        }
+        dbg('coverage already exists — kept');
+    }
+
+    const layerName = `${workspace}:${storeName}`;
+    dbg(`done → ${layerName} (${Date.now() - t0}ms)`);
+    return layerName;
+};
+
 const harvestGeoTiff = async (coverageStore, tifPath) => {
     const config = assertGeoserverConfigured();
     const fileUrl = tifPath.startsWith('file://') ? tifPath : `file://${tifPath}`;
@@ -342,6 +425,7 @@ module.exports = {
     publishVectorLayer,
     publishRasterLayer,
     publishS3GeoTiffLayer,
+    publishFsGeoTiffLayer,
     publishTimelapseLayer,
     unpublishLayer,
     setLayerEnabled,
