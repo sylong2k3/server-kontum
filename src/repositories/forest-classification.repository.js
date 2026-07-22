@@ -262,14 +262,9 @@ const listAll = async ({ page = 1, limit = 24, status = null } = {}) => {
     return { items, total };
 };
 
-const listExporting = async () => {
-    const { rows } = await db.query(
-        `SELECT * FROM forest.forest_snapshots
-         WHERE status = 'exporting' AND gee_task_id IS NOT NULL
-         ORDER BY created_at`,
-    );
-    return rows;
-};
+// listExporting() đã BỎ — GCS batch export path không còn dùng (thay bằng
+// auto-ingest queue). Nếu về sau cần đọc snapshot status='exporting', dùng
+// `getById` hoặc query trực tiếp trong migration.
 
 // ── District area stats ───────────────────────────────────────────────────────
 
@@ -356,7 +351,6 @@ module.exports = {
     getByYearMonth,
     listCompleted,
     listAll,
-    listExporting,
     replaceDistrictAreas,
     getDistrictAreas,
     getPreviousCompleted,
