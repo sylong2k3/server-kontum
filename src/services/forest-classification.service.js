@@ -254,7 +254,12 @@ async function runAnalysis(year, month, {
             region,
             region.geometry(),
             {
-                seed: year * 1000 + month,
+                // Seed nhỏ (max ~2000×12 = ~24000 với year=2100) — pipeline
+                // sẽ nhân seed với 2000 khi derive cho dataset samples, phải
+                // đảm bảo kết quả không vượt int32 (2^31 - 1 = 2,147,483,647).
+                // Cũ: `year * 1000 + month` → cho 2026/7 → 2026007 →
+                // pipeline * 2000 = 4,052,014,001 → GEE reject "Long".
+                seed: year * 20 + month,
                 groundTruthAssetId,
                 groundTruthGeoJson,   // NEW (033): inline GT có ưu tiên hơn asset
                 gtBufferM,
