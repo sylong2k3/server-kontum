@@ -44,16 +44,6 @@ const buildGeoserverDownloadUrl = (layerFqn) => {
     return `${base}/${ws}/wcs?${qs.toString()}`;
 };
 
-// ── GET /forest-classification/map ───────────────────────────────────────────
-// Trả GeoJSON FeatureCollection ranh giới huyện + area stats từ snapshot mới
-// nhất. Mirror pattern fire-risk /map — client render trực tiếp bằng
-// Leaflet/MapLibre, không cần wrap OK() (raw JSON theo GeoJSON spec).
-const getMap = async (req, res) => {
-    dbg('MAP', `caller user=${req.user?.id || 'anon'} lang=${req.lang}`);
-    const geojson = await svc.getMap();
-    res.json(geojson);
-};
-
 // ── GET /forest-classification/latest ────────────────────────────────────────
 const getLatest = async (req, res) => {
     dbg('LATEST', `caller user=${req.user?.id || 'anon'} lang=${req.lang}`);
@@ -293,4 +283,4 @@ function formatLogRow(s) {
     };
 }
 
-module.exports = { getLatest, getMap, getHistory, getPublishedHistory, refresh, queryPeriod, getLogs, getSnapshot, publishRaster };
+module.exports = { getLatest, getHistory, getPublishedHistory, refresh, queryPeriod, getLogs, getSnapshot, publishRaster };
