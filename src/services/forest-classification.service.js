@@ -458,7 +458,7 @@ async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
     const tag = `${year}${String(month).padStart(2, '0')}`;
     const layerCode = `forest_class_${tag}`;
     const t0 = Date.now();
-    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.EXPORT_SCALE_M || 60}m urlLen=${geeDownloadUrl.length}`);
+    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.DOWNLOAD_SCALE_M || 200}m urlLen=${geeDownloadUrl.length}`);
     console.log(`[FOREST-CLS] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
     const { job, deduplicated } = await ingestSvc.enqueue({
         sourceUrl:  geeDownloadUrl,
@@ -470,7 +470,7 @@ async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
             linkedResource: { type: 'forest', id: snapshot.id },
             year,
             month,
-            scale_m:        cfg.EXPORT_SCALE_M || 60,
+            scale_m:        cfg.DOWNLOAD_SCALE_M || 200,   // scale URL sinh thật
             autoIngested:   true,   // trace: enqueue tự động vs admin bấm
         },
         user: null,  // system-triggered

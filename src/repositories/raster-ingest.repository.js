@@ -100,16 +100,26 @@ async function updateStatus(id, { status, progress, errorLog }) {
     return rows[0] || null;
 }
 
-async function incrementRetry(id) {
-    dbg(`incrementRetry #${id} → status=pending (reset)`);
+/**
+ * Increment retry_count + reset về pending. Optional `nextRetryAtMs` = số ms
+ * delay tối thiểu trước khi worker được claim lại — dùng cho backoff sau
+ * HTTP 429 (GEE rate limit). Null/0 → poll ngay tick sau (behavior cũ).
+ */
+async function incrementRetry(id, { nextRetryAtMs = null } = {}) {
+    if (nextRetryAtMs) {
+        dbg(`incrementRetry #${id} → status=pending (reset), next_retry in ${nextRetryAtMs}ms`);
+    } else {
+        dbg(`incrementRetry #${id} → status=pending (reset)`);
+    }
     const { rows } = await db.query(
         `UPDATE gis.raster_ingest_jobs
-         SET retry_count = retry_count + 1,
-             status      = 'pending',
-             progress    = 0
+         SET retry_count   = retry_count + 1,
+             status        = 'pending',
+             progress      = 0,
+             next_retry_at = $2
          WHERE id = $1
          RETURNING ${COLUMNS}`,
-        [id],
+        [id, nextRetryAtMs ? new Date(Date.now() + nextRetryAtMs) : null],
     );
     return rows[0] || null;
 }
@@ -155,6 +165,7 @@ async function claimPending({ batchSize, maxRetries }) {
              SELECT id FROM gis.raster_ingest_jobs
              WHERE status = 'pending'
                AND retry_count <= $2
+               AND (next_retry_at IS NULL OR next_retry_at <= NOW())
              ORDER BY created_at ASC
              LIMIT $1
              FOR UPDATE SKIP LOCKED

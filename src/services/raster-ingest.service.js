@@ -178,8 +178,30 @@ async function _fail(job, err) {
         && err.code !== 'NO_TIF_IN_ZIP';
 
     if (canRetry) {
-        await rasterRepo.incrementRetry(job.id);
-        console.warn(`[RASTER-INGEST] job=${job.id} RETRY ${job.retry_count + 1}/${cfg.MAX_RETRIES} layer=${job.layer_code} — ${errMsg}`);
+        // Detect HTTP 429 (rate limit) từ error message hoặc code. GEE
+        // thumbnails endpoint có window 60-300s; nếu retry ngay 15s sau sẽ
+        // trigger 429 tiếp tục, cuối cùng GEE hard-reject bằng 400 và
+        // invalidate URL. Cần exponential backoff cho case này.
+        //
+        // Backoff formula (jittered):
+        //   retry 1 → 60s + jitter (0-15s)
+        //   retry 2 → 180s + jitter (0-30s)
+        //   retry 3 → 600s (10min) + jitter (0-60s)
+        //
+        // Non-429 error (network fail, timeout, MinIO down, ...) → không
+        // delay, poll ngay tick sau (behavior cũ giữ nguyên).
+        const is429 = /HTTP 429|UPSTREAM_4XX.*429|rate.?limit/i.test(errMsg);
+        let nextRetryAtMs = null;
+        if (is429) {
+            const base = [60_000, 180_000, 600_000][job.retry_count] || 600_000;
+            const jitter = Math.floor(Math.random() * base * 0.25);
+            nextRetryAtMs = base + jitter;
+        }
+        await rasterRepo.incrementRetry(job.id, { nextRetryAtMs });
+        const delayNote = nextRetryAtMs
+            ? ` (backoff ${Math.round(nextRetryAtMs / 1000)}s — 429 detected)`
+            : '';
+        console.warn(`[RASTER-INGEST] job=${job.id} RETRY ${job.retry_count + 1}/${cfg.MAX_RETRIES} layer=${job.layer_code} — ${errMsg}${delayNote}`);
     } else {
         await rasterRepo.updateStatus(job.id, {
             status:   'failed',
