@@ -90,11 +90,11 @@ const GCS_KEY_FILE  = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
 const MINIO_BUCKET  = process.env.FC_MINIO_BUCKET || 'forest-classification';
 const EXPORT_SCALE_M = parseInt(process.env.FC_EXPORT_SCALE_M, 10) || 30;
 
-// Scale riêng cho getDownloadURL (preview raster clip theo tỉnh). Coarse hơn
-// EXPORT_SCALE_M để callback trả trong 30s timeout. Cùng lý do fire-risk dùng
-// 500m: WMS tile 256×256 không cần độ chi tiết 30-60m. 200m ~ 250k pixels
-// cho Kon Tum → getDownloadURL response ~15-25s (test tương tự fire-risk).
-const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 200;
+// Scale riêng cho getDownloadURL (preview/publish raster clip theo tỉnh).
+// Mặc định 250m, đồng bộ với FIRE_RISK_EXPORT_SCALE_M để raster-ingest không
+// phải kéo một ảnh RF 11 lớp quá lớn từ URL GEE tạm thời. Có thể override bằng
+// FC_DOWNLOAD_SCALE_M khi hạ tầng/quota cho phép xuất chi tiết hơn.
+const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 250;
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 const SNAPSHOT_GRACE_MONTHS = parseInt(process.env.FC_SNAPSHOT_GRACE_MONTHS, 10) || 24;

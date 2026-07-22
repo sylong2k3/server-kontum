@@ -1,6 +1,7 @@
 'use strict';
 
 const svc  = require('../services/forest-classification.service');
+const cfg  = require('../configs/forest-classification');
 const repo = require('../repositories/forest-classification.repository');
 const ingestSvc = require('../services/raster-ingest.service');
 const { OK, OK_LIST, CREATED } = require('../core/success.response');
@@ -252,14 +253,19 @@ const publishRaster = async (req, res) => {
             linkedResource: { type: 'forest', id: snap.id },
             year:  snap.year,
             month: snap.month,
+            scale_m: cfg.DOWNLOAD_SCALE_M,
         },
         user: req.user || null,
         lang: req.lang,
     });
     console.log(`[FOREST-CTL] publishRaster snapshot=${id} → job=${job.id} status=${job.status} deduplicated=${Boolean(deduplicated)}`);
 
-    CREATED(res, deduplicated ? 'Job publish đã tồn tại — trả về job cũ.' : 'Đã kích hoạt job publish.', {
-        jobId: job.id, status: job.status, deduplicated: Boolean(deduplicated),
+    return CREATED(res, deduplicated ? 'Job publish đã tồn tại — trả về job cũ.' : 'Đã kích hoạt job publish.', {
+        snapshotId: id,
+        jobId: job.id,
+        status: job.status,
+        layerCode,
+        deduplicated: Boolean(deduplicated),
     });
 };
 

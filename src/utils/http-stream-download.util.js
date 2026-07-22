@@ -24,6 +24,15 @@ const safeHost = (url) => {
     try { return new URL(url).host; } catch { return '(invalid-url)'; }
 };
 
+const safeUrlWithoutQuery = (url) => {
+    try {
+        const u = new URL(url);
+        return `${u.origin}${u.pathname}`;
+    } catch {
+        return '(invalid-url)';
+    }
+};
+
 class DownloadError extends Error {
     constructor(message, code, cause) {
         super(message);
@@ -58,8 +67,13 @@ async function downloadToFile(url, destPath, { timeoutMs, maxBytes, headers = {}
         dbg(`response status=${res.status} elapsed=${Date.now() - t0}ms`);
 
         if (!res.ok) {
+            let detail = '';
+            try {
+                const text = await res.text();
+                detail = text ? ` — ${text.replace(/\s+/g, ' ').trim().slice(0, 500)}` : '';
+            } catch {}
             throw new DownloadError(
-                `HTTP ${res.status} khi tải ${url.slice(0, 120)}…`,
+                `HTTP ${res.status} khi tải ${safeUrlWithoutQuery(url)}${detail}`,
                 res.status >= 500 ? 'UPSTREAM_5XX' : 'UPSTREAM_4XX',
             );
         }

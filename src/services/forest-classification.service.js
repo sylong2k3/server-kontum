@@ -4,14 +4,15 @@
  * Forest Classification Service (Phân loại lớp phủ rừng).
  *
  * Implements the 11-class Kon Tum forest classification from lopPhuRungFinal.txt v3.
- * Uses Landsat 5/7/8/9 + Sentinel-2 + Random Forest (200 trees).
+ * The scheduled/admin flow uses the same lite Random Forest mode as
+ * `/satellite/classified` so interactive GEE operations stay within quota.
  *
  * Pipeline:
  *   1. Build 3 composites: base (full year), dry (Jan-Apr), wet (Aug-Nov)
  *   2. Compute spectral indices (NDVI, NDWI, MNDWI, NDMI, NDBI, NBR, BSI, EVI)
  *      for base + seasonal amplitudes
  *   3. Add DEM bands (elevation, slope, aspect)
- *   4. Build pseudo-label images (threshold + Dynamic World / ESA WorldCover + JRC Water)
+ *   4. Build threshold pseudo-labels (optional dataset labels via config)
  *   5. Sample training data from pseudo-labels
  *   6. Train Random Forest (200 trees, 6 variables/split, seed=year)
  *   7. Classify + water post-processing (JRC stable water correction)
@@ -228,18 +229,23 @@ async function runAnalysis(year, month, {
             trigger,
             requested_by: requestedBy,
             model_params: {
-                version:        'v3',
-                rf_trees:       cfg.RF_TREES,
+                version:        'v3-lite',
+                mode:           'lite',
+                rf_trees:       cfg.LITE_RF_TREES,
                 rf_vars_split:  cfg.RF_VARIABLES_PER_SPLIT,
                 bag_fraction:   cfg.RF_BAG_FRACTION,
-                samples:        cfg.SAMPLES_PER_CLASS,
-                sample_scale_m: cfg.SAMPLE_SCALE_M,
-                area_scale_m:   cfg.AREA_STATS_SCALE_M,
+                samples:        cfg.LITE_SAMPLES_PER_CLASS,
+                sample_scale_m: cfg.LITE_SAMPLE_SCALE_M,
+                area_scale_m:   200,
+                download_scale_m: cfg.DOWNLOAD_SCALE_M,
+                skip_stats:     true,
                 ground_truth_asset_id: hasGT ? groundTruthAssetId : null,
                 gt_buffer_m:    hasGT ? gtBufferM : null,
-                blend_rule:     hasGT
-                    ? 'Input 50% + Dataset 30% + Threshold 20%'
-                    : 'Dataset 60% + Threshold 40%',
+                blend_rule:     cfg.LITE_USE_DATASET_LABELS
+                    ? (hasGT
+                        ? 'Input 50% + Dataset 30% + Threshold 20%'
+                        : 'Dataset 60% + Threshold 40%')
+                    : (hasGT ? 'Input 50% + Threshold 50%' : 'Threshold 100%'),
             },
         }));
 
@@ -293,7 +299,9 @@ async function runAnalysis(year, month, {
                 // sample, phải bảo đảm không vượt int32 (2^31-1). Cũ:
                 // `year*1000+month` → 2026007 → *2000 → overflow. Xem
                 // commit fix clampSeed trong pipeline.
-                seed: year * 20 + month,
+                // Đồng bộ với satellite `/classified`: cùng năm + cùng ROI +
+                // cùng ground truth sẽ tạo cùng mô hình RF.
+                seed: year,
                 groundTruthAssetId,
                 groundTruthGeoJson,
                 gtBufferM,
@@ -366,23 +374,28 @@ async function runAnalysis(year, month, {
                         .getDownloadURL(
                             {
                                 name:        fileBase,
-                                // DOWNLOAD_SCALE_M (200m) coarse hơn EXPORT
-                                // (60m) — WMS tile 256px không cần độ chi
-                                // tiết cao; scale 60m gây GEE timeout 30s.
-                                scale:       cfg.DOWNLOAD_SCALE_M || 200,
+                                // Đồng bộ pipeline download/publish fire-risk.
+                                scale:       cfg.DOWNLOAD_SCALE_M,
                                 region:      region.geometry(),
                                 crs:         'EPSG:4326',
                                 format:      'GEO_TIFF',
                                 filePerBand: false,
+                                maxPixels:   1e9,
                             },
-                            (url) => { clearTimeout(timer); resolve(url || null); },
+                            (url, err) => {
+                                clearTimeout(timer);
+                                if (err) {
+                                    console.warn(`[FOREST-CLS] getDownloadURL err: ${err.message || err}`);
+                                }
+                                resolve(err ? null : (url || null));
+                            },
                         );
                 }),
             );
             if (geeDownloadUrl) {
                 dbgTime('DOWNLOAD_URL', `ok fileBase=${fileBase} len=${geeDownloadUrl.length}`, dlStart);
             } else {
-                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT/NULL (30s) — snapshot ${year}/${month} sẽ không auto-ingest`);
+                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT/NULL (60s) — snapshot ${year}/${month} sẽ không auto-ingest`);
             }
         } catch (err) {
             console.warn(`[FOREST-CLS] getDownloadURL failed (non-fatal): ${err.message}`);
@@ -458,7 +471,7 @@ async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
     const tag = `${year}${String(month).padStart(2, '0')}`;
     const layerCode = `forest_class_${tag}`;
     const t0 = Date.now();
-    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.DOWNLOAD_SCALE_M || 200}m urlLen=${geeDownloadUrl.length}`);
+    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.DOWNLOAD_SCALE_M}m urlLen=${geeDownloadUrl.length}`);
     console.log(`[FOREST-CLS] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
     const { job, deduplicated } = await ingestSvc.enqueue({
         sourceUrl:  geeDownloadUrl,
@@ -470,7 +483,7 @@ async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
             linkedResource: { type: 'forest', id: snapshot.id },
             year,
             month,
-            scale_m:        cfg.DOWNLOAD_SCALE_M || 200,   // scale URL sinh thật
+            scale_m:        cfg.DOWNLOAD_SCALE_M,
             autoIngested:   true,   // trace: enqueue tự động vs admin bấm
         },
         user: null,  // system-triggered

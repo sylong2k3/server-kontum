@@ -347,7 +347,8 @@ async function buildClassified(params, region) {
         // Lite mode: on-demand endpoint bỏ dataset labels (DW+WC+JRC), giảm sample,
         // giảm RF trees, dùng sample scale coarser. Cần thiết vì graph v3 gốc
         // vượt quá budget của getMapId (~200 s → GEE "Please try again").
-        // Batch cron trong forest-classification.service.js vẫn dùng full v3.
+        // Batch/admin forest-classification dùng cùng lite mode để kết quả và
+        // thời gian xử lý nhất quán với endpoint on-demand này.
         liteMode:           params.liteMode !== false,
     });
     dbgTime('CLASSIFIED', `RF graph built (stats skipped)`, t0);
@@ -411,12 +412,16 @@ async function buildClassified(params, region) {
             startDate:  params.startDate,
             endDate:    params.endDate,
             classCount: nClasses,
-            model:      'RandomForest v3 (Landsat 5/7/8/9 + S2 + DW + WorldCover + JRC GSW)',
+            model:      fcCfg.LITE_USE_DATASET_LABELS
+                ? 'RandomForest v3-lite (Landsat 5/7/8/9 + S2 + dataset labels)'
+                : 'RandomForest v3-lite (Landsat 5/7/8/9 + S2 + threshold labels)',
             groundTruthAssetId: hasGT ? params.groundTruthAssetId : null,
             gtBufferM:          hasGT ? params.gtBufferM : null,
-            blendRule:          hasGT
-                ? 'Input 50% + Dataset 30% + Threshold 20%'
-                : 'Dataset 60% + Threshold 40%',
+            blendRule:          fcCfg.LITE_USE_DATASET_LABELS
+                ? (hasGT
+                    ? 'Input 50% + Dataset 30% + Threshold 20%'
+                    : 'Dataset 60% + Threshold 40%')
+                : (hasGT ? 'Input 50% + Threshold 50%' : 'Threshold 100%'),
         },
     };
 }

@@ -171,11 +171,14 @@ async function _cleanup(files) {
 
 async function _fail(job, err) {
     const errMsg = `${err.code || err.name || 'ERROR'}: ${err.message}`;
+    const is429 = /HTTP 429|UPSTREAM_4XX.*429|rate.?limit/i.test(errMsg);
+    const isNonRetryable4xx = err.code === 'UPSTREAM_4XX' && !is429;
     const canRetry =
         job.retry_count < cfg.MAX_RETRIES
         && !(err instanceof Api400Error)
         && err.code !== 'FILE_TOO_LARGE'
-        && err.code !== 'NO_TIF_IN_ZIP';
+        && err.code !== 'NO_TIF_IN_ZIP'
+        && !isNonRetryable4xx;
 
     if (canRetry) {
         // Detect HTTP 429 (rate limit) từ error message hoặc code. GEE
@@ -190,7 +193,6 @@ async function _fail(job, err) {
         //
         // Non-429 error (network fail, timeout, MinIO down, ...) → không
         // delay, poll ngay tick sau (behavior cũ giữ nguyên).
-        const is429 = /HTTP 429|UPSTREAM_4XX.*429|rate.?limit/i.test(errMsg);
         let nextRetryAtMs = null;
         if (is429) {
             const base = [60_000, 180_000, 600_000][job.retry_count] || 600_000;
