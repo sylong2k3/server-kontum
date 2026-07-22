@@ -13,6 +13,10 @@ const router = Router();
 // Latest completed snapshot.
 router.get('/latest',  optionalAuth, asyncHandler(ctrl.getLatest));
 
+// Ranh giới huyện + area stats (GeoJSON FC) — client render polygon overlay
+// tô màu theo dominant class hoặc % rừng. Không cần auth (public data).
+router.get('/map',     optionalAuth, asyncHandler(ctrl.getMap));
+
 // On-demand user query: cache-hit returns immediately; miss triggers async run.
 // optionalAuth so authenticated users are logged as requester.
 router.post('/query',  optionalAuth, asyncHandler(ctrl.queryPeriod));

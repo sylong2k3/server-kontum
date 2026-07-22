@@ -355,7 +355,7 @@ async function runAnalysis(year, month, {
             geeDownloadUrl = await log.run(
                 'Generate GEE download URL (classified visualize → GeoTIFF RGB)',
                 () => new Promise((resolve) => {
-                    const timer = setTimeout(() => resolve(null), 30_000);
+                    const timer = setTimeout(() => resolve(null), 60_000);
                     classified
                         // Mask class=0 ("Đất khác") để pixel không thuộc rừng
                         // render trong suốt trên WMS overlay — cùng cơ chế
@@ -366,7 +366,10 @@ async function runAnalysis(year, month, {
                         .getDownloadURL(
                             {
                                 name:        fileBase,
-                                scale:       cfg.EXPORT_SCALE_M || 60,
+                                // DOWNLOAD_SCALE_M (200m) coarse hơn EXPORT
+                                // (60m) — WMS tile 256px không cần độ chi
+                                // tiết cao; scale 60m gây GEE timeout 30s.
+                                scale:       cfg.DOWNLOAD_SCALE_M || 200,
                                 region:      region.geometry(),
                                 crs:         'EPSG:4326',
                                 format:      'GEO_TIFF',
@@ -515,6 +518,131 @@ const getLatest = async () => {
     };
 };
 
+/**
+ * GET /forest-classification/map — GeoJSON FeatureCollection ranh giới huyện
+ * Kon Tum, mỗi feature gán area stats từ DB (grouped by district_code) +
+ * dominant class + forestHa/forestPct. Client consume trực tiếp cho Leaflet/
+ * MapLibre để render tô màu theo dominant class hoặc % rừng.
+ *
+ * Đọc trực tiếp `data/RanhGioiHuyen_Polygon.geojson` (GADM v2 WGS84) — mirror
+ * cách `getKonTumDistricts()` của gee-satellite.util nhưng ở tầng service,
+ * không cần GEE (client chỉ cần polygons đã có sẵn ở file local).
+ */
+const getMap = async () => {
+    const t0 = Date.now();
+    const snapshot = await repo.getLatestCompleted();
+    if (!snapshot) {
+        dbgTime('GET_MAP', 'no snapshot → empty FC', t0);
+        return {
+            type: 'FeatureCollection', features: [],
+            snapshotPeriod: null, geoserverLayer: null, geeTileUrl: null,
+        };
+    }
+
+    // District areas từ DB (flat rows). Group by district_code để tính
+    // aggregate per-huyện: totalHa, forestHa, byClass dict, dominant class.
+    const areaRows = await repo.getDistrictAreas(snapshot.id);
+    const groups = new Map();
+    for (const r of areaRows) {
+        const code = r.district_code || '__unknown__';
+        if (!groups.has(code)) {
+            groups.set(code, {
+                districtCode: code, districtName: r.district_name || code,
+                totalHa: 0, forestHa: 0, byClass: {}, dominantClassId: null,
+                dominantClassName: null, dominantHa: 0,
+            });
+        }
+        const g = groups.get(code);
+        const ha = Number(r.area_ha) || 0;
+        g.byClass[r.class_id] = ha;
+        g.totalHa += ha;
+        if (cfg.FOREST_CLASS_IDS.includes(r.class_id)) g.forestHa += ha;
+        if (ha > g.dominantHa) {
+            g.dominantHa = ha;
+            g.dominantClassId   = r.class_id;
+            g.dominantClassName = r.class_name || cfg.CLASS_NAMES[r.class_id] || null;
+        }
+    }
+    for (const g of groups.values()) {
+        g.forestPct = g.totalHa > 0 ? (g.forestHa / g.totalHa) * 100 : 0;
+    }
+
+    // Read polygons huyện từ file local (GADM v2 WGS84). Non-fatal: nếu file
+    // vắng/parse fail, trả FC rỗng để client render map bare (chỉ có raster).
+    let districtGeoJson = null;
+    try {
+        const fs   = require('fs');
+        const path = require('path');
+        const geoPath = path.resolve(__dirname, '../../data/RanhGioiHuyen_Polygon.geojson');
+        const raw = fs.readFileSync(geoPath, 'utf8');
+        districtGeoJson = JSON.parse(raw);
+    } catch (err) {
+        console.warn(`[FOREST-CLS] getMap: cannot read RanhGioiHuyen_Polygon.geojson: ${err.message}`);
+        dbgTime('GET_MAP', 'no local district file → return without geometries', t0);
+        // Fallback: trả features KHÔNG có geometry (client vẫn có thể hiển
+        // thị dạng bảng, không có polygon overlay).
+        const featuresNoGeom = Array.from(groups.values()).map((g) => ({
+            type: 'Feature', geometry: null,
+            properties: { ...g },
+        }));
+        return {
+            type: 'FeatureCollection', features: featuresNoGeom,
+            snapshotPeriod: `${snapshot.year}-${String(snapshot.month).padStart(2,'0')}`,
+            geoserverLayer: snapshot.geoserver_layer || null,
+            geeTileUrl:     snapshot.gee_tile_url   || null,
+            geeMapId:       snapshot.gee_map_id     || null,
+            classifiedViz:  CLASSIFIED_VIZ,
+        };
+    }
+
+    // Match district polygon với DB stats. Key match theo `ID_2` (GADM code),
+    // fallback name. GADM file có duplicate features (18 raw → 9 unique) —
+    // dùng Set để dedupe theo ID_2.
+    const seen = new Set();
+    const features = [];
+    for (const f of districtGeoJson.features || []) {
+        const p = f.properties || {};
+        const code = String(p.ID_2 || p.ADM2_CODE || p.NAME_2 || '');
+        if (!code || seen.has(code)) continue;
+        seen.add(code);
+
+        // Match DB stats — thử theo code trước, fallback theo name.
+        const stats = groups.get(code) || groups.get(String(p.NAME_2 || '')) || {
+            districtCode: code, districtName: p.NAME_2 || p.VARNAME_2 || code,
+            totalHa: 0, forestHa: 0, forestPct: 0, byClass: {},
+            dominantClassId: null, dominantClassName: null, dominantHa: 0,
+        };
+        features.push({
+            type: 'Feature',
+            geometry: f.geometry,
+            properties: {
+                districtCode:      stats.districtCode,
+                districtName:      stats.districtName,
+                totalHa:           Math.round(stats.totalHa * 100) / 100,
+                forestHa:          Math.round(stats.forestHa * 100) / 100,
+                forestPct:         Math.round(stats.forestPct * 100) / 100,
+                dominantClassId:   stats.dominantClassId,
+                dominantClassName: stats.dominantClassName,
+                byClass:           stats.byClass,
+            },
+        });
+    }
+
+    dbgTime('GET_MAP',
+        `snapshot=${snapshot.id} y/m=${snapshot.year}/${snapshot.month} ` +
+        `districts=${features.length} withStats=${Array.from(groups.keys()).length}`, t0);
+
+    return {
+        type:           'FeatureCollection',
+        features,
+        snapshotPeriod: `${snapshot.year}-${String(snapshot.month).padStart(2,'0')}`,
+        geoserverLayer: snapshot.geoserver_layer || null,
+        geeTileUrl:     snapshot.gee_tile_url   || null,
+        geeMapId:       snapshot.gee_map_id     || null,
+        classifiedViz:  CLASSIFIED_VIZ,
+    };
+};
+
 const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) => {
     const t0 = Date.now();
     const result = await repo.listCompleted({ page, limit, hasGeoserverLayer });
@@ -605,6 +733,7 @@ const getSnapshotById = async (id) => {
 module.exports = {
     runAnalysis,
     getLatest,
+    getMap,
     getHistory,
     refresh,
     queryForPeriod,
