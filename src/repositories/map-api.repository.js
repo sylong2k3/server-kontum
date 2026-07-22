@@ -31,7 +31,7 @@ const findById = async (id) => {
         `SELECT ${PUBLIC_COLUMNS}
          FROM gis.map_apis a
          JOIN gis.layer_registry l ON l.id = a.layer_id
-         WHERE a.id = $1`,
+         WHERE a.id = $1 AND a.deleted_at IS NULL`,
         [id],
     );
     return rows[0] || null;
@@ -45,7 +45,7 @@ const findByPrefixWithSecret = async (keyPrefix) => {
                 l.name_vi AS layer_name_vi, l.is_active AS layer_is_active
          FROM gis.map_apis a
          JOIN gis.layer_registry l ON l.id = a.layer_id
-         WHERE a.key_prefix = $1
+         WHERE a.key_prefix = $1 AND a.deleted_at IS NULL AND l.deleted_at IS NULL
          LIMIT 1`,
         [keyPrefix],
     );
@@ -56,7 +56,7 @@ const _escapeLike = (value) => String(value).replace(/[\\%_]/g, '\\$&');
 
 const list = async ({ limit = 50, offset = 0, q = null, layer_id = null, is_active = null } = {}) => {
     const params = [];
-    const where = [];
+    const where = ['a.deleted_at IS NULL'];
     if (q) {
         params.push(`%${_escapeLike(q)}%`);
         const qi = params.length;
@@ -136,7 +136,10 @@ const rotateKey = async (id, { key_prefix, key_hash, key_last4 }) => {
 };
 
 const remove = async (id) => {
-    const { rows } = await db.query(`DELETE FROM gis.map_apis WHERE id = $1 RETURNING id`, [id]);
+    const { rows } = await db.query(
+        `UPDATE gis.map_apis SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
+        [id]
+    );
     return rows[0] || null;
 };
 

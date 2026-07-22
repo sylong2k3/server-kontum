@@ -32,7 +32,7 @@ const LAYER_COLUMNS = `
 `;
 
 const buildLayerWhere = ({ isAdmin = false, filter = {} }, params) => {
-    const where = ['($1::boolean = true OR (is_active = true AND is_public = true))'];
+    const where = ['($1::boolean = true OR (is_active = true AND is_public = true))', 'deleted_at IS NULL'];
     if (filter.q) {
         params.push(`%${filter.q}%`);
         where.push(`(name_vi ILIKE $${params.length} OR code ILIKE $${params.length})`);
@@ -99,19 +99,19 @@ const countAll = async ({ isAdmin = false, filter = {} } = {}) => {
 };
 
 const findById = async (id) => {
-    const { rows } = await db.query(`SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE id = $1`, [id]);
+    const { rows } = await db.query(`SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE id = $1 AND deleted_at IS NULL`, [id]);
     return rows[0] || null;
 };
 
 const findByCode = async (code, client = null) => {
-    const { rows } = await exec(client)(`SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE code = $1`, [code]);
+    const { rows } = await exec(client)(`SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE code = $1 AND deleted_at IS NULL`, [code]);
     return rows[0] || null;
 };
 
 const findByTableName = async (tableName) => {
     const normalized = tableName.includes(':') ? tableName.split(':').pop() : tableName;
     const { rows } = await db.query(
-        `SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE table_name = $1 OR geoserver_layer = $2`,
+        `SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE (table_name = $1 OR geoserver_layer = $2) AND deleted_at IS NULL`,
         [normalized, tableName]
     );
     return rows[0] || null;
@@ -184,7 +184,10 @@ const updateLayer = async (client, code, payload) => {
 };
 
 const deleteLayer = async (client, code) => {
-    const { rows } = await exec(client)(`DELETE FROM gis.layer_registry WHERE code = $1 RETURNING ${LAYER_COLUMNS}`, [code]);
+    const { rows } = await exec(client)(
+        `UPDATE gis.layer_registry SET deleted_at = NOW() WHERE code = $1 AND deleted_at IS NULL RETURNING ${LAYER_COLUMNS}`,
+        [code]
+    );
     return rows[0] || null;
 };
 
@@ -315,6 +318,7 @@ const upsertLayerByCode = async (client, payload) => {
             $21,$22,$23,$24,$25,$26,$27,$28,$28
         )
         ON CONFLICT (code) DO UPDATE SET
+            deleted_at        = NULL,
             name_vi           = COALESCE(EXCLUDED.name_vi, gis.layer_registry.name_vi),
             name_en           = COALESCE(EXCLUDED.name_en, gis.layer_registry.name_en),
             schema_name       = EXCLUDED.schema_name,

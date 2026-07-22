@@ -144,12 +144,12 @@ const assignCode = async (client, id) => {
 };
 
 const findById = async (id) => {
-    const { rows } = await db.query(`SELECT ${MEASUREMENT_COLUMNS} FROM gis.field_measurements WHERE id = $1`, [id]);
+    const { rows } = await db.query(`SELECT ${MEASUREMENT_COLUMNS} FROM gis.field_measurements WHERE id = $1 AND deleted_at IS NULL`, [id]);
     return rows[0] || null;
 };
 
 const findAll = async ({ status, communeCode, areaId, measuredBy, from, to, limit = 20, offset = 0 } = {}) => {
-    const where = [];
+    const where = ['deleted_at IS NULL'];
     const params = [];
     if (status) { params.push(status); where.push(`status = $${params.length}`); }
     if (communeCode) { params.push(communeCode); where.push(`commune_code = $${params.length}`); }
@@ -195,7 +195,7 @@ const updateEditable = async (id, payload) => {
 
 const remove = async (id) => {
     const { rows } = await db.query(
-        `DELETE FROM gis.field_measurements WHERE id = $1 AND status = 'draft' RETURNING id`,
+        `UPDATE gis.field_measurements SET deleted_at = NOW() WHERE id = $1 AND status = 'draft' AND deleted_at IS NULL RETURNING id`,
         [id]
     );
     return rows[0] || null;

@@ -46,6 +46,7 @@ const _escapeLike = (value) => value.replace(/[\\%_]/g, '\\$&');
 
 const _buildVisibleNotificationFilter = ({ userId, roleCode, filter = {} }) => {
     const conditions = [
+        'n.deleted_at IS NULL',
         '(n.expires_at IS NULL OR n.expires_at > NOW())',
         'r.dismissed_at IS NULL',
         `(
@@ -162,8 +163,9 @@ const isVisibleToUser = async ({ notificationId, userId, roleCode }) => {
          LEFT JOIN core.notification_reads r
                 ON r.notification_id = n.id AND r.user_id = $2
          WHERE n.id = $1
+           AND n.deleted_at IS NULL
            AND (n.expires_at IS NULL OR n.expires_at > NOW())
-           AND r.dismissed_at IS NULL
+           AND COALESCE(r.dismissed_at, '1970-01-01') < NOW()
            AND (
                 n.user_id = $2
                 OR (n.user_id IS NULL AND n.audience = 'all')
@@ -190,7 +192,8 @@ const markAllRead = async ({ userId, roleCode }) => {
         `INSERT INTO core.notification_reads (notification_id, user_id)
          SELECT n.id, $1
          FROM core.notifications n
-         WHERE (n.expires_at IS NULL OR n.expires_at > NOW())
+         WHERE n.deleted_at IS NULL
+           AND (n.expires_at IS NULL OR n.expires_at > NOW())
            AND (
                 n.user_id = $1
                 OR (n.user_id IS NULL AND n.audience = 'all')
@@ -210,7 +213,7 @@ const markAllRead = async ({ userId, roleCode }) => {
  */
 const deleteForUser = async ({ notificationId, userId, roleCode }) => {
     const { rowCount: personalCount } = await db.query(
-        `DELETE FROM core.notifications WHERE id = $1 AND user_id = $2`,
+        `UPDATE core.notifications SET deleted_at = NOW() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
         [notificationId, userId]
     );
     if (personalCount > 0) {
