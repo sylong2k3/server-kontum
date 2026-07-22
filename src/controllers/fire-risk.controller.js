@@ -108,11 +108,26 @@ const getMap = async (req, res) => {
 };
 
 // ── GET /fire-risk/history ────────────────────────────────────────────────────
+// Filter options:
+//   ?hasGeoserverLayer=true  → chỉ snapshot đã publish GeoServer (client browse
+//                              để add overlay so sánh; GEE-only URL expire 24h
+//                              nên không muốn add).
+//   ?hasGeoserverLayer=false → chỉ snapshot chưa publish (admin xem để chọn
+//                              trigger publish thủ công).
+//   không truyền           → trả tất cả (backward-compat).
 const getHistory = async (req, res) => {
     const page  = parseInt(req.query.page,  10) || 1;
     const limit = parseInt(req.query.limit, 10) || 30;
-    const { items, total } = await svc.getHistory({ page, limit });
-    OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
+    // Chuẩn hoá `hasGeoserverLayer` — chỉ nhận literal string 'true'/'false',
+    // các giá trị khác treat as undefined (không filter).
+    let hasGeoserverLayer;
+    if (req.query.hasGeoserverLayer === 'true')  hasGeoserverLayer = true;
+    if (req.query.hasGeoserverLayer === 'false') hasGeoserverLayer = false;
+    const { items, total } = await svc.getHistory({ page, limit, hasGeoserverLayer });
+    OK_LIST(res, t('get_list_success', req.lang), items, {
+        page, limit, total,
+        ...(hasGeoserverLayer !== undefined ? { hasGeoserverLayer } : {}),
+    });
 };
 
 // ── POST /fire-risk/refresh ───────────────────────────────────────────────────

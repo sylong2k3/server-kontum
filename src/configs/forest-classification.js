@@ -67,8 +67,18 @@ const CLASS_PALETTE = [
 const FOREST_CLASS_IDS = [1, 3, 4, 5, 6, 7, 8];
 
 // ── Cron schedule ─────────────────────────────────────────────────────────────
-// Default: ngày 1 hàng tháng lúc 00:00 UTC (07:00 VN +7).
-const CRON = process.env.FC_CRON || '0 0 1 * *';
+// Default: daily 06:00 (theo TZ FC_CRON_TZ) — handler tự guard bằng
+// MIN_INTERVAL_DAYS để chạy đúng ~45 ngày/lần (cron không hỗ trợ trực tiếp
+// "every N days"). Lý do dùng daily thay vì fixed dates: nếu server down vào
+// đúng ngày cron, khi restart handler vẫn phát hiện quá hạn và chạy lại.
+const CRON = process.env.FC_CRON || '0 6 * * *';
+
+// Khoảng cách tối thiểu (ngày) giữa 2 lần chạy analysis tự động — cron tick
+// hàng ngày, nhưng handler skip nếu snapshot completed gần nhất còn trong
+// khoảng < MIN_INTERVAL_DAYS. Default 45 ngày phù hợp với chu kỳ cập nhật ảnh
+// Sentinel-2 mùa khô/mùa mưa (không có ý nghĩa chạy quá thường xuyên vì dữ
+// liệu tham chiếu MODIS/JRC/pseudo-label không đổi hàng ngày).
+const MIN_INTERVAL_DAYS = parseInt(process.env.FC_MIN_INTERVAL_DAYS, 10) || 45;
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
 // Alert when total forest area change exceeds this % relative to previous month.
@@ -120,6 +130,7 @@ module.exports = {
     CLASS_PALETTE,
     FOREST_CLASS_IDS,
     CRON,
+    MIN_INTERVAL_DAYS,
     ALERT_FOREST_CHANGE_PCT,
     GCS_BUCKET,
     GCS_KEY_FILE,

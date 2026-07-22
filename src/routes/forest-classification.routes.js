@@ -34,6 +34,13 @@ router.get('/logs', verifyToken, requirePermission('forest_classification', 'man
 router.post('/refresh', verifyToken, requirePermission('forest_classification', 'manage'),
     asyncHandler(ctrl.refresh));
 
+// Publish snapshot GeoTIFF → MinIO → GeoServer, back-link `geoserver_layer` vào
+// snapshot khi job xong. Cùng permission `map_layers.ingest_raster` với
+// fire-risk (đã có ở system_admin + so_nnmt từ migration 031).
+router.post('/snapshots/:id/publish-raster',
+    verifyToken, requirePermission('map_layers', 'ingest_raster'),
+    asyncHandler(ctrl.publishRaster));
+
 // ── Ground truth ─────────────────────────────────────────────────────────────
 // Quyền `forest_classification.ground_truth` (migration 033).
 const gt = (h) => [verifyToken, requirePermission('forest_classification', 'ground_truth'), asyncHandler(h)];

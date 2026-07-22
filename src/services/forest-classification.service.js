@@ -47,6 +47,17 @@ const { StatusCodes } = require('../core/http-status-code');
 // stratified sampling, Random Forest training, JRC water correction) lives in
 // forest-classification.pipeline.js and is shared with satellite.service.
 
+// ── Debug helper ────────────────────────────────────────────────────────────
+// FC_DEBUG=true (hoặc NODE_ENV=development) → in `[FOREST-CLS:DBG] ...` cho
+// các checkpoint không critical (entry/exit public API, kết quả URL,
+// auto-ingest decision). Info/warn/error luôn ghi bất kể flag.
+const DEBUG = process.env.FC_DEBUG === 'true'
+    || process.env.NODE_ENV === 'development';
+const dbg = (tag, msg) => { if (DEBUG) console.debug(`[FOREST-CLS:DBG:${tag}] ${msg}`); };
+const dbgTime = (tag, msg, t0) => {
+    if (DEBUG) console.debug(`[FOREST-CLS:DBG:${tag}] ${msg} (${Date.now() - t0}ms)`);
+};
+
 // ── Area stats ────────────────────────────────────────────────────────────────
 
 async function computeProvinceAreaStats(classified, region) {
@@ -152,6 +163,14 @@ async function runAnalysis(year, month, {
         correlationId: `${year}-${String(month).padStart(2, '0')}`,
     });
     const startMs = Date.now();
+
+    // Entry log — luôn ghi (không cần DEBUG) để trace tất cả run.
+    console.log(
+        `[FOREST-CLS] runAnalysis START period=${year}/${month} trigger=${trigger} ` +
+        `submitExport=${submitExport} hasGtAsset=${Boolean(groundTruthAssetId)} ` +
+        `gtWindow=${gtWindowDays}d gtBuffer=${gtBufferM}m minFieldTest=${minFieldTest} ` +
+        `requestedBy=${requestedBy || 'system'} debug=${DEBUG}`,
+    );
 
     // NOTE (033): GT query moved INTO try/catch below (line ~200) — nếu
     // migration 033 chưa chạy, `getGtForAnalysis` throw ở tầng ngoài sẽ khiến
@@ -278,6 +297,49 @@ async function runAnalysis(year, month, {
             console.warn(`[FOREST-CLS] getEeMapId failed (non-fatal): ${err.message}`);
         }
 
+        // GEE download URL clip theo ranh giới tỉnh — GeoTIFF trần (image/tiff)
+        // valid ~24h. Server auto-ingest sẽ pull về MinIO trước khi hết hạn.
+        // Non-fatal: nếu getDownloadURL lỗi, snapshot vẫn completed, chỉ thiếu
+        // link download + không auto-publish GeoServer (admin có thể refresh sau).
+        // .visualize() → RGB 3-band để mở ra là ảnh MÀU (không cần palette metadata).
+        let geeDownloadUrl = null;
+        try {
+            const tag = `${year}${String(month).padStart(2, '0')}`;
+            const fileBase = `forest_class_kontum_${tag}`;
+            const dlStart = Date.now();
+            geeDownloadUrl = await log.run(
+                'Generate GEE download URL (classified visualize → GeoTIFF RGB)',
+                () => new Promise((resolve) => {
+                    const timer = setTimeout(() => resolve(null), 30_000);
+                    classified
+                        // Mask class=0 ("Đất khác") để pixel không thuộc rừng
+                        // render trong suốt trên WMS overlay — cùng cơ chế
+                        // đã fix fire-risk.
+                        .updateMask(classified.gt(0))
+                        .visualize(CLASSIFIED_VIZ)
+                        .clip(region.geometry())
+                        .getDownloadURL(
+                            {
+                                name:        fileBase,
+                                scale:       cfg.EXPORT_SCALE_M || 60,
+                                region:      region.geometry(),
+                                crs:         'EPSG:4326',
+                                format:      'GEO_TIFF',
+                                filePerBand: false,
+                            },
+                            (url) => { clearTimeout(timer); resolve(url || null); },
+                        );
+                }),
+            );
+            if (geeDownloadUrl) {
+                dbgTime('DOWNLOAD_URL', `ok fileBase=${fileBase} len=${geeDownloadUrl.length}`, dlStart);
+            } else {
+                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT/NULL (30s) — snapshot ${year}/${month} sẽ không auto-ingest`);
+            }
+        } catch (err) {
+            console.warn(`[FOREST-CLS] getDownloadURL failed (non-fatal): ${err.message}`);
+        }
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary: provinceSummary,
@@ -290,6 +352,7 @@ async function runAnalysis(year, month, {
                 gee_map_id:       geeMapId,
                 gee_tile_url:     geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
+                gee_download_url: geeDownloadUrl,
                 gt_zone_count:    gtData.counts.zones,
                 gt_point_count:   gtData.counts.points,
                 gt_window_days:   gtWindowDays,
@@ -314,6 +377,14 @@ async function runAnalysis(year, month, {
         }
 
         log.summary();
+
+        // ── Auto ingest → MinIO → GeoServer (persistent COG) ──────────────
+        // Cùng cơ chế fire-risk: cron chạy xong tự enqueue raster-ingest job.
+        // Job worker (poll 15s) tự pick up. Snapshot được back-link
+        // `geoserver_layer` khi ingest complete (queue service).
+        // KHÔNG throw nếu enqueue fail — không được chặn pipeline chính.
+        _safe(() => _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month));
+
         return snapshot;
     } catch (err) {
         log.summary();
@@ -321,6 +392,52 @@ async function runAnalysis(year, month, {
         await repo.updateStatus(snapshot.id, 'failed', { error_message: err.message });
         throw err;
     }
+}
+
+// ── Notification / auto-ingest helpers ──────────────────────────────────────
+const _safe = (fn) => {
+    try {
+        const r = fn();
+        if (r?.catch) r.catch((e) => console.warn('[FOREST-CLS] async helper err:', e.message));
+    } catch (e) {
+        console.warn('[FOREST-CLS] sync helper err:', e.message);
+    }
+};
+
+async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
+    if (!geeDownloadUrl) {
+        console.log('[FOREST-CLS] auto-ingest SKIP — no gee_download_url');
+        return;
+    }
+    if (snapshot.geoserver_layer) {
+        console.log(`[FOREST-CLS] auto-ingest SKIP — snapshot=${snapshot.id} already has geoserver_layer=${snapshot.geoserver_layer}`);
+        return;
+    }
+    // Lazy require để tránh circular dependency với raster-ingest.service.
+    const ingestSvc = require('./raster-ingest.service');
+    const tag = `${year}${String(month).padStart(2, '0')}`;
+    const layerCode = `forest_class_${tag}`;
+    const t0 = Date.now();
+    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.EXPORT_SCALE_M || 60}m urlLen=${geeDownloadUrl.length}`);
+    console.log(`[FOREST-CLS] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
+    const { job, deduplicated } = await ingestSvc.enqueue({
+        sourceUrl:  geeDownloadUrl,
+        layerCode,
+        nameVi:     `Phân loại rừng ${year}-${String(month).padStart(2, '0')}`,
+        isPublic:   true,
+        category:   'forest',
+        requestParams: {
+            linkedResource: { type: 'forest', id: snapshot.id },
+            year,
+            month,
+            scale_m:        cfg.EXPORT_SCALE_M || 60,
+            autoIngested:   true,   // trace: enqueue tự động vs admin bấm
+        },
+        user: null,  // system-triggered
+        lang: 'vi',
+    });
+    console.log(`[FOREST-CLS] auto-ingest ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
+    dbgTime('AUTO_INGEST', `done job=${job.id} deduplicated=${Boolean(deduplicated)}`, t0);
 }
 
 // ── Raster export ─────────────────────────────────────────────────────────────
@@ -382,13 +499,18 @@ async function pollExports() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 const getLatest = async () => {
+    const t0 = Date.now();
     const snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
         const pending = await repo.getLatest();
-        if (pending) return {
-            snapshot: pending, districtAreas: [], stale: true, computing: true,
-            geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
-        };
+        if (pending) {
+            dbgTime('GET_LATEST', `pending id=${pending.id} status=${pending.status} y/m=${pending.year}/${pending.month}`, t0);
+            return {
+                snapshot: pending, districtAreas: [], stale: true, computing: true,
+                geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
+            };
+        }
+        dbgTime('GET_LATEST', 'no snapshot in DB → throw FC_NO_DATA', t0);
         throw new BusinessLogicError(
             'Chưa có dữ liệu phân loại rừng. Vui lòng thử lại sau.',
             ['FC_NO_DATA'],
@@ -396,6 +518,10 @@ const getLatest = async () => {
         );
     }
     const districtAreas = await repo.getDistrictAreas(snapshot.id);
+    dbgTime('GET_LATEST',
+        `snapshot=${snapshot.id} y/m=${snapshot.year}/${snapshot.month} status=${snapshot.status} ` +
+        `districts=${districtAreas.length} hasLayer=${Boolean(snapshot.geoserver_layer)} ` +
+        `hasDlUrl=${Boolean(snapshot.gee_download_url)}`, t0);
     return {
         snapshot, districtAreas, stale: false, computing: false,
         geeTileUrl:    snapshot.gee_tile_url || null,
@@ -404,13 +530,20 @@ const getLatest = async () => {
     };
 };
 
-const getHistory = async ({ page = 1, limit = 24 } = {}) =>
-    repo.listCompleted({ page, limit });
+const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) => {
+    const t0 = Date.now();
+    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer });
+    dbgTime('GET_HISTORY',
+        `page=${page} limit=${limit} hasGeoserverLayer=${hasGeoserverLayer ?? 'all'} ` +
+        `→ items=${result.items.length} total=${result.total}`, t0);
+    return result;
+};
 
 const refresh = async ({ year, month, groundTruthAssetId, gtBufferM, minFieldTest } = {}) => {
     const now = new Date();
     const y   = year  || now.getUTCFullYear();
     const m   = month || (now.getUTCMonth() + 1);
+    console.log(`[FOREST-CLS] refresh (manual) triggered for period=${y}/${m}`);
     return runAnalysis(y, m, {
         trigger: 'manual',
         ...(groundTruthAssetId ? { groundTruthAssetId } : {}),
