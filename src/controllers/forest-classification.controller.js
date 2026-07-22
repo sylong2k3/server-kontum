@@ -80,6 +80,32 @@ const getHistory = async (req, res) => {
     });
 };
 
+// ── GET /forest-classification/published-history ─────────────────────────────
+// Public sub-endpoint (optionalAuth) — mirror pattern fire-risk. Force filter
+// hasGeoserverLayer=true, trả subset field an toàn. Dùng cho client browse để
+// add WMS overlay các tháng cũ vào bản đồ. Khác `/history`: `/history` admin-
+// only, trả full field + tất cả trạng thái.
+const getPublishedHistory = async (req, res) => {
+    const page  = parseInt(req.query.page,  10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 24;
+    dbg('PUBLISHED_HISTORY', `page=${page} limit=${limit} user=${req.user?.id || 'anon'}`);
+    const { items, total } = await svc.getHistory({
+        page, limit, hasGeoserverLayer: true,
+    });
+    const safeItems = items.map((it) => ({
+        id:                    it.id,
+        year:                  it.year,
+        month:                 it.month,
+        status:                it.status,
+        geoserver_layer:       it.geoserver_layer,
+        gee_tile_url:          it.gee_tile_url,
+        gee_tile_generated_at: it.gee_tile_generated_at,
+        computed_at:           it.computed_at,
+        published_at:          it.published_at,
+    }));
+    OK_LIST(res, t('get_list_success', req.lang), safeItems, { page, limit, total });
+};
+
 // ── POST /forest-classification/refresh ──────────────────────────────────────
 const refresh = async (req, res) => {
     const year  = req.body?.year  ? parseInt(req.body.year,  10) : null;
@@ -257,4 +283,4 @@ function formatLogRow(s) {
     };
 }
 
-module.exports = { getLatest, getHistory, refresh, queryPeriod, getLogs, getSnapshot, publishRaster };
+module.exports = { getLatest, getHistory, getPublishedHistory, refresh, queryPeriod, getLogs, getSnapshot, publishRaster };

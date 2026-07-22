@@ -14,6 +14,13 @@ const router = Router();
 router.get('/latest',  optionalAuth, asyncHandler(ctrl.getLatest));
 router.get('/map',     optionalAuth, asyncHandler(ctrl.getMap));
 
+// Public browse các snapshot ĐÃ publish GeoServer — client sidebar dùng để
+// hiển thị list history + add WMS overlay. Force hasGeoserverLayer=true trong
+// controller. Trả subset field (bỏ error_message, minio_key, download URL...)
+// để không leak thông tin admin. Khác với /history: /history admin-only, trả
+// full field + tất cả trạng thái (completed/published/failed).
+router.get('/published-history', optionalAuth, asyncHandler(ctrl.getPublishedHistory));
+
 // ── Admin: cần đăng nhập + quyền fire_risk.manage ────────────────────────────
 router.get('/history', verifyToken, requirePermission('fire_risk', 'manage'), asyncHandler(ctrl.getHistory));
 router.post('/refresh', verifyToken, requirePermission('fire_risk', 'manage'), asyncHandler(ctrl.refresh));

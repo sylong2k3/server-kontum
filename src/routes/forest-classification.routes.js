@@ -20,6 +20,11 @@ router.post('/query',  optionalAuth, asyncHandler(ctrl.queryPeriod));
 // Poll a specific snapshot (for clients waiting on computing=true results).
 router.get('/snapshot/:id', optionalAuth, asyncHandler(ctrl.getSnapshot));
 
+// Public browse các snapshot ĐÃ publish GeoServer — client sidebar dùng để
+// hiển thị list history + add WMS overlay các tháng cũ. Trả subset field an
+// toàn (không leak error_message, minio_key, download URL...).
+router.get('/published-history', optionalAuth, asyncHandler(ctrl.getPublishedHistory));
+
 // ── Admin only ────────────────────────────────────────────────────────────────
 
 // Completed runs (existing public-facing history).

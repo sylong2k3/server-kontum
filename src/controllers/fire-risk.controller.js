@@ -130,6 +130,33 @@ const getHistory = async (req, res) => {
     });
 };
 
+// ── GET /fire-risk/published-history ─────────────────────────────────────────
+// Public sub-endpoint (optionalAuth) — chỉ trả snapshot ĐÃ publish GeoServer,
+// dùng cho client browse để add WMS overlay lên bản đồ. Force filter
+// hasGeoserverLayer=true bất kể query param. Trả subset field an toàn cho
+// public (bỏ error_message, minio_key, gee_download_url, model_params,
+// gee_task_id...) — layer name đã public qua WMS URL nên OK.
+const getPublishedHistory = async (req, res) => {
+    const page  = parseInt(req.query.page,  10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 30;
+    const { items, total } = await svc.getHistory({
+        page, limit, hasGeoserverLayer: true,
+    });
+    // Whitelist field an toàn cho public — chỉ đủ để client render WMS + hiển
+    // thị metadata cơ bản trong list.
+    const safeItems = items.map((it) => ({
+        id:                     it.id,
+        analysis_date:          it.analysis_date,
+        status:                 it.status,
+        geoserver_layer:        it.geoserver_layer,
+        gee_tile_url:           it.gee_tile_url,
+        gee_tile_generated_at:  it.gee_tile_generated_at,
+        computed_at:            it.computed_at,
+        published_at:           it.published_at,
+    }));
+    OK_LIST(res, t('get_list_success', req.lang), safeItems, { page, limit, total });
+};
+
 // ── POST /fire-risk/refresh ───────────────────────────────────────────────────
 const refresh = async (req, res) => {
     const analysisDate = req.body?.analysisDate || null;
@@ -202,4 +229,4 @@ const publishRaster = async (req, res) => {
     });
 };
 
-module.exports = { getLatest, getMap, getHistory, refresh, publishRaster };
+module.exports = { getLatest, getMap, getHistory, getPublishedHistory, refresh, publishRaster };
