@@ -443,12 +443,14 @@ async function executeAnalysis(year, month, {
         // `geoserver_layer` khi ingest complete (queue service).
         // KHÔNG throw nếu enqueue fail — không được chặn pipeline chính.
         _safe(() => _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month));
+        _safe(() => _notifyForestClassificationCompleted(snapshot, provinceSummary));
 
         return snapshot;
     } catch (err) {
         log.summary();
         console.error(`[FOREST-CLS] runAnalysis ${year}-${month} failed:`, err.message);
         await repo.updateStatus(snapshot.id, 'failed', { error_message: err.message });
+        _safe(() => _notifyForestClassificationFailed(year, month, err.message));
         throw err;
     }
 }
@@ -479,6 +481,53 @@ const _safe = (fn) => {
         console.warn('[FOREST-CLS] sync helper err:', e.message);
     }
 };
+
+async function _notifyForestClassificationCompleted(snapshot, provinceSummary) {
+    const notifSvc = require('./notification.service');
+    const period = `${snapshot.year}-${String(snapshot.month).padStart(2, '0')}`;
+    const byClass = provinceSummary?.byClass || {};
+    const totalHa = Number(provinceSummary?.totalHa) || 0;
+    const forestHa = cfg.FOREST_CLASS_IDS.reduce(
+        (sum, classId) => sum + (Number(byClass[classId]) || 0),
+        0,
+    );
+    const body = `Đã hoàn thành phân loại 11 lớp cho kỳ ${period}. `
+        + `Tổng diện tích ${Math.round(totalHa).toLocaleString('vi')} ha; `
+        + `diện tích rừng ${Math.round(forestHa).toLocaleString('vi')} ha. `
+        + 'Raster GeoServer đang được xử lý tự động.';
+    const data = {
+        snapshotId: snapshot.id,
+        year: snapshot.year,
+        month: snapshot.month,
+        period,
+        totalHa,
+        forestHa,
+    };
+
+    for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
+        await notifSvc.broadcastToRole(role, {
+            type: 'forest_classification_completed',
+            title: `Phân loại lớp phủ rừng ${period} hoàn thành`,
+            body,
+            data,
+            channel: 'system',
+        }).catch((err) => {
+            console.warn(`[FOREST-CLS] notify role=${role} failed:`, err.message);
+        });
+    }
+}
+
+async function _notifyForestClassificationFailed(year, month, errorMessage) {
+    const notifSvc = require('./notification.service');
+    const period = `${year}-${String(month).padStart(2, '0')}`;
+    await notifSvc.broadcastToRole('system_admin', {
+        type: 'forest_classification_failed',
+        title: `Phân loại lớp phủ rừng ${period} thất bại`,
+        body: errorMessage?.slice(0, 200) || 'Không rõ lỗi',
+        data: { year, month, period, error: errorMessage },
+        channel: 'system',
+    }).catch(() => {});
+}
 
 async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
     if (!geeDownloadUrl) {
@@ -522,6 +571,108 @@ async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+const roundComparisonValue = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const buildAreaMetric = (currentHa, previousHa) => {
+    const current = roundComparisonValue(currentHa);
+    const previous = roundComparisonValue(previousHa);
+    const deltaHa = roundComparisonValue(current - previous);
+    const changePct = previous > 0
+        ? roundComparisonValue((deltaHa / previous) * 100)
+        : (current === 0 ? 0 : null);
+    return { currentHa: current, previousHa: previous, deltaHa, changePct };
+};
+
+const sumForestByClass = (byClass = {}) => cfg.FOREST_CLASS_IDS.reduce(
+    (sum, classId) => sum + (Number(byClass[classId]) || 0),
+    0,
+);
+
+const sumAllByClass = (byClass = {}) => Object.values(byClass).reduce(
+    (sum, areaHa) => sum + (Number(areaHa) || 0),
+    0,
+);
+
+const summarizeDistrict = (district) => {
+    const byClass = {};
+    let totalHa = 0;
+    for (const item of (district?.classes || [])) {
+        const classId = Number(item.classId);
+        const areaHa = Number(item.areaHa) || 0;
+        byClass[classId] = areaHa;
+        totalHa += areaHa;
+    }
+    return { byClass, totalHa, forestHa: sumForestByClass(byClass) };
+};
+
+const buildSnapshotComparison = async (snapshot, districtAreas) => {
+    if (!snapshot || !['completed', 'published'].includes(snapshot.status)) return null;
+
+    const previousSnapshot = await repo.getPreviousCompleted(snapshot.year, snapshot.month);
+    if (!previousSnapshot?.province_summary) return null;
+
+    const currentSummary = snapshot.province_summary || {};
+    const previousSummary = previousSnapshot.province_summary || {};
+    const currentByClass = currentSummary.byClass || {};
+    const previousByClass = previousSummary.byClass || {};
+    const previousDistrictAreas = await repo.getDistrictAreas(previousSnapshot.id);
+    const currentDistrictMap = new Map(
+        (districtAreas || []).map((item) => [item.districtCode || item.districtName, item]),
+    );
+    const previousDistrictMap = new Map(
+        previousDistrictAreas.map((item) => [item.districtCode || item.districtName, item]),
+    );
+    const districtKeys = new Set([...currentDistrictMap.keys(), ...previousDistrictMap.keys()]);
+
+    const classes = cfg.CLASS_NAMES.map((className, classId) => ({
+        classId,
+        className,
+        ...buildAreaMetric(currentByClass[classId], previousByClass[classId]),
+    }));
+    const districts = previousDistrictAreas.length > 0 ? [...districtKeys].map((key) => {
+        const current = currentDistrictMap.get(key);
+        const previous = previousDistrictMap.get(key);
+        const currentStats = summarizeDistrict(current);
+        const previousStats = summarizeDistrict(previous);
+        return {
+            districtCode: current?.districtCode || previous?.districtCode || null,
+            districtName: current?.districtName || previous?.districtName || null,
+            total: buildAreaMetric(currentStats.totalHa, previousStats.totalHa),
+            forest: buildAreaMetric(currentStats.forestHa, previousStats.forestHa),
+            classes: cfg.CLASS_NAMES.map((className, classId) => ({
+                classId,
+                className,
+                ...buildAreaMetric(
+                    currentStats.byClass[classId],
+                    previousStats.byClass[classId],
+                ),
+            })),
+        };
+    }) : [];
+
+    return {
+        previousSnapshot: {
+            id: previousSnapshot.id,
+            year: previousSnapshot.year,
+            month: previousSnapshot.month,
+            computedAt: previousSnapshot.computed_at || null,
+            publishedAt: previousSnapshot.published_at || null,
+        },
+        province: {
+            total: buildAreaMetric(
+                currentSummary.totalHa ?? sumAllByClass(currentByClass),
+                previousSummary.totalHa ?? sumAllByClass(previousByClass),
+            ),
+            forest: buildAreaMetric(
+                sumForestByClass(currentByClass),
+                sumForestByClass(previousByClass),
+            ),
+            classes,
+        },
+        districts,
+    };
+};
+
 const getLatest = async () => {
     const t0 = Date.now();
     const snapshot = await repo.getLatestCompleted();
@@ -531,6 +682,7 @@ const getLatest = async () => {
             dbgTime('GET_LATEST', `pending id=${pending.id} status=${pending.status} y/m=${pending.year}/${pending.month}`, t0);
             return {
                 snapshot: pending, districtAreas: [], stale: true, computing: true,
+                comparison: null,
                 geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
             };
         }
@@ -542,12 +694,13 @@ const getLatest = async () => {
         );
     }
     const districtAreas = await repo.getDistrictAreas(snapshot.id);
+    const comparison = await buildSnapshotComparison(snapshot, districtAreas);
     dbgTime('GET_LATEST',
         `snapshot=${snapshot.id} y/m=${snapshot.year}/${snapshot.month} status=${snapshot.status} ` +
         `districts=${districtAreas.length} hasLayer=${Boolean(snapshot.geoserver_layer)} ` +
         `hasDlUrl=${Boolean(snapshot.gee_download_url)}`, t0);
     return {
-        snapshot, districtAreas, stale: false, computing: false,
+        snapshot, districtAreas, comparison, stale: false, computing: false,
         geeTileUrl:    snapshot.gee_tile_url || null,
         geeMapId:      snapshot.gee_map_id   || null,
         classifiedViz: CLASSIFIED_VIZ,
@@ -589,7 +742,7 @@ const refresh = async ({ year, month, groundTruthAssetId, gtBufferM, minFieldTes
  * @param {number} year
  * @param {number} month   1-12
  * @param {number|null} userId  Authenticated user id (for logging)
- * @returns {{ snapshot, districtAreas, cached, computing }}
+ * @returns {{ snapshot, districtAreas, comparison, cached, computing }}
  */
 const queryForPeriod = async (year, month, userId = null) => {
     const existing = await repo.getByYearMonth(year, month);
@@ -597,10 +750,14 @@ const queryForPeriod = async (year, month, userId = null) => {
     if (existing) {
         if (['completed', 'published'].includes(existing.status)) {
             const districtAreas = await repo.getDistrictAreas(existing.id);
-            return { snapshot: existing, districtAreas, cached: true, computing: false };
+            const comparison = await buildSnapshotComparison(existing, districtAreas);
+            return { snapshot: existing, districtAreas, comparison, cached: true, computing: false };
         }
         if (['computing', 'exporting'].includes(existing.status)) {
-            return { snapshot: existing, districtAreas: [], cached: false, computing: true };
+            return {
+                snapshot: existing, districtAreas: [], comparison: null,
+                cached: false, computing: true,
+            };
         }
         // failed / pending → fall through to re-trigger
     }
@@ -614,7 +771,10 @@ const queryForPeriod = async (year, month, userId = null) => {
     const pending = await repo.getByYearMonth(year, month)
         || { id: null, year, month, status: 'computing' };
 
-    return { snapshot: pending, districtAreas: [], cached: false, computing: true };
+    return {
+        snapshot: pending, districtAreas: [], comparison: null,
+        cached: false, computing: true,
+    };
 };
 
 // ── Admin logs ────────────────────────────────────────────────────────────────
@@ -629,7 +789,7 @@ const getLogs = async ({ page = 1, limit = 24, status = null } = {}) =>
 // ── Snapshot by ID ────────────────────────────────────────────────────────────
 
 /**
- * Get a specific snapshot with district areas.
+ * Get a specific snapshot with district areas and nearest prior-period comparison.
  * Used by clients to poll a user-triggered analysis.
  */
 const getSnapshotById = async (id) => {
@@ -638,7 +798,8 @@ const getSnapshotById = async (id) => {
     const districtAreas = ['completed', 'published'].includes(snapshot.status)
         ? await repo.getDistrictAreas(snapshot.id)
         : [];
-    return { snapshot, districtAreas };
+    const comparison = await buildSnapshotComparison(snapshot, districtAreas);
+    return { snapshot, districtAreas, comparison };
 };
 
 module.exports = {

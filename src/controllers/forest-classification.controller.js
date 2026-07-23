@@ -28,12 +28,15 @@ const forestFilename = (year, month) => {
 // không giảm resolution như GEE getDownloadURL).
 const buildGeoserverDownloadUrl = (layerFqn) => {
     if (!layerFqn) return null;
-    const base = (process.env.GEOSERVER_PUBLIC_URL || process.env.GEOSERVER_URL || '')
+    const base = (process.env.GEOSERVER_PUBLIC_URL || '')
         .trim().replace(/\/+$/, '');
     if (!base) return null;
     const [ws, name] = String(layerFqn).includes(':')
         ? String(layerFqn).split(':')
         : [process.env.GEOSERVER_WORKSPACE || 'kontum', String(layerFqn)];
+    const root = base
+        .replace(new RegExp(`/${ws}/(?:wms|wcs)$`, 'i'), '')
+        .replace(/\/(?:wms|wcs)$/i, '');
     const coverageId = `${ws}__${name}`;
     const qs = new URLSearchParams({
         service:    'WCS',
@@ -42,17 +45,18 @@ const buildGeoserverDownloadUrl = (layerFqn) => {
         coverageId,
         format:     'image/tiff',
     });
-    return `${base}/${ws}/wcs?${qs.toString()}`;
+    return `${root}/${ws}/wcs?${qs.toString()}`;
 };
 
 // ── GET /forest-classification/latest ────────────────────────────────────────
 const getLatest = async (req, res) => {
     dbg('LATEST', `caller user=${req.user?.id || 'anon'} lang=${req.lang}`);
-    const { snapshot, districtAreas, stale, computing, geeTileUrl, geeMapId, classifiedViz }
+    const { snapshot, districtAreas, comparison, stale, computing, geeTileUrl, geeMapId, classifiedViz }
         = await svc.getLatest();
     OK(res, t('get_detail_success', req.lang), {
         snapshot: formatSnapshot(snapshot),
         districtAreas,
+        comparison,
         // Tile Earth Engine cho client render trực tiếp raster 11 lớp.
         geeTileUrl,
         geeMapId,
@@ -150,12 +154,18 @@ const queryPeriod = async (req, res) => {
     }
 
     const userId = req.user?.id || null;
-    const { snapshot, districtAreas, cached, computing } =
+    const { snapshot, districtAreas, comparison, cached, computing } =
         await svc.queryForPeriod(year, month, userId);
 
     OK(res,
         cached ? t('get_detail_success', req.lang) : 'Đang xử lý, vui lòng truy vấn lại sau.',
-        { snapshot: snapshot ? formatSnapshot(snapshot) : null, districtAreas, cached, computing },
+        {
+            snapshot: snapshot ? formatSnapshot(snapshot) : null,
+            districtAreas,
+            comparison,
+            cached,
+            computing,
+        },
     );
 };
 
@@ -186,6 +196,7 @@ const getSnapshot = async (req, res) => {
     OK(res, t('get_detail_success', req.lang), {
         snapshot:      formatSnapshot(result.snapshot),
         districtAreas: result.districtAreas,
+        comparison:    result.comparison,
         computing:     activeStates.includes(result.snapshot.status),
     });
 };

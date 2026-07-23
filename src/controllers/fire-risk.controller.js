@@ -24,15 +24,18 @@ const fireRiskFilename = (analysisDate) => {
 //   - Persistent (không expire 24h như GEE URL).
 //   - Full-resolution (COG nguyên gốc trong data_dir, không bị downsample).
 //   - Không phụ thuộc quota GEE khi user tải lại nhiều lần.
-// Trả null khi chưa có layer hoặc GEOSERVER_URL chưa cấu hình.
+// Trả null khi chưa có layer hoặc GEOSERVER_PUBLIC_URL chưa cấu hình.
 const buildGeoserverDownloadUrl = (layerFqn) => {
     if (!layerFqn) return null;
-    const base = (process.env.GEOSERVER_PUBLIC_URL || process.env.GEOSERVER_URL || '')
+    const base = (process.env.GEOSERVER_PUBLIC_URL || '')
         .trim().replace(/\/+$/, '');
     if (!base) return null;
     const [ws, name] = String(layerFqn).includes(':')
         ? String(layerFqn).split(':')
         : [process.env.GEOSERVER_WORKSPACE || 'kontum', String(layerFqn)];
+    const root = base
+        .replace(new RegExp(`/${ws}/(?:wms|wcs)$`, 'i'), '')
+        .replace(/\/(?:wms|wcs)$/i, '');
     // WCS 2.0 coverageId dùng `__` (double underscore) làm workspace separator.
     const coverageId = `${ws}__${name}`;
     const qs = new URLSearchParams({
@@ -42,7 +45,7 @@ const buildGeoserverDownloadUrl = (layerFqn) => {
         coverageId,
         format:     'image/tiff',
     });
-    return `${base}/${ws}/wcs?${qs.toString()}`;
+    return `${root}/${ws}/wcs?${qs.toString()}`;
 };
 
 // ── GET /fire-risk/latest ─────────────────────────────────────────────────────
