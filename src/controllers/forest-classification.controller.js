@@ -91,7 +91,7 @@ const getPublishedHistory = async (req, res) => {
     const limit = parseInt(req.query.limit, 10) || 24;
     dbg('PUBLISHED_HISTORY', `page=${page} limit=${limit} user=${req.user?.id || 'anon'}`);
     const { items, total } = await svc.getHistory({
-        page, limit, hasGeoserverLayer: true,
+        page, limit, hasGeoserverLayer: true, sortByPublishedAt: true,
     });
     const safeItems = items.map((it) => ({
         id:                    it.id,

@@ -633,12 +633,23 @@ async function processRequest(imageType, rawParams) {
 
     // Generate download URL (best-effort; null nếu ảnh quá lớn / GEE reject).
     // Filename format: <type>_<startDate>.zip — dùng cho <a download> ở FE.
+    const classifiedDownloadOpts = normalType === 'classified'
+        ? {
+            scale:     fcCfg.DOWNLOAD_SCALE_M,
+            maxPixels: 1e9,
+            timeoutMs: 60_000,
+        }
+        : {};
     const dl = await getEeDownloadUrl(eeImage, region, vizParams, {
         name: `satellite_${normalType}`,
         date: params.startDate || params.analysisDate,
+        ...classifiedDownloadOpts,
     });
     const downloadUrl      = dl?.url || null;
     const downloadFilename = dl?.filename || null;
+    if (!downloadUrl) {
+        console.warn(`[SATELLITE:${normalType}] GEE download URL is unavailable; tile result will still be saved.`);
+    }
 
     const saved = await repo.upsert({
         request_hash: hash,

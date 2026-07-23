@@ -177,13 +177,16 @@ const getByYearMonth = async (year, month) => {
  *   hasGeoserverLayer=false → chỉ item chưa publish (admin xem để trigger).
  *   undefined → tất cả (backward-compat).
  */
-const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) => {
+const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer, sortByPublishedAt = false } = {}) => {
     const t0 = Date.now();
     const offset = (page - 1) * limit;
     const whereClauses = [`status IN ('completed','published')`];
     if (hasGeoserverLayer === true)  whereClauses.push('geoserver_layer IS NOT NULL');
     if (hasGeoserverLayer === false) whereClauses.push('geoserver_layer IS NULL');
     const whereSql = whereClauses.join(' AND ');
+    const orderSql = sortByPublishedAt
+        ? 'published_at DESC NULLS LAST, year DESC, month DESC, id DESC'
+        : 'year DESC, month DESC, created_at DESC, id DESC';
     dbg('listCompleted', `page=${page} limit=${limit} filter=${hasGeoserverLayer ?? 'all'} WHERE=${whereSql}`);
 
     const { rows } = await db.query(
@@ -194,7 +197,7 @@ const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) =
                 COUNT(*) OVER()::int AS total_count
          FROM forest.forest_snapshots
          WHERE ${whereSql}
-         ORDER BY year DESC, month DESC
+         ORDER BY ${orderSql}
          LIMIT $1 OFFSET $2`,
         [limit, offset],
     );

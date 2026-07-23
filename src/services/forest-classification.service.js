@@ -554,9 +554,9 @@ const getLatest = async () => {
     };
 };
 
-const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) => {
+const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer, sortByPublishedAt = false } = {}) => {
     const t0 = Date.now();
-    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer });
+    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer, sortByPublishedAt });
     dbgTime('GET_HISTORY',
         `page=${page} limit=${limit} hasGeoserverLayer=${hasGeoserverLayer ?? 'all'} ` +
         `→ items=${result.items.length} total=${result.total}`, t0);

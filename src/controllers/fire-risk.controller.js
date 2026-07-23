@@ -140,7 +140,7 @@ const getPublishedHistory = async (req, res) => {
     const page  = parseInt(req.query.page,  10) || 1;
     const limit = parseInt(req.query.limit, 10) || 30;
     const { items, total } = await svc.getHistory({
-        page, limit, hasGeoserverLayer: true,
+        page, limit, hasGeoserverLayer: true, sortByPublishedAt: true,
     });
     // Whitelist field an toàn cho public — chỉ đủ để client render WMS + hiển
     // thị metadata cơ bản trong list.
