@@ -365,6 +365,7 @@ const locales = {
         // ── Đo đạc thực địa / Field Measurements (docs/modules/17) ───────────
         field_measurement_not_found: 'Không tìm thấy phiên đo',
         field_measurement_invalid_points: 'Cần ít nhất 3 điểm GPS để khép vùng',
+        field_measurement_out_of_province: 'Vị trí đo nằm ngoài ranh giới tỉnh Kon Tum',
         field_measurement_invalid_land_use_field: 'Tên cột loại đất (landUseField) không hợp lệ',
         field_measurement_invalid_transition: 'Phiên đo không ở trạng thái cho phép thao tác này',
         field_measurement_review_note_required: 'Cần nhập lý do khi trả lại phiên đo',
@@ -749,6 +750,7 @@ const locales = {
         // ── Field Measurements (docs/modules/17) ─────────────────────────────
         field_measurement_not_found: 'Field measurement not found',
         field_measurement_invalid_points: 'At least 3 GPS points are required to close the area',
+        field_measurement_out_of_province: 'Measured location is outside Kon Tum province boundary',
         field_measurement_invalid_land_use_field: 'Invalid land use column name (landUseField)',
         field_measurement_invalid_transition: 'Measurement is not in a status that allows this action',
         field_measurement_review_note_required: 'A reason is required when returning a measurement',

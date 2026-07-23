@@ -92,6 +92,13 @@ const createMeasurement = async (actor, payload, lang) => {
 
     const { geom, areaM2, avgAccuracyM } = await repo.buildValidPolygon(payload.points);
 
+    // Joi chỉ chặn khung chữ nhật 106-109/13-16.5 (bao trùm cả tỉnh lân cận) —
+    // đây mới là chốt chặn thật so với ranh giới polygon tỉnh Kon Tum.
+    const withinProvince = await repo.isWithinProvince(geom);
+    if (!withinProvince) {
+        throw new Api400Error(t('field_measurement_out_of_province', lang));
+    }
+
     let affectedFeatures = [];
     let oldLandUse = null;
     let layer = null;
