@@ -6695,6 +6695,50 @@
             "description": "Tổng hợp điều hành: che phủ rừng toàn tỉnh, tổng diện tích rừng tự nhiên/trồng, top 5 huyện che phủ cao/thấp, số phản ánh theo trạng thái.\n\nKết quả cache TTL 10 phút (gửi force=true để tính lại).\n\nCảnh báo cháy (fireAlerts) hiện placeholder — chờ EP-06.\n\nQuyền: statistics.dashboard (system_admin, ubnd_tinh).\n\nYêu cầu Bearer token/quyền tương ứng."
           },
           "response": []
+        },
+        {
+          "name": "GET /stats/dashboard?force=true — Làm mới dashboard GIS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]); });",
+                  "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });",
+                  "pm.test(\"Content-Type present\", function () { pm.response.to.have.header(\"Content-Type\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/stats/dashboard?force=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "stats",
+                "dashboard"
+              ],
+              "query": [
+                {
+                  "key": "force",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Buộc tính lại dashboard từ dữ liệu server mới nhất, bỏ qua cache.\n\nResponse gồm forestClassification (snapshot phân loại rừng theo tháng) và fireAlerts (cảnh báo cháy rừng).\n\nYêu cầu Bearer token và quyền statistics.dashboard."
+          },
+          "response": []
         }
       ]
     },
@@ -6914,6 +6958,54 @@
             "auth": {
               "type": "noauth"
             }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /fire-risk/published-history — Lịch sử đã công bố",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]); });",
+                  "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });",
+                  "pm.test(\"Content-Type present\", function () { pm.response.to.have.header(\"Content-Type\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/fire-risk/published-history?page=1&limit=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fire-risk",
+                "published-history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "30"
+                }
+              ]
+            },
+            "description": "Danh sách snapshot cảnh báo cháy đã publish GeoServer, dùng cho bản đồ công khai."
           },
           "response": []
         },
@@ -7959,6 +8051,54 @@
           "response": []
         },
         {
+          "name": "GET /forest-classification/published-history — Lịch sử đã công bố",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]); });",
+                  "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });",
+                  "pm.test(\"Content-Type present\", function () { pm.response.to.have.header(\"Content-Type\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forest-classification/published-history?page=1&limit=24",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forest-classification",
+                "published-history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "24"
+                }
+              ]
+            },
+            "description": "Danh sách snapshot phân loại rừng đã publish GeoServer, dùng cho bản đồ công khai."
+          },
+          "response": []
+        },
+        {
           "name": "GET /forest-classification/history — Lịch sử phân loại",
           "event": [
             {
@@ -8103,6 +8243,60 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"year\": 2024,\n  \"month\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /forest-classification/snapshots/:id/publish-raster",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]); });",
+                  "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });",
+                  "pm.test(\"Content-Type present\", function () { pm.response.to.have.header(\"Content-Type\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forest-classification/snapshots/{{forestSnapshotId}}/publish-raster",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forest-classification",
+                "snapshots",
+                "{{forestSnapshotId}}",
+                "publish-raster"
+              ]
+            },
+            "description": "Publish GeoTIFF phân loại rừng lên GeoServer. Thêm ?force=1 để publish lại. Yêu cầu quyền map_layers.ingest_raster.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"

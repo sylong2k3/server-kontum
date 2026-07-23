@@ -1,8 +1,7 @@
 -- ============================================================================
 -- Migration 023: DỮ LIỆU LỊCH SỬ RỪNG KON TUM (2019–2022) — CẤP TỈNH
 --
--- Mục đích: bổ sung các mốc năm để endpoint forest-change (US-061) có
---   ít nhất 3 cặp so sánh: 2020↔2022, 2022↔2023, 2023↔2024.
+-- Mục đích: bổ sung các mốc năm cho thống kê lịch sử cấp tỉnh.
 --
 -- Nguồn dữ liệu:
 --   2020 — QĐ 1558/QĐ-BNN-TCLN ngày 13/4/2021 (hiện trạng đến 31/12/2020)

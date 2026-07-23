@@ -13,6 +13,8 @@
 
 const repo = require('../repositories/statistics.repository');
 const fireRiskRepo = require('../repositories/fire-risk.repository');
+const forestClassificationRepo = require('../repositories/forest-classification.repository');
+const forestClassificationConfig = require('../configs/forest-classification');
 const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 
@@ -69,6 +71,80 @@ const _buildFireRiskDashboard = async () => {
         };
     } catch (err) {
         console.warn('[STATS] fire-risk dashboard build failed:', err.message);
+        return { available: false, note: err.message };
+    }
+};
+
+// ── Forest-classification dashboard block ────────────────────────────────────
+// Dùng snapshot theo tháng mới nhất thay vì số liệu seed theo năm. Khối này
+// phản ánh đúng pipeline phân loại 11 lớp đang vận hành và trạng thái publish.
+const _buildForestClassificationDashboard = async () => {
+    try {
+        const snap = await forestClassificationRepo.getLatestCompleted();
+        if (!snap) {
+            return { available: false, note: 'Chưa có snapshot phân loại rừng.' };
+        }
+
+        const summary = snap.province_summary || {};
+        const byClass = summary.byClass || {};
+        const totalAreaHa = Number(summary.totalHa)
+            || Object.values(byClass).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        const forestAreaHa = forestClassificationConfig.FOREST_CLASS_IDS.reduce(
+            (sum, classId) => sum + (Number(byClass[classId]) || 0),
+            0,
+        );
+        const dominantEntry = Object.entries(byClass).reduce(
+            (best, entry) => (Number(entry[1]) > Number(best?.[1] || 0) ? entry : best),
+            null,
+        );
+        const dominantClassId = dominantEntry ? Number(dominantEntry[0]) : null;
+
+        const previous = await forestClassificationRepo.getPreviousCompleted(snap.year, snap.month);
+        const previousByClass = previous?.province_summary?.byClass || {};
+        const previousForestHa = previous
+            ? forestClassificationConfig.FOREST_CLASS_IDS.reduce(
+                (sum, classId) => sum + (Number(previousByClass[classId]) || 0),
+                0,
+            )
+            : null;
+        const forestDeltaHa = previousForestHa == null ? null : forestAreaHa - previousForestHa;
+
+        return {
+            available:        true,
+            snapshotId:       snap.id,
+            year:             snap.year,
+            month:            snap.month,
+            status:           snap.status,
+            totalAreaHa:      round(totalAreaHa),
+            forestAreaHa:     round(forestAreaHa),
+            forestCoveragePct: totalAreaHa > 0 ? round((forestAreaHa / totalAreaHa) * 100) : null,
+            byClass,
+            dominantClassId,
+            dominantClassName: dominantClassId == null
+                ? null
+                : forestClassificationConfig.CLASS_NAMES[dominantClassId] || null,
+            dominantClassAreaHa: dominantEntry ? round(Number(dominantEntry[1])) : null,
+            oobAccuracy:       round(snap.oob_accuracy),
+            testAccuracy:      round(snap.test_accuracy),
+            testKappa:         round(snap.test_kappa, 3),
+            s2ImageCount:      snap.s2_image_count ?? null,
+            landsatImageCount: snap.ls_image_count ?? null,
+            geoserverLayer:    snap.geoserver_layer || null,
+            geeDownloadUrl:    snap.gee_download_url || null,
+            computedAt:        snap.computed_at || null,
+            publishedAt:       snap.published_at || null,
+            comparison: previous ? {
+                previousSnapshotId: previous.id,
+                previousYear:       previous.year,
+                previousMonth:      previous.month,
+                forestDeltaHa:      round(forestDeltaHa),
+                forestChangePct:    previousForestHa > 0
+                    ? round((forestDeltaHa / previousForestHa) * 100)
+                    : null,
+            } : null,
+        };
+    } catch (err) {
+        console.warn('[STATS] forest-classification dashboard build failed:', err.message);
         return { available: false, note: err.message };
     }
 };
@@ -155,7 +231,7 @@ const scopeForRole = (role) => (OPERATIONAL_ROLES.includes(role) ? 'operational'
 // ══════════════════════════════════════════════════════════════════════════════
 const getDashboard = async ({ lang, force = false, role } = {}) => {
     const scope = scopeForRole(role);
-    const cacheKey = `dashboard:${scope}`;
+    const cacheKey = `dashboard:v2:${scope}`;
     if (!force) {
         const cached = await repo.getCache(cacheKey);
         if (cached) {
@@ -228,7 +304,10 @@ const getDashboard = async ({ lang, force = false, role } = {}) => {
     //   - riskLevelDist: breakdown ha theo cấp (0-5)
     //   - hotspotDistrictCount: số huyện có maxLevel ≥ 3 (định nghĩa "điểm nóng")
     //   - snapshotId + analysisDate + link để admin bấm publish
-    const fireAlerts = await _buildFireRiskDashboard();
+    const [fireAlerts, forestClassification] = await Promise.all([
+        _buildFireRiskDashboard(),
+        _buildForestClassificationDashboard(),
+    ]);
 
     const payload = {
         scope,
@@ -236,6 +315,7 @@ const getDashboard = async ({ lang, force = false, role } = {}) => {
         forest,
         feedback,
         fireAlerts,
+        forestClassification,
     };
 
     await repo.setCache(cacheKey, payload, DASHBOARD_TTL);

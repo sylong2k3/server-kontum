@@ -67,18 +67,10 @@ const CLASS_PALETTE = [
 const FOREST_CLASS_IDS = [1, 3, 4, 5, 6, 7, 8];
 
 // ── Cron schedule ─────────────────────────────────────────────────────────────
-// Default: daily 06:00 (theo TZ FC_CRON_TZ) — handler tự guard bằng
-// MIN_INTERVAL_DAYS để chạy đúng ~45 ngày/lần (cron không hỗ trợ trực tiếp
-// "every N days"). Lý do dùng daily thay vì fixed dates: nếu server down vào
-// đúng ngày cron, khi restart handler vẫn phát hiện quá hạn và chạy lại.
-const CRON = process.env.FC_CRON || '0 6 * * *';
-
-// Khoảng cách tối thiểu (ngày) giữa 2 lần chạy analysis tự động — cron tick
-// hàng ngày, nhưng handler skip nếu snapshot completed gần nhất còn trong
-// khoảng < MIN_INTERVAL_DAYS. Default 45 ngày phù hợp với chu kỳ cập nhật ảnh
-// Sentinel-2 mùa khô/mùa mưa (không có ý nghĩa chạy quá thường xuyên vì dữ
-// liệu tham chiếu MODIS/JRC/pseudo-label không đổi hàng ngày).
-const MIN_INTERVAL_DAYS = parseInt(process.env.FC_MIN_INTERVAL_DAYS, 10) || 45;
+// Chạy lúc 00:00 ngày 1 hàng tháng theo FC_CRON_TZ. Job luôn phân tích tháng
+// vừa kết thúc, nên tự xử lý đúng tháng 28/29/30/31 ngày. Startup catch-up trong
+// forest-classification.job.js bù kỳ bị lỡ nếu server ngừng đúng ngày 1.
+const CRON = process.env.FC_CRON || '0 0 1 * *';
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
 // Alert when total forest area change exceeds this % relative to previous month.
@@ -101,6 +93,10 @@ const SNAPSHOT_GRACE_MONTHS = parseInt(process.env.FC_SNAPSHOT_GRACE_MONTHS, 10)
 
 // ── GEE timeout ──────────────────────────────────────────────────────────────
 const GEE_TIMEOUT_MS = parseInt(process.env.GEE_TIMEOUT_MS, 10) || 5 * 60 * 1000;
+// OOB materializes the complete sampling + RF training graph. Keep a separate
+// budget so admin snapshots can collect model diagnostics without relaxing
+// every other synchronous GEE operation.
+const OOB_TIMEOUT_MS = parseInt(process.env.FC_OOB_TIMEOUT_MS, 10) || 10 * 60 * 1000;
 
 // ── Lite mode (on-demand /satellite/classified) ──────────────────────────────
 // The full v3 pipeline (dry+wet composites × 8 indices × 4 Landsat + S2 + DW +
@@ -136,7 +132,6 @@ module.exports = {
     CLASS_PALETTE,
     FOREST_CLASS_IDS,
     CRON,
-    MIN_INTERVAL_DAYS,
     ALERT_FOREST_CHANGE_PCT,
     GCS_BUCKET,
     GCS_KEY_FILE,
@@ -145,6 +140,7 @@ module.exports = {
     DOWNLOAD_SCALE_M,
     SNAPSHOT_GRACE_MONTHS,
     GEE_TIMEOUT_MS,
+    OOB_TIMEOUT_MS,
     LITE_SAMPLES_PER_CLASS,
     LITE_SAMPLE_SCALE_M,
     LITE_RF_TREES,

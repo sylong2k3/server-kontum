@@ -9,10 +9,13 @@ const cookieParser = require("cookie-parser");
 require("dotenv").config();
 
 const routes = require("./routes");
-const { errorHandler, notFoundHandler } = require("./middlewares/error-handler");
+const {
+  errorHandler,
+  notFoundHandler,
+} = require("./middlewares/error-handler");
 const { initPassport } = require("./configs/passport");
 const localeMiddleware = require("./middlewares/locale.middleware");
-const { t } = require('./utils/i18n.util');
+const { t } = require("./utils/i18n.util");
 
 initPassport();
 
@@ -35,7 +38,13 @@ if (trustProxy === "true") {
 } else if (/^\d+$/.test(trustProxy || "")) {
   app.set("trust proxy", Number(trustProxy));
 } else if (trustProxy) {
-  app.set("trust proxy", trustProxy.split(",").map((value) => value.trim()).filter(Boolean));
+  app.set(
+    "trust proxy",
+    trustProxy
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
 }
 
 const corsOrigins = process.env.CORS_ORIGINS || "*";
@@ -46,8 +55,11 @@ let allowedOrigins = corsOrigins
 
 const corsAllowCredentials = true;
 if (corsAllowCredentials && allowedOrigins.includes("*")) {
-  allowedOrigins = ["http://localhost:5173", "http://localhost:5174", "http://103.163.119.247:22026",
-    "http://103.163.119.247:12026", "https://dulich.tourismpj.pro.vn", "https://admindulich.tourismpj.pro.vn"
+  allowedOrigins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://103.163.119.247:32026",
+    "http://103.163.119.247:42026",
   ];
 }
 
@@ -65,8 +77,12 @@ app.use(
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin) {return callback(null, true);}
-    if (allowedOrigins.includes("*")) {return callback(null, true);}
+    if (!origin) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.includes("*")) {
+      return callback(null, true);
+    }
     if (allowedOrigins.indexOf(origin) !== -1) {
       return callback(null, true);
     }
@@ -77,8 +93,21 @@ const corsOptions = {
   },
   credentials: corsAllowCredentials,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-anonymous-id", "X-Map-Api-Key"],
-  exposedHeaders: ["Content-Range", "X-Content-Range", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "x-anonymous-id",
+    "X-Map-Api-Key",
+  ],
+  exposedHeaders: [
+    "Content-Range",
+    "X-Content-Range",
+    "X-RateLimit-Limit",
+    "X-RateLimit-Remaining",
+    "X-RateLimit-Reset",
+    "Retry-After",
+  ],
   maxAge: 86400,
 };
 
@@ -89,23 +118,33 @@ app.use(localeMiddleware);
 
 const bodyLimit = process.env.REQUEST_BODY_LIMIT || "2mb";
 app.use(express.json({ limit: bodyLimit }));
-app.use(express.urlencoded({ extended: true, limit: bodyLimit, parameterLimit: 1000 }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: bodyLimit,
+    parameterLimit: 1000,
+  }),
+);
 app.use("/uploads", express.static("public/uploads"));
-app.use(compression({
+app.use(
+  compression({
     filter: (req, res) => {
-        if (req.headers["accept"] === "text/event-stream" || res.getHeader("Content-Type") === "text/event-stream") {
-            return false;
-        }
-        return compression.filter(req, res);
+      if (
+        req.headers["accept"] === "text/event-stream" ||
+        res.getHeader("Content-Type") === "text/event-stream"
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
     },
-}));
+  }),
+);
 
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 } else {
   app.use(morgan("combined"));
 }
-
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -139,32 +178,39 @@ const expensiveLimiter = rateLimit({
   max: parseInt(process.env.EXPENSIVE_RATE_LIMIT_MAX, 10) || 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many expensive requests.", errors: ["TOO_MANY_REQUESTS"] },
+  message: {
+    success: false,
+    message: "Too many expensive requests.",
+    errors: ["TOO_MANY_REQUESTS"],
+  },
 });
 
 app.use("/api/", limiter);
 app.use("/api/v1/auth", authLimiter);
-app.use([
-  "/api/v1/remote-sensing",
-  "/api/v1/satellite",
-  "/api/v1/spatial",
-  "/api/v1/fire-risk",
-  "/api/v1/forest-classification",
-], expensiveLimiter);
+app.use(
+  [
+    "/api/v1/remote-sensing",
+    "/api/v1/satellite",
+    "/api/v1/spatial",
+    "/api/v1/fire-risk",
+    "/api/v1/forest-classification",
+  ],
+  expensiveLimiter,
+);
 
-app.get('/health', (req, res) => {
-    res.json({ status: "OK", timestamp: new Date().toISOString() });
+app.get("/health", (req, res) => {
+  res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
 app.use("/api/v1", routes);
 
 app.get("/", (req, res) => {
-    res.json({
-        status: "success",
-        message: t('root_welcome', req.lang),
-        version: "1.0.0",
-        timestamp: new Date().toISOString(),
-    });
+  res.json({
+    status: "success",
+    message: t("root_welcome", req.lang),
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.use(notFoundHandler);

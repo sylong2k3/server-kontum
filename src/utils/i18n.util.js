@@ -359,10 +359,7 @@ const locales = {
         stats_landcover_success: 'Lấy thống kê lớp phủ thành công',
         stats_dashboard_success: 'Lấy dữ liệu dashboard thành công',
         stats_year_not_available: 'Năm không có dữ liệu. Các năm hiện có: {years}',
-        spatial_forest_change_success: 'Phân tích thay đổi rừng thành công',
         spatial_residential_distance_success: 'Phân tích khoảng cách dân cư – rừng thành công',
-        spatial_same_year: 'Hai mốc thời gian phải khác nhau',
-        spatial_year_not_available: 'Năm không có dữ liệu. Các năm hiện có: {years}',
         spatial_layer_not_found: 'Không tìm thấy lớp GIS với mã: {code}',
 
         // ── Đo đạc thực địa / Field Measurements (docs/modules/17) ───────────
@@ -746,10 +743,7 @@ const locales = {
         stats_landcover_success: 'Landcover statistics retrieved successfully',
         stats_dashboard_success: 'Dashboard data retrieved successfully',
         stats_year_not_available: 'Year has no data. Available years: {years}',
-        spatial_forest_change_success: 'Forest change analysis completed',
         spatial_residential_distance_success: 'Residential–forest distance analysis completed',
-        spatial_same_year: 'The two periods must be different',
-        spatial_year_not_available: 'Year has no data. Available years: {years}',
         spatial_layer_not_found: 'GIS layer not found with code: {code}',
 
         // ── Field Measurements (docs/modules/17) ─────────────────────────────

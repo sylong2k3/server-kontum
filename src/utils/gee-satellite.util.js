@@ -44,6 +44,24 @@ function eeEval(eeObject, timeoutMs = DEFAULT_TIMEOUT_MS) {
 }
 
 /**
+ * Promisify ee object.getInfo(callback) without blocking the Node.js event loop.
+ * Use this only for small metadata objects such as classifier diagnostics.
+ */
+function eeGetInfo(eeObject, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(`GEE getInfo() timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+        );
+        eeObject.getInfo((result, err) => {
+            clearTimeout(timer);
+            if (err) reject(new Error(String(err)));
+            else resolve(result);
+        });
+    });
+}
+
+/**
  * Get GEE map tile info for display on Leaflet / MapboxGL.
  * Returns { mapId, token, tileUrl } where tileUrl has {z}/{x}/{y} placeholders.
  *
@@ -619,6 +637,7 @@ const fmtDate = (d) => {
 
 module.exports = {
     eeEval,
+    eeGetInfo,
     getEeMapId,
     getEeDownloadUrl,
     getKonTumRegion,

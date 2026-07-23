@@ -21,6 +21,7 @@ const cfg = require('../configs/forest-classification');
 const { ee } = require('../configs/gge');
 const {
     eeEval,
+    eeGetInfo,
     makeComposite,
     addIndices,
     getDemBands,
@@ -306,6 +307,8 @@ function buildExclusionMask(groundTruthFC, bufferM, region) {
  *                                               around ground-truth features
  *                                               for Dataset/Threshold sampling.
  * @param {number} [opts.minFieldTest=10]        Min input test samples/class.
+ * @param {boolean} [opts.computeOob]             Fetch RF OOB diagnostics.
+ * @param {boolean} [opts.computeTestMetrics]     Evaluate GT holdout metrics.
  */
 async function runRfClassification(year, region, regionGeom, opts = {}) {
     const {
@@ -313,9 +316,11 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         // NEW (033): inline GeoJSON FeatureCollection từ PostGIS. Ưu tiên hơn
         // `groundTruthAssetId` nếu có. Feature.properties phải có `class` (0-10).
         groundTruthGeoJson = null,
-        // Skip blocking eeEval calls (OOB accuracy, test metrics).
-        // Use for on-demand tile generation where metadata is not critical.
+        // Backward-compatible switch for on-demand rendering. Explicit metric
+        // options below may override it for admin/batch diagnostics.
         skipStats = false,
+        computeOob,
+        computeTestMetrics,
         logger,
         // Lite mode is for /satellite/classified on-demand: same 11-class
         // essence but a much lighter graph so getMapId returns in seconds
@@ -326,6 +331,8 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         // Threshold pseudo-labels still exercise all 11 classes.
         liteMode = false,
     } = opts;
+    const shouldComputeOob = computeOob ?? !skipStats;
+    const shouldComputeTestMetrics = computeTestMetrics ?? !skipStats;
     // GEE `Image.stratifiedSample` yêu cầu `seed` là Integer (int32 signed,
      // max 2^31-1 = 2,147,483,647). Derived seed bên dưới có phép nhân với
      // 1000/2000 → phải đảm bảo input seed đủ nhỏ. Clamp về khoảng [0, MAX_SAFE]
@@ -462,21 +469,24 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         { note: `trees=${rfTrees} bag=${cfg.RF_BAG_FRACTION}` },
     );
 
-    // Đây là điểm evaluate() ĐẦU TIÊN, kéo toàn bộ đồ thị (composite → indices
+    // Đây là lời gọi getInfo() ĐẦU TIÊN, kéo toàn bộ đồ thị (composite → indices
     // → threshold → dataset → sampling → RF train) chạy trên EE.
     // Nếu time-out xảy ra ở stage này → điểm nghẽn nằm ở sampling/training.
     let oobPct = null;
-    if (!skipStats) {
+    if (shouldComputeOob) {
         oobPct = await log.run(
-            'EVALUATE OOB accuracy (forces sampling + RF training on EE)',
+            'GETINFO OOB accuracy (forces sampling + RF training on EE)',
             async () => {
-                const rfInfo      = ee.Dictionary(classifier.explain());
-                const oobAccuracy = ee.Number(1)
-                    .subtract(ee.Number(rfInfo.get('outOfBagErrorEstimate')))
-                    .multiply(100);
-                return eeEval(oobAccuracy);
+                const diagnostics = ee.Dictionary(classifier.explain())
+                    .select(['outOfBagErrorEstimate']);
+                const info = await eeGetInfo(diagnostics, cfg.OOB_TIMEOUT_MS);
+                const oobError = Number(info?.outOfBagErrorEstimate);
+                if (!Number.isFinite(oobError)) {
+                    throw new Error('GEE classifier diagnostics did not return outOfBagErrorEstimate');
+                }
+                return Math.max(0, Math.min(100, (1 - oobError) * 100));
             },
-            { note: 'blocking evaluate() — first heavy call' },
+            { note: `async getInfo(callback), timeout=${cfg.OOB_TIMEOUT_MS}ms` },
         );
         log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
     }
@@ -484,7 +494,7 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     // ── Independent test accuracy from ground-truth holdout ──────────────
     let testAccuracyPct = null;
     let testKappa       = null;
-    if (!skipStats && hasGT) {
+    if (shouldComputeTestMetrics && hasGT) {
         await log.run(
             'EVALUATE independent test accuracy + kappa (ground-truth holdout)',
             async () => {

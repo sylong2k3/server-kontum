@@ -290,13 +290,15 @@ async function executeAnalysis(year, month, {
         const districts = await log.run('Load Kon Tum districts collection',
             () => Promise.resolve(getKonTumDistricts()));
 
-        // Cùng pattern satellite `/classified` — liteMode + skipStats để tránh
-        // GEE `evaluate()` timeout 5 phút. Full v3 mode (200 trees + DW+WC+JRC
+        // Cùng pattern satellite `/classified` — liteMode để tránh đồ thị full
+        // vượt budget GEE. Admin vẫn lấy riêng OOB qua getInfo(callback), nhưng
+        // bỏ test/kappa khi chưa có ground truth độc lập.
+        // Full v3 mode (200 trees + DW+WC+JRC
         // dataset labels + 30m sample) đã proven vượt budget khi chạy cron.
         // Lite mode: threshold-only pseudo-labels + 80 trees + 100m sample →
         // graph nhẹ, getMapId trả trong ~15-30s. Chấp nhận sai số accuracy
         // vài % — snapshot vẫn dùng được để so sánh liên tháng.
-        const { classified, quotas } = await runRfClassification(
+        const { classified, quotas, oobPct } = await runRfClassification(
             year,
             region,
             region.geometry(),
@@ -314,12 +316,12 @@ async function executeAnalysis(year, month, {
                 minFieldTest,
                 logger:    log,
                 // KEY CHANGES:
-                liteMode:  true,   // skip DW+WC+JRC dataset labels
-                skipStats: true,   // skip OOB/test/kappa evaluate() → tránh timeout
+                liteMode:           true,  // skip DW+WC+JRC dataset labels
+                computeOob:         true,  // classifier.explain().getInfo(callback)
+                computeTestMetrics: false, // chỉ bật khi có holdout GT đủ tin cậy
             },
         );
-        // Metrics rỗng vì skipStats=true — vẫn lưu null trong DB.
-        const oobPct = null, testAccuracyPct = null, testKappa = null;
+        const testAccuracyPct = null, testKappa = null;
 
         // Area stats — dùng coarse scale (200m) như satellite `/classified` để
         // reduceRegion mất ~10-20s thay vì 5+ phút. Chấp nhận sai số ±3% cho
@@ -707,9 +709,9 @@ const getLatest = async () => {
     };
 };
 
-const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer, sortByPublishedAt = false } = {}) => {
+const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) => {
     const t0 = Date.now();
-    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer, sortByPublishedAt });
+    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer });
     dbgTime('GET_HISTORY',
         `page=${page} limit=${limit} hasGeoserverLayer=${hasGeoserverLayer ?? 'all'} ` +
         `→ items=${result.items.length} total=${result.total}`, t0);

@@ -157,16 +157,14 @@ const getById = async (id) => {
  * Client browse history to add overlay dùng ?hasGeoserverLayer=true để bỏ item
  * chỉ có GEE URL (TTL 24h) — add rồi vài giờ sau tile 404.
  */
-const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer, sortByPublishedAt = false } = {}) => {
+const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) => {
     const offset = (page - 1) * limit;
     // Build WHERE + params động — pg driver bind theo thứ tự $1, $2, ...
     const whereClauses = [`status IN ('completed','published')`];
     if (hasGeoserverLayer === true)  whereClauses.push('geoserver_layer IS NOT NULL');
     if (hasGeoserverLayer === false) whereClauses.push('geoserver_layer IS NULL');
     const whereSql = whereClauses.join(' AND ');
-    const orderSql = sortByPublishedAt
-        ? 'published_at DESC NULLS LAST, analysis_date DESC, id DESC'
-        : 'analysis_date DESC, created_at DESC, id DESC';
+    const orderSql = 'analysis_date DESC, created_at DESC, id DESC';
 
     // Trả đầy đủ field admin cần cho "full snapshot payload" trong panel expand.
     const { rows } = await db.query(

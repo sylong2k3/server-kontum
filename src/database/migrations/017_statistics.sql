@@ -4,7 +4,7 @@
 -- Cung cấp nền dữ liệu cho:
 --   - US-060: Diện tích lớp phủ / che phủ rừng theo huyện + mốc thời gian
 --   - US-063: Dashboard điều hành (tổng hợp + cache)
---   - US-061: Thay đổi rừng giữa 2 mốc (so sánh tabular + raster sau này)
+--   - Dữ liệu chuỗi thời gian phục vụ thống kê lịch sử
 --   - US-062: Khoảng cách dân cư – rừng (ST_DWithin trên lớp GIS đã import)
 --
 -- Dữ liệu seed là SỐ LIỆU THỰC tỉnh Kon Tum:
