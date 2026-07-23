@@ -368,10 +368,19 @@ async function executeAnalysis(year, month, {
             const tag = `${year}${String(month).padStart(2, '0')}`;
             const fileBase = `forest_class_kontum_${tag}`;
             const dlStart = Date.now();
+            // Timeout 300s: graph classified nặng (Landsat 5/7/8/9 + S2 + 3 composites
+            // + 8 indices ×3 + DEM + 11 threshold masks + RF80 + visualize + clip).
+            // 60s cũ hay hit trần khi bật computeOob → mất auto-ingest. Fire-risk
+            // dùng 30s được vì graph nhẹ hơn nhiều, không so sánh 1-1 với forest.
+            const DL_TIMEOUT_MS = 300_000;
+            let timedOut = false;
             geeDownloadUrl = await log.run(
                 'Generate GEE download URL (classified visualize → GeoTIFF RGB)',
                 () => new Promise((resolve) => {
-                    const timer = setTimeout(() => resolve(null), 60_000);
+                    const timer = setTimeout(() => {
+                        timedOut = true;
+                        resolve(null);
+                    }, DL_TIMEOUT_MS);
                     classified
                         // Mask class=0 ("Đất khác") để pixel không thuộc rừng
                         // render trong suốt trên WMS overlay — cùng cơ chế
@@ -392,18 +401,24 @@ async function executeAnalysis(year, month, {
                             },
                             (url, err) => {
                                 clearTimeout(timer);
+                                const ms = Date.now() - dlStart;
                                 if (err) {
-                                    console.warn(`[FOREST-CLS] getDownloadURL err: ${err.message || err}`);
+                                    console.warn(`[FOREST-CLS] getDownloadURL err (${ms}ms): ${err.message || err}`);
+                                } else if (!url) {
+                                    console.warn(`[FOREST-CLS] getDownloadURL null URL (${ms}ms) — no err returned`);
                                 }
                                 resolve(err ? null : (url || null));
                             },
                         );
                 }),
             );
+            const dlMs = Date.now() - dlStart;
             if (geeDownloadUrl) {
                 dbgTime('DOWNLOAD_URL', `ok fileBase=${fileBase} len=${geeDownloadUrl.length}`, dlStart);
+            } else if (timedOut) {
+                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT (${dlMs}ms / ${DL_TIMEOUT_MS}ms) — snapshot ${year}/${month} sẽ không auto-ingest`);
             } else {
-                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT/NULL (60s) — snapshot ${year}/${month} sẽ không auto-ingest`);
+                console.warn(`[FOREST-CLS] getDownloadURL NULL (${dlMs}ms) — snapshot ${year}/${month} sẽ không auto-ingest`);
             }
         } catch (err) {
             console.warn(`[FOREST-CLS] getDownloadURL failed (non-fatal): ${err.message}`);
