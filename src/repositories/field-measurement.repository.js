@@ -63,6 +63,46 @@ const buildValidPolygon = async (points) => {
     return { geom: rows[0].geojson, areaM2: rows[0].area_m2, avgAccuracyM };
 };
 
+// ── Bước 1b: chặn vùng đo nằm ngoài tỉnh Kon Tum ─────────────────────────────
+// Joi chỉ chặn theo khung chữ nhật 106–109°E / 13–16.5°N (bao trùm cả các tỉnh
+// lân cận như Đà Nẵng, Quảng Ngãi...) nên không đủ — phải kiểm tra polygon
+// thật so với ranh giới tỉnh (gis."RanhGioiTinh_Polygon", cùng lớp GeoServer
+// dùng để clip ảnh vệ tinh, xem gee-satellite.util.js). Cho phép buffer dung
+// sai ~200m để tránh loại oan các phiên đo sát biên giới do trôi GPS.
+const PROVINCE_BOUNDARY_TOLERANCE_M = 200;
+
+// Ranh giới tỉnh không đổi khi server đang chạy — cache WKB đã buffer sẵn để
+// khỏi lặp lại ST_Union/ST_Transform/ST_Buffer (~500ms) trên mỗi phiên đo.
+let _cachedProvinceBufferWKB = null;
+let _cachedProvinceBufferTolerance = null;
+
+const getProvinceBufferWKB = async (toleranceM) => {
+    if (_cachedProvinceBufferWKB && _cachedProvinceBufferTolerance === toleranceM) {
+        return _cachedProvinceBufferWKB;
+    }
+    const { rows } = await db.query(
+        `SELECT ST_AsEWKB(ST_Buffer(
+            ST_Transform(ST_Force2D(ST_Union("Shape")), 4326)::geography,
+            $1
+        )::geometry) AS wkb
+        FROM gis."RanhGioiTinh_Polygon"`,
+        [toleranceM]
+    );
+    _cachedProvinceBufferWKB = rows[0]?.wkb || null;
+    _cachedProvinceBufferTolerance = toleranceM;
+    return _cachedProvinceBufferWKB;
+};
+
+const isWithinProvince = async (geomGeoJSON, toleranceM = PROVINCE_BOUNDARY_TOLERANCE_M) => {
+    const provinceWKB = await getProvinceBufferWKB(toleranceM);
+    if (!provinceWKB) { throw new Error('PROVINCE_BOUNDARY_NOT_CONFIGURED'); }
+    const { rows } = await db.query(
+        `SELECT ST_Within(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326), $2::geometry) AS within`,
+        [JSON.stringify(geomGeoJSON), provinceWKB]
+    );
+    return rows[0]?.within === true;
+};
+
 // ── Bước 2: giao cắt với lớp thửa nền để auto-fill loại đất hiện trạng ───────
 // landUseField: tên cột thuộc tính loại đất trong bảng vật lý của layer (tùy chọn).
 // feature_id dùng ctid vì bảng lớp GIS động không có quy ước tên khóa chính cố định.
@@ -253,6 +293,7 @@ const listPhotos = async (measurementId) => {
 
 module.exports = {
     buildValidPolygon,
+    isWithinProvince,
     intersectWithLayer,
     findCommuneCode,
     create,
