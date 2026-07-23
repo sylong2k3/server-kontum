@@ -24,15 +24,18 @@ const fireRiskFilename = (analysisDate) => {
 //   - Persistent (không expire 24h như GEE URL).
 //   - Full-resolution (COG nguyên gốc trong data_dir, không bị downsample).
 //   - Không phụ thuộc quota GEE khi user tải lại nhiều lần.
-// Trả null khi chưa có layer hoặc GEOSERVER_URL chưa cấu hình.
+// Trả null khi chưa có layer hoặc GEOSERVER_PUBLIC_URL chưa cấu hình.
 const buildGeoserverDownloadUrl = (layerFqn) => {
     if (!layerFqn) return null;
-    const base = (process.env.GEOSERVER_PUBLIC_URL || process.env.GEOSERVER_URL || '')
+    const base = (process.env.GEOSERVER_PUBLIC_URL || '')
         .trim().replace(/\/+$/, '');
     if (!base) return null;
     const [ws, name] = String(layerFqn).includes(':')
         ? String(layerFqn).split(':')
         : [process.env.GEOSERVER_WORKSPACE || 'kontum', String(layerFqn)];
+    const root = base
+        .replace(new RegExp(`/${ws}/(?:wms|wcs)$`, 'i'), '')
+        .replace(/\/(?:wms|wcs)$/i, '');
     // WCS 2.0 coverageId dùng `__` (double underscore) làm workspace separator.
     const coverageId = `${ws}__${name}`;
     const qs = new URLSearchParams({
@@ -42,7 +45,7 @@ const buildGeoserverDownloadUrl = (layerFqn) => {
         coverageId,
         format:     'image/tiff',
     });
-    return `${base}/${ws}/wcs?${qs.toString()}`;
+    return `${root}/${ws}/wcs?${qs.toString()}`;
 };
 
 // ── GET /fire-risk/latest ─────────────────────────────────────────────────────
@@ -108,11 +111,53 @@ const getMap = async (req, res) => {
 };
 
 // ── GET /fire-risk/history ────────────────────────────────────────────────────
+// Filter options:
+//   ?hasGeoserverLayer=true  → chỉ snapshot đã publish GeoServer (client browse
+//                              để add overlay so sánh; GEE-only URL expire 24h
+//                              nên không muốn add).
+//   ?hasGeoserverLayer=false → chỉ snapshot chưa publish (admin xem để chọn
+//                              trigger publish thủ công).
+//   không truyền           → trả tất cả (backward-compat).
 const getHistory = async (req, res) => {
     const page  = parseInt(req.query.page,  10) || 1;
     const limit = parseInt(req.query.limit, 10) || 30;
-    const { items, total } = await svc.getHistory({ page, limit });
-    OK_LIST(res, t('get_list_success', req.lang), items, { page, limit, total });
+    // Chuẩn hoá `hasGeoserverLayer` — chỉ nhận literal string 'true'/'false',
+    // các giá trị khác treat as undefined (không filter).
+    let hasGeoserverLayer;
+    if (req.query.hasGeoserverLayer === 'true')  hasGeoserverLayer = true;
+    if (req.query.hasGeoserverLayer === 'false') hasGeoserverLayer = false;
+    const { items, total } = await svc.getHistory({ page, limit, hasGeoserverLayer });
+    OK_LIST(res, t('get_list_success', req.lang), items, {
+        page, limit, total,
+        ...(hasGeoserverLayer !== undefined ? { hasGeoserverLayer } : {}),
+    });
+};
+
+// ── GET /fire-risk/published-history ─────────────────────────────────────────
+// Public sub-endpoint (optionalAuth) — chỉ trả snapshot ĐÃ publish GeoServer,
+// dùng cho client browse để add WMS overlay lên bản đồ. Force filter
+// hasGeoserverLayer=true bất kể query param. Trả subset field an toàn cho
+// public (bỏ error_message, minio_key, gee_download_url, model_params,
+// gee_task_id...) — layer name đã public qua WMS URL nên OK.
+const getPublishedHistory = async (req, res) => {
+    const page  = parseInt(req.query.page,  10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 30;
+    const { items, total } = await svc.getHistory({
+        page, limit, hasGeoserverLayer: true, sortByPublishedAt: true,
+    });
+    // Whitelist field an toàn cho public — chỉ đủ để client render WMS + hiển
+    // thị metadata cơ bản trong list.
+    const safeItems = items.map((it) => ({
+        id:                     it.id,
+        analysis_date:          it.analysis_date,
+        status:                 it.status,
+        geoserver_layer:        it.geoserver_layer,
+        gee_tile_url:           it.gee_tile_url,
+        gee_tile_generated_at:  it.gee_tile_generated_at,
+        computed_at:            it.computed_at,
+        published_at:           it.published_at,
+    }));
+    OK_LIST(res, t('get_list_success', req.lang), safeItems, { page, limit, total });
 };
 
 // ── POST /fire-risk/refresh ───────────────────────────────────────────────────
@@ -187,4 +232,4 @@ const publishRaster = async (req, res) => {
     });
 };
 
-module.exports = { getLatest, getMap, getHistory, refresh, publishRaster };
+module.exports = { getLatest, getMap, getHistory, getPublishedHistory, refresh, publishRaster };

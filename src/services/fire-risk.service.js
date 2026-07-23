@@ -896,8 +896,8 @@ const getMap = async ({ minRiskLevel = 4 } = {}) => {
 /**
  * List completed snapshots (history).
  */
-const getHistory = async ({ page = 1, limit = 30 } = {}) =>
-    repo.listCompleted({ page, limit });
+const getHistory = async ({ page = 1, limit = 30, hasGeoserverLayer, sortByPublishedAt = false } = {}) =>
+    repo.listCompleted({ page, limit, hasGeoserverLayer, sortByPublishedAt });
 
 /**
  * Trigger manual analysis for today (admin only).

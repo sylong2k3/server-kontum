@@ -4,14 +4,15 @@
  * Forest Classification Service (Phân loại lớp phủ rừng).
  *
  * Implements the 11-class Kon Tum forest classification from lopPhuRungFinal.txt v3.
- * Uses Landsat 5/7/8/9 + Sentinel-2 + Random Forest (200 trees).
+ * The scheduled/admin flow uses the same lite Random Forest mode as
+ * `/satellite/classified` so interactive GEE operations stay within quota.
  *
  * Pipeline:
  *   1. Build 3 composites: base (full year), dry (Jan-Apr), wet (Aug-Nov)
  *   2. Compute spectral indices (NDVI, NDWI, MNDWI, NDMI, NDBI, NBR, BSI, EVI)
  *      for base + seasonal amplitudes
  *   3. Add DEM bands (elevation, slope, aspect)
- *   4. Build pseudo-label images (threshold + Dynamic World / ESA WorldCover + JRC Water)
+ *   4. Build threshold pseudo-labels (optional dataset labels via config)
  *   5. Sample training data from pseudo-labels
  *   6. Train Random Forest (200 trees, 6 variables/split, seed=year)
  *   7. Classify + water post-processing (JRC stable water correction)
@@ -47,15 +48,26 @@ const { StatusCodes } = require('../core/http-status-code');
 // stratified sampling, Random Forest training, JRC water correction) lives in
 // forest-classification.pipeline.js and is shared with satellite.service.
 
+// ── Debug helper ────────────────────────────────────────────────────────────
+// FC_DEBUG=true (hoặc NODE_ENV=development) → in `[FOREST-CLS:DBG] ...` cho
+// các checkpoint không critical (entry/exit public API, kết quả URL,
+// auto-ingest decision). Info/warn/error luôn ghi bất kể flag.
+const DEBUG = process.env.FC_DEBUG === 'true'
+    || process.env.NODE_ENV === 'development';
+const dbg = (tag, msg) => { if (DEBUG) console.debug(`[FOREST-CLS:DBG:${tag}] ${msg}`); };
+const dbgTime = (tag, msg, t0) => {
+    if (DEBUG) console.debug(`[FOREST-CLS:DBG:${tag}] ${msg} (${Date.now() - t0}ms)`);
+};
+
 // ── Area stats ────────────────────────────────────────────────────────────────
 
-async function computeProvinceAreaStats(classified, region) {
+async function computeProvinceAreaStats(classified, region, scaleM) {
     const areaImg = ee.Image.pixelArea().divide(10000).addBands(classified.rename('class'));
     const result  = await eeEval(
         areaImg.reduceRegion({
             reducer:    ee.Reducer.sum().group({ groupField: 1, groupName: 'class' }),
             geometry:   region.geometry(),
-            scale:      cfg.AREA_STATS_SCALE_M,
+            scale:      scaleM || cfg.AREA_STATS_SCALE_M,
             bestEffort: true,
             maxPixels:  1e13,
             tileScale:  8,
@@ -72,12 +84,12 @@ async function computeProvinceAreaStats(classified, region) {
     return { byClass, totalHa: Math.round(totalHa * 100) / 100 };
 }
 
-async function computeDistrictAreaStats(classified, districts) {
+async function computeDistrictAreaStats(classified, districts, scaleM) {
     const areaImg = ee.Image.pixelArea().divide(10000).addBands(classified.rename('class'));
     const reduced = areaImg.reduceRegions({
         collection: districts,
         reducer:    ee.Reducer.sum().group({ groupField: 1, groupName: 'class' }),
-        scale:      cfg.AREA_STATS_SCALE_M,
+        scale:      scaleM || cfg.AREA_STATS_SCALE_M,
         tileScale:  8,
     });
 
@@ -103,32 +115,77 @@ async function computeDistrictAreaStats(classified, districts) {
     return distStats;
 }
 
-// ── Alert notification ────────────────────────────────────────────────────────
-
-async function sendAreaChangeAlert(snapshot, prevSnapshot, provinceSummary) {
+// ── Alert notification: top-3 changes ──────────────────────────────────────
+// So sánh từng class giữa snapshot hiện tại vs prev, sort theo |change%| desc,
+// gửi notification liệt kê 3 class biến động mạnh nhất. Chỉ trigger nếu class
+// top-1 vượt ngưỡng ALERT_FOREST_CHANGE_PCT (default 2%).
+//
+// Cấu trúc payload:
+//   title: "Cảnh báo biến động rừng YYYY/MM"
+//   message: "Top 3 lớp biến động so với YYYY/MM trước:\n
+//             1. <name>: +X.X% (a → b ha)\n
+//             2. <name>: -Y.Y% ...\n
+//             3. <name>: +Z.Z% ..."
+async function sendTop3ChangesAlert(snapshot, prevSnapshot, provinceSummary) {
     try {
-        const notifSvc = require('./notification.service');
         const prevSummary = prevSnapshot?.province_summary;
-        if (!prevSummary) return;
-
-        let prevForestHa = 0;
-        let currForestHa = 0;
-        for (const classId of cfg.FOREST_CLASS_IDS) {
-            prevForestHa += prevSummary.byClass?.[classId] || 0;
-            currForestHa += provinceSummary.byClass?.[classId] || 0;
+        if (!prevSummary) {
+            dbg('ALERT', 'skip — no previous snapshot for comparison');
+            return;
         }
-        if (prevForestHa === 0) return;
+        const notifSvc = require('./notification.service');
 
-        const changePct = Math.abs((currForestHa - prevForestHa) / prevForestHa * 100);
-        if (changePct < cfg.ALERT_FOREST_CHANGE_PCT) return;
+        // Tính change cho MỌI class (kể cả class 0 "Đất khác"). Class có prev=0
+        // và curr>0 → % = Infinity, treat as "mới xuất hiện" với +100%.
+        const changes = [];
+        for (let i = 0; i < cfg.CLASS_NAMES.length; i++) {
+            const prevHa = Number(prevSummary.byClass?.[i]) || 0;
+            const currHa = Number(provinceSummary.byClass?.[i]) || 0;
+            if (prevHa === 0 && currHa === 0) continue;   // Class trống cả 2 kỳ → bỏ
+            const pct = prevHa === 0
+                ? 100                                     // Mới xuất hiện
+                : ((currHa - prevHa) / prevHa) * 100;
+            changes.push({
+                classId:  i,
+                name:     cfg.CLASS_NAMES[i],
+                prevHa,
+                currHa,
+                deltaHa:  currHa - prevHa,
+                pct,
+                absPct:   Math.abs(pct),
+            });
+        }
+        // Sort theo |change%| desc → 3 class biến động nhất.
+        changes.sort((a, b) => b.absPct - a.absPct);
+        const top3 = changes.slice(0, 3);
+        if (top3.length === 0) return;
 
-        const direction = currForestHa < prevForestHa ? 'giảm' : 'tăng';
-        await notifSvc.createSystemNotification({
-            title:   `Cảnh báo thay đổi diện tích rừng ${snapshot.year}/${snapshot.month}`,
-            message: `Diện tích rừng Kon Tum ${direction} ${changePct.toFixed(1)}% so với tháng trước ` +
-                     `(từ ${prevForestHa.toLocaleString('vi')} ha → ${currForestHa.toLocaleString('vi')} ha).`,
-            type:    'warning',
+        // Ngưỡng trigger: class top-1 phải vượt ALERT_FOREST_CHANGE_PCT.
+        const threshold = cfg.ALERT_FOREST_CHANGE_PCT;
+        if (top3[0].absPct < threshold) {
+            dbg('ALERT', `skip — top-1 change ${top3[0].absPct.toFixed(2)}% < threshold ${threshold}%`);
+            return;
+        }
+
+        const period    = `${snapshot.year}/${String(snapshot.month).padStart(2,'0')}`;
+        const prevPeriod = `${prevSnapshot.year}/${String(prevSnapshot.month).padStart(2,'0')}`;
+        const lines = top3.map((c, idx) => {
+            const sign = c.pct >= 0 ? '+' : '';
+            return `  ${idx + 1}. ${c.name}: ${sign}${c.pct.toFixed(1)}% ` +
+                   `(${c.prevHa.toLocaleString('vi')} → ${c.currHa.toLocaleString('vi')} ha)`;
         });
+        const title = `Cảnh báo biến động rừng ${period}`;
+        const body = `So sánh với ${prevPeriod}. Top 3 lớp biến động mạnh nhất:\n${lines.join('\n')}`;
+        for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
+            await notifSvc.broadcastToRole(role, {
+                type: 'forest_change_alert',
+                title,
+                body,
+                data: { snapshotId: snapshot.id, period, previousPeriod: prevPeriod, top3 },
+                channel: 'alert',
+            });
+        }
+        console.log(`[FOREST] top-3 alert dispatched period=${period} vs ${prevPeriod} top1=${top3[0].name} ${top3[0].pct.toFixed(1)}%`);
     } catch (err) {
         console.warn('[FOREST] Alert notification failed:', err.message);
     }
@@ -136,8 +193,7 @@ async function sendAreaChangeAlert(snapshot, prevSnapshot, provinceSummary) {
 
 // ── Main analysis ─────────────────────────────────────────────────────────────
 
-async function runAnalysis(year, month, {
-    submitExport       = cfg.isGcsConfigured(),
+async function executeAnalysis(year, month, {
     trigger            = 'cron',
     requestedBy        = null,
     groundTruthAssetId = process.env.FC_GROUND_TRUTH_ASSET_ID || '',
@@ -152,6 +208,14 @@ async function runAnalysis(year, month, {
         correlationId: `${year}-${String(month).padStart(2, '0')}`,
     });
     const startMs = Date.now();
+
+    // Entry log — luôn ghi (không cần DEBUG) để trace tất cả run.
+    console.log(
+        `[FOREST-CLS] runAnalysis START period=${year}/${month} trigger=${trigger} ` +
+        `hasGtAsset=${Boolean(groundTruthAssetId)} ` +
+        `gtWindow=${gtWindowDays}d gtBuffer=${gtBufferM}m minFieldTest=${minFieldTest} ` +
+        `requestedBy=${requestedBy || 'system'} debug=${DEBUG}`,
+    );
 
     // NOTE (033): GT query moved INTO try/catch below (line ~200) — nếu
     // migration 033 chưa chạy, `getGtForAnalysis` throw ở tầng ngoài sẽ khiến
@@ -171,18 +235,23 @@ async function runAnalysis(year, month, {
             trigger,
             requested_by: requestedBy,
             model_params: {
-                version:        'v3',
-                rf_trees:       cfg.RF_TREES,
+                version:        'v3-lite',
+                mode:           'lite',
+                rf_trees:       cfg.LITE_RF_TREES,
                 rf_vars_split:  cfg.RF_VARIABLES_PER_SPLIT,
                 bag_fraction:   cfg.RF_BAG_FRACTION,
-                samples:        cfg.SAMPLES_PER_CLASS,
-                sample_scale_m: cfg.SAMPLE_SCALE_M,
-                area_scale_m:   cfg.AREA_STATS_SCALE_M,
+                samples:        cfg.LITE_SAMPLES_PER_CLASS,
+                sample_scale_m: cfg.LITE_SAMPLE_SCALE_M,
+                area_scale_m:   200,
+                download_scale_m: cfg.DOWNLOAD_SCALE_M,
+                skip_stats:     true,
                 ground_truth_asset_id: hasGT ? groundTruthAssetId : null,
                 gt_buffer_m:    hasGT ? gtBufferM : null,
-                blend_rule:     hasGT
-                    ? 'Input 50% + Dataset 30% + Threshold 20%'
-                    : 'Dataset 60% + Threshold 40%',
+                blend_rule:     cfg.LITE_USE_DATASET_LABELS
+                    ? (hasGT
+                        ? 'Input 50% + Dataset 30% + Threshold 20%'
+                        : 'Dataset 60% + Threshold 40%')
+                    : (hasGT ? 'Input 50% + Threshold 50%' : 'Threshold 100%'),
             },
         }));
 
@@ -221,44 +290,53 @@ async function runAnalysis(year, month, {
         const districts = await log.run('Load Kon Tum districts collection',
             () => Promise.resolve(getKonTumDistricts()));
 
-        // Steps 1-7: full RF pipeline (feature image, pseudo-labels, sampling,
-        // training, JRC water correction). Sub-stage logs come from the pipeline
-        // — same logger is forwarded so all A→Z markers show in one stream.
-        const {
-            classified,
-            oobPct,
-            testAccuracyPct,
-            testKappa,
-            quotas,
-        } = await runRfClassification(
+        // Cùng pattern satellite `/classified` — liteMode + skipStats để tránh
+        // GEE `evaluate()` timeout 5 phút. Full v3 mode (200 trees + DW+WC+JRC
+        // dataset labels + 30m sample) đã proven vượt budget khi chạy cron.
+        // Lite mode: threshold-only pseudo-labels + 80 trees + 100m sample →
+        // graph nhẹ, getMapId trả trong ~15-30s. Chấp nhận sai số accuracy
+        // vài % — snapshot vẫn dùng được để so sánh liên tháng.
+        const { classified, quotas } = await runRfClassification(
             year,
             region,
             region.geometry(),
             {
-                seed: year * 1000 + month,
+                // Seed nhỏ — pipeline nhân với 2000 khi derive cho dataset
+                // sample, phải bảo đảm không vượt int32 (2^31-1). Cũ:
+                // `year*1000+month` → 2026007 → *2000 → overflow. Xem
+                // commit fix clampSeed trong pipeline.
+                // Đồng bộ với satellite `/classified`: cùng năm + cùng ROI +
+                // cùng ground truth sẽ tạo cùng mô hình RF.
+                seed: year,
                 groundTruthAssetId,
-                groundTruthGeoJson,   // NEW (033): inline GT có ưu tiên hơn asset
+                groundTruthGeoJson,
                 gtBufferM,
                 minFieldTest,
-                logger: log,
+                logger:    log,
+                // KEY CHANGES:
+                liteMode:  true,   // skip DW+WC+JRC dataset labels
+                skipStats: true,   // skip OOB/test/kappa evaluate() → tránh timeout
             },
         );
+        // Metrics rỗng vì skipStats=true — vẫn lưu null trong DB.
+        const oobPct = null, testAccuracyPct = null, testKappa = null;
 
-        // Steps 8-9: các evaluate() được TÁCH tuần tự thay vì Promise.all —
-        // song song sẽ khiến EE phân bổ bộ nhớ đồng thời cho cả hai, dễ vượt
-        // ngưỡng và cùng lúc time-out mà không biết bước nào chậm.
+        // Area stats — dùng coarse scale (200m) như satellite `/classified` để
+        // reduceRegion mất ~10-20s thay vì 5+ phút. Chấp nhận sai số ±3% cho
+        // trend liên tháng. AREA_STATS_SCALE_M cũ = 60m → replace 200m.
+        const AREA_SCALE_M = 200;
         const provinceSummary = await log.run(
-            'EVALUATE province area stats (reduceRegion sum groupBy class)',
-            () => computeProvinceAreaStats(classified, region),
-            { note: `scale=${cfg.AREA_STATS_SCALE_M}m tileScale=8 bestEffort` },
+            'EVALUATE province area stats (reduceRegion sum groupBy class, coarse 200m)',
+            () => computeProvinceAreaStats(classified, region, AREA_SCALE_M),
+            { note: `scale=${AREA_SCALE_M}m tileScale=8 bestEffort` },
         );
         log.mark('Province area',
             `totalHa=${provinceSummary.totalHa}, classes=${Object.keys(provinceSummary.byClass || {}).length}`);
 
         const districtAreas = await log.run(
-            'EVALUATE district area stats (reduceRegions sum groupBy class)',
-            () => computeDistrictAreaStats(classified, districts),
-            { note: `scale=${cfg.AREA_STATS_SCALE_M}m tileScale=8` },
+            'EVALUATE district area stats (reduceRegions sum groupBy class, coarse 200m)',
+            () => computeDistrictAreaStats(classified, districts, AREA_SCALE_M),
+            { note: `scale=${AREA_SCALE_M}m tileScale=8` },
         );
         log.mark('District area rows', `${districtAreas.length}`);
 
@@ -278,6 +356,57 @@ async function runAnalysis(year, month, {
             console.warn(`[FOREST-CLS] getEeMapId failed (non-fatal): ${err.message}`);
         }
 
+        // GEE download URL clip theo ranh giới tỉnh — GeoTIFF trần (image/tiff)
+        // valid ~24h. Server auto-ingest sẽ pull về MinIO trước khi hết hạn.
+        // Non-fatal: nếu getDownloadURL lỗi, snapshot vẫn completed, chỉ thiếu
+        // link download + không auto-publish GeoServer (admin có thể refresh sau).
+        // .visualize() → RGB 3-band để mở ra là ảnh MÀU (không cần palette metadata).
+        let geeDownloadUrl = null;
+        try {
+            const tag = `${year}${String(month).padStart(2, '0')}`;
+            const fileBase = `forest_class_kontum_${tag}`;
+            const dlStart = Date.now();
+            geeDownloadUrl = await log.run(
+                'Generate GEE download URL (classified visualize → GeoTIFF RGB)',
+                () => new Promise((resolve) => {
+                    const timer = setTimeout(() => resolve(null), 60_000);
+                    classified
+                        // Mask class=0 ("Đất khác") để pixel không thuộc rừng
+                        // render trong suốt trên WMS overlay — cùng cơ chế
+                        // đã fix fire-risk.
+                        .updateMask(classified.gt(0))
+                        .visualize(CLASSIFIED_VIZ)
+                        .clip(region.geometry())
+                        .getDownloadURL(
+                            {
+                                name:        fileBase,
+                                // Đồng bộ pipeline download/publish fire-risk.
+                                scale:       cfg.DOWNLOAD_SCALE_M,
+                                region:      region.geometry(),
+                                crs:         'EPSG:4326',
+                                format:      'GEO_TIFF',
+                                filePerBand: false,
+                                maxPixels:   1e9,
+                            },
+                            (url, err) => {
+                                clearTimeout(timer);
+                                if (err) {
+                                    console.warn(`[FOREST-CLS] getDownloadURL err: ${err.message || err}`);
+                                }
+                                resolve(err ? null : (url || null));
+                            },
+                        );
+                }),
+            );
+            if (geeDownloadUrl) {
+                dbgTime('DOWNLOAD_URL', `ok fileBase=${fileBase} len=${geeDownloadUrl.length}`, dlStart);
+            } else {
+                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT/NULL (60s) — snapshot ${year}/${month} sẽ không auto-ingest`);
+            }
+        } catch (err) {
+            console.warn(`[FOREST-CLS] getDownloadURL failed (non-fatal): ${err.message}`);
+        }
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary: provinceSummary,
@@ -290,6 +419,7 @@ async function runAnalysis(year, month, {
                 gee_map_id:       geeMapId,
                 gee_tile_url:     geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
+                gee_download_url: geeDownloadUrl,
                 gt_zone_count:    gtData.counts.zones,
                 gt_point_count:   gtData.counts.points,
                 gt_window_days:   gtWindowDays,
@@ -302,93 +432,261 @@ async function runAnalysis(year, month, {
             'Fetch previous completed snapshot (for area-change alert)',
             () => repo.getPreviousCompleted(year, month),
         );
-        await log.run('Evaluate + dispatch area-change alert',
-            () => sendAreaChangeAlert(snapshot, prevSnapshot, provinceSummary));
-
-        if (submitExport) {
-            const taskName = await log.run(
-                'Submit GEE raster export task (async)',
-                () => submitExportTask(classified, year, month, region),
-            );
-            snapshot = await repo.updateStatus(snapshot.id, 'exporting', { gee_task_id: taskName });
-        }
+        await log.run('Evaluate + dispatch top-3 changes alert',
+            () => sendTop3ChangesAlert(snapshot, prevSnapshot, provinceSummary));
 
         log.summary();
+
+        // ── Auto ingest → MinIO → GeoServer (persistent COG) ──────────────
+        // Cùng cơ chế fire-risk: cron chạy xong tự enqueue raster-ingest job.
+        // Job worker (poll 15s) tự pick up. Snapshot được back-link
+        // `geoserver_layer` khi ingest complete (queue service).
+        // KHÔNG throw nếu enqueue fail — không được chặn pipeline chính.
+        _safe(() => _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month));
+        _safe(() => _notifyForestClassificationCompleted(snapshot, provinceSummary));
+
         return snapshot;
     } catch (err) {
         log.summary();
         console.error(`[FOREST-CLS] runAnalysis ${year}-${month} failed:`, err.message);
         await repo.updateStatus(snapshot.id, 'failed', { error_message: err.message });
+        _safe(() => _notifyForestClassificationFailed(year, month, err.message));
         throw err;
     }
 }
 
-// ── Raster export ─────────────────────────────────────────────────────────────
+// Chặn hai request manual/user/cron cùng materialize một graph GEE cho cùng kỳ.
+// Các caller đến sau dùng chung Promise và nhận cùng snapshot kết quả.
+const activeRuns = new Map();
+function runAnalysis(year, month, options = {}) {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    const active = activeRuns.get(key);
+    if (active) {
+        console.warn(`[FOREST-CLS] runAnalysis DEDUPE period=${key} — reuse active run`);
+        return active;
+    }
 
-async function submitExportTask(classified, year, month, region) {
-    if (!cfg.isGcsConfigured()) throw new Error('GEE_GCS_BUCKET not configured');
-    const tag      = `${year}${String(month).padStart(2, '0')}`;
-    const filePrefix = `forest_classification/kontum_forest_${tag}`;
-
-    const task = ee.batch.Export.image.toCloudStorage({
-        image:          classified.toInt8(),
-        description:    `forest_class_${tag}`,
-        bucket:         cfg.GCS_BUCKET,
-        fileNamePrefix: filePrefix,
-        scale:          cfg.EXPORT_SCALE_M,
-        maxPixels:      1e13,
-        region:         region.geometry(),
-        fileFormat:     'GeoTIFF',
-        formatOptions:  { cloudOptimized: true },
-    });
-    task.start();
-    const status = await eeEval(task.status());
-    return status.name || status.id || String(task);
+    const run = executeAnalysis(year, month, options)
+        .finally(() => activeRuns.delete(key));
+    activeRuns.set(key, run);
+    return run;
 }
 
-async function pollExports() {
-    const exporting = await repo.listExporting();
-    for (const snap of exporting) {
-        try {
-            const tag     = `${snap.year}${String(snap.month).padStart(2, '0')}`;
-            const gcsPath = `forest_classification/kontum_forest_${tag}`;
+// ── Notification / auto-ingest helpers ──────────────────────────────────────
+const _safe = (fn) => {
+    try {
+        const r = fn();
+        if (r?.catch) r.catch((e) => console.warn('[FOREST-CLS] async helper err:', e.message));
+    } catch (e) {
+        console.warn('[FOREST-CLS] sync helper err:', e.message);
+    }
+};
 
-            const { pollGeeTask, publishRasterToMinio } = require('../utils/gee-export.helper');
-            const state = await pollGeeTask(snap.gee_task_id);
+async function _notifyForestClassificationCompleted(snapshot, provinceSummary) {
+    const notifSvc = require('./notification.service');
+    const period = `${snapshot.year}-${String(snapshot.month).padStart(2, '0')}`;
+    const byClass = provinceSummary?.byClass || {};
+    const totalHa = Number(provinceSummary?.totalHa) || 0;
+    const forestHa = cfg.FOREST_CLASS_IDS.reduce(
+        (sum, classId) => sum + (Number(byClass[classId]) || 0),
+        0,
+    );
+    const body = `Đã hoàn thành phân loại 11 lớp cho kỳ ${period}. `
+        + `Tổng diện tích ${Math.round(totalHa).toLocaleString('vi')} ha; `
+        + `diện tích rừng ${Math.round(forestHa).toLocaleString('vi')} ha. `
+        + 'Raster GeoServer đang được xử lý tự động.';
+    const data = {
+        snapshotId: snapshot.id,
+        year: snapshot.year,
+        month: snapshot.month,
+        period,
+        totalHa,
+        forestHa,
+    };
 
-            if (state === 'COMPLETED') {
-                const published = await publishRasterToMinio({
-                    gcsPath, bucket: cfg.MINIO_BUCKET,
-                    fileName:  `kontum_forest_${tag}.tif`,
-                    minioKey:  `forest_classification/kontum_forest_${tag}.tif`,
-                    storeName: `forest_class_${tag}`,
-                });
-                if (published) {
-                    await repo.updateStatus(snap.id, 'published', {
-                        ...published, published_at: new Date(),
-                    });
-                }
-            } else if (['FAILED','CANCELLED','TIMEOUT'].includes(state)) {
-                await repo.updateStatus(snap.id, 'failed', {
-                    error_message: `GEE export task ${state}: ${snap.gee_task_id}`,
-                });
-            }
-        } catch (err) {
-            console.error(`[FOREST] pollExports error for snapshot ${snap.id}:`, err.message);
-        }
+    for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
+        await notifSvc.broadcastToRole(role, {
+            type: 'forest_classification_completed',
+            title: `Phân loại lớp phủ rừng ${period} hoàn thành`,
+            body,
+            data,
+            channel: 'system',
+        }).catch((err) => {
+            console.warn(`[FOREST-CLS] notify role=${role} failed:`, err.message);
+        });
     }
 }
 
+async function _notifyForestClassificationFailed(year, month, errorMessage) {
+    const notifSvc = require('./notification.service');
+    const period = `${year}-${String(month).padStart(2, '0')}`;
+    await notifSvc.broadcastToRole('system_admin', {
+        type: 'forest_classification_failed',
+        title: `Phân loại lớp phủ rừng ${period} thất bại`,
+        body: errorMessage?.slice(0, 200) || 'Không rõ lỗi',
+        data: { year, month, period, error: errorMessage },
+        channel: 'system',
+    }).catch(() => {});
+}
+
+async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
+    if (!geeDownloadUrl) {
+        console.log('[FOREST-CLS] auto-ingest SKIP — no gee_download_url');
+        return;
+    }
+    if (snapshot.geoserver_layer) {
+        console.log(`[FOREST-CLS] auto-ingest SKIP — snapshot=${snapshot.id} already has geoserver_layer=${snapshot.geoserver_layer}`);
+        return;
+    }
+    // Lazy require để tránh circular dependency với raster-ingest.service.
+    const ingestSvc = require('./raster-ingest.service');
+    const tag = `${year}${String(month).padStart(2, '0')}`;
+    const layerCode = `forest_class_${tag}`;
+    const t0 = Date.now();
+    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.DOWNLOAD_SCALE_M}m urlLen=${geeDownloadUrl.length}`);
+    console.log(`[FOREST-CLS] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
+    const { job, deduplicated } = await ingestSvc.enqueue({
+        sourceUrl:  geeDownloadUrl,
+        layerCode,
+        nameVi:     `Phân loại rừng ${year}-${String(month).padStart(2, '0')}`,
+        isPublic:   true,
+        category:   'forest',
+        requestParams: {
+            linkedResource: { type: 'forest', id: snapshot.id },
+            year,
+            month,
+            scale_m:        cfg.DOWNLOAD_SCALE_M,
+            autoIngested:   true,   // trace: enqueue tự động vs admin bấm
+        },
+        user: null,  // system-triggered
+        lang: 'vi',
+    });
+    console.log(`[FOREST-CLS] auto-ingest ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
+    dbgTime('AUTO_INGEST', `done job=${job.id} deduplicated=${Boolean(deduplicated)}`, t0);
+}
+
+// GCS export path (submitExportTask/pollExports) đã BỎ — flow mới dùng
+// getDownloadURL + raster-ingest queue (`_autoIngestSnapshot`) giống fire-risk.
+// Đơn giản hơn, không phụ thuộc GCS bucket, không cần cron poll.
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
+const roundComparisonValue = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const buildAreaMetric = (currentHa, previousHa) => {
+    const current = roundComparisonValue(currentHa);
+    const previous = roundComparisonValue(previousHa);
+    const deltaHa = roundComparisonValue(current - previous);
+    const changePct = previous > 0
+        ? roundComparisonValue((deltaHa / previous) * 100)
+        : (current === 0 ? 0 : null);
+    return { currentHa: current, previousHa: previous, deltaHa, changePct };
+};
+
+const sumForestByClass = (byClass = {}) => cfg.FOREST_CLASS_IDS.reduce(
+    (sum, classId) => sum + (Number(byClass[classId]) || 0),
+    0,
+);
+
+const sumAllByClass = (byClass = {}) => Object.values(byClass).reduce(
+    (sum, areaHa) => sum + (Number(areaHa) || 0),
+    0,
+);
+
+const summarizeDistrict = (district) => {
+    const byClass = {};
+    let totalHa = 0;
+    for (const item of (district?.classes || [])) {
+        const classId = Number(item.classId);
+        const areaHa = Number(item.areaHa) || 0;
+        byClass[classId] = areaHa;
+        totalHa += areaHa;
+    }
+    return { byClass, totalHa, forestHa: sumForestByClass(byClass) };
+};
+
+const buildSnapshotComparison = async (snapshot, districtAreas) => {
+    if (!snapshot || !['completed', 'published'].includes(snapshot.status)) return null;
+
+    const previousSnapshot = await repo.getPreviousCompleted(snapshot.year, snapshot.month);
+    if (!previousSnapshot?.province_summary) return null;
+
+    const currentSummary = snapshot.province_summary || {};
+    const previousSummary = previousSnapshot.province_summary || {};
+    const currentByClass = currentSummary.byClass || {};
+    const previousByClass = previousSummary.byClass || {};
+    const previousDistrictAreas = await repo.getDistrictAreas(previousSnapshot.id);
+    const currentDistrictMap = new Map(
+        (districtAreas || []).map((item) => [item.districtCode || item.districtName, item]),
+    );
+    const previousDistrictMap = new Map(
+        previousDistrictAreas.map((item) => [item.districtCode || item.districtName, item]),
+    );
+    const districtKeys = new Set([...currentDistrictMap.keys(), ...previousDistrictMap.keys()]);
+
+    const classes = cfg.CLASS_NAMES.map((className, classId) => ({
+        classId,
+        className,
+        ...buildAreaMetric(currentByClass[classId], previousByClass[classId]),
+    }));
+    const districts = previousDistrictAreas.length > 0 ? [...districtKeys].map((key) => {
+        const current = currentDistrictMap.get(key);
+        const previous = previousDistrictMap.get(key);
+        const currentStats = summarizeDistrict(current);
+        const previousStats = summarizeDistrict(previous);
+        return {
+            districtCode: current?.districtCode || previous?.districtCode || null,
+            districtName: current?.districtName || previous?.districtName || null,
+            total: buildAreaMetric(currentStats.totalHa, previousStats.totalHa),
+            forest: buildAreaMetric(currentStats.forestHa, previousStats.forestHa),
+            classes: cfg.CLASS_NAMES.map((className, classId) => ({
+                classId,
+                className,
+                ...buildAreaMetric(
+                    currentStats.byClass[classId],
+                    previousStats.byClass[classId],
+                ),
+            })),
+        };
+    }) : [];
+
+    return {
+        previousSnapshot: {
+            id: previousSnapshot.id,
+            year: previousSnapshot.year,
+            month: previousSnapshot.month,
+            computedAt: previousSnapshot.computed_at || null,
+            publishedAt: previousSnapshot.published_at || null,
+        },
+        province: {
+            total: buildAreaMetric(
+                currentSummary.totalHa ?? sumAllByClass(currentByClass),
+                previousSummary.totalHa ?? sumAllByClass(previousByClass),
+            ),
+            forest: buildAreaMetric(
+                sumForestByClass(currentByClass),
+                sumForestByClass(previousByClass),
+            ),
+            classes,
+        },
+        districts,
+    };
+};
+
 const getLatest = async () => {
+    const t0 = Date.now();
     const snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
         const pending = await repo.getLatest();
-        if (pending) return {
-            snapshot: pending, districtAreas: [], stale: true, computing: true,
-            geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
-        };
+        if (pending) {
+            dbgTime('GET_LATEST', `pending id=${pending.id} status=${pending.status} y/m=${pending.year}/${pending.month}`, t0);
+            return {
+                snapshot: pending, districtAreas: [], stale: true, computing: true,
+                comparison: null,
+                geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
+            };
+        }
+        dbgTime('GET_LATEST', 'no snapshot in DB → throw FC_NO_DATA', t0);
         throw new BusinessLogicError(
             'Chưa có dữ liệu phân loại rừng. Vui lòng thử lại sau.',
             ['FC_NO_DATA'],
@@ -396,21 +694,33 @@ const getLatest = async () => {
         );
     }
     const districtAreas = await repo.getDistrictAreas(snapshot.id);
+    const comparison = await buildSnapshotComparison(snapshot, districtAreas);
+    dbgTime('GET_LATEST',
+        `snapshot=${snapshot.id} y/m=${snapshot.year}/${snapshot.month} status=${snapshot.status} ` +
+        `districts=${districtAreas.length} hasLayer=${Boolean(snapshot.geoserver_layer)} ` +
+        `hasDlUrl=${Boolean(snapshot.gee_download_url)}`, t0);
     return {
-        snapshot, districtAreas, stale: false, computing: false,
+        snapshot, districtAreas, comparison, stale: false, computing: false,
         geeTileUrl:    snapshot.gee_tile_url || null,
         geeMapId:      snapshot.gee_map_id   || null,
         classifiedViz: CLASSIFIED_VIZ,
     };
 };
 
-const getHistory = async ({ page = 1, limit = 24 } = {}) =>
-    repo.listCompleted({ page, limit });
+const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer, sortByPublishedAt = false } = {}) => {
+    const t0 = Date.now();
+    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer, sortByPublishedAt });
+    dbgTime('GET_HISTORY',
+        `page=${page} limit=${limit} hasGeoserverLayer=${hasGeoserverLayer ?? 'all'} ` +
+        `→ items=${result.items.length} total=${result.total}`, t0);
+    return result;
+};
 
 const refresh = async ({ year, month, groundTruthAssetId, gtBufferM, minFieldTest } = {}) => {
     const now = new Date();
     const y   = year  || now.getUTCFullYear();
     const m   = month || (now.getUTCMonth() + 1);
+    console.log(`[FOREST-CLS] refresh (manual) triggered for period=${y}/${m}`);
     return runAnalysis(y, m, {
         trigger: 'manual',
         ...(groundTruthAssetId ? { groundTruthAssetId } : {}),
@@ -432,7 +742,7 @@ const refresh = async ({ year, month, groundTruthAssetId, gtBufferM, minFieldTes
  * @param {number} year
  * @param {number} month   1-12
  * @param {number|null} userId  Authenticated user id (for logging)
- * @returns {{ snapshot, districtAreas, cached, computing }}
+ * @returns {{ snapshot, districtAreas, comparison, cached, computing }}
  */
 const queryForPeriod = async (year, month, userId = null) => {
     const existing = await repo.getByYearMonth(year, month);
@@ -440,10 +750,14 @@ const queryForPeriod = async (year, month, userId = null) => {
     if (existing) {
         if (['completed', 'published'].includes(existing.status)) {
             const districtAreas = await repo.getDistrictAreas(existing.id);
-            return { snapshot: existing, districtAreas, cached: true, computing: false };
+            const comparison = await buildSnapshotComparison(existing, districtAreas);
+            return { snapshot: existing, districtAreas, comparison, cached: true, computing: false };
         }
         if (['computing', 'exporting'].includes(existing.status)) {
-            return { snapshot: existing, districtAreas: [], cached: false, computing: true };
+            return {
+                snapshot: existing, districtAreas: [], comparison: null,
+                cached: false, computing: true,
+            };
         }
         // failed / pending → fall through to re-trigger
     }
@@ -457,7 +771,10 @@ const queryForPeriod = async (year, month, userId = null) => {
     const pending = await repo.getByYearMonth(year, month)
         || { id: null, year, month, status: 'computing' };
 
-    return { snapshot: pending, districtAreas: [], cached: false, computing: true };
+    return {
+        snapshot: pending, districtAreas: [], comparison: null,
+        cached: false, computing: true,
+    };
 };
 
 // ── Admin logs ────────────────────────────────────────────────────────────────
@@ -472,7 +789,7 @@ const getLogs = async ({ page = 1, limit = 24, status = null } = {}) =>
 // ── Snapshot by ID ────────────────────────────────────────────────────────────
 
 /**
- * Get a specific snapshot with district areas.
+ * Get a specific snapshot with district areas and nearest prior-period comparison.
  * Used by clients to poll a user-triggered analysis.
  */
 const getSnapshotById = async (id) => {
@@ -481,12 +798,12 @@ const getSnapshotById = async (id) => {
     const districtAreas = ['completed', 'published'].includes(snapshot.status)
         ? await repo.getDistrictAreas(snapshot.id)
         : [];
-    return { snapshot, districtAreas };
+    const comparison = await buildSnapshotComparison(snapshot, districtAreas);
+    return { snapshot, districtAreas, comparison };
 };
 
 module.exports = {
     runAnalysis,
-    pollExports,
     getLatest,
     getHistory,
     refresh,

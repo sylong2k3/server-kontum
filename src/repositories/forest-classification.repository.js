@@ -2,6 +2,12 @@
 
 const db = require('../configs/database');
 
+// Debug — FC_DEBUG=true (hoặc NODE_ENV=development) → in `[FOREST-REPO:DBG] ...`
+// cho các query. Info/warn/error luôn ghi bất kể flag.
+const DEBUG = process.env.FC_DEBUG === 'true'
+    || process.env.NODE_ENV === 'development';
+const dbg = (tag, msg) => { if (DEBUG) console.debug(`[FOREST-REPO:DBG:${tag}] ${msg}`); };
+
 // ── Snapshots ─────────────────────────────────────────────────────────────────
 
 const upsertSnapshot = async ({
@@ -63,6 +69,14 @@ const upsertSnapshot = async ({
 };
 
 const updateStatus = async (id, status, extra = {}) => {
+    // Debug — chỉ log key/value flag để tránh spam JSON dài. Đủ để trace việc
+    // set geoserver_layer (back-link) hoặc chuyển state (computing→completed).
+    if (DEBUG) {
+        const keys = Object.keys(extra).filter((k) => extra[k] !== undefined);
+        dbg('updateStatus', `id=${id} status=${status} fields=[${keys.join(',')}] ` +
+            (extra.geoserver_layer ? `layer=${extra.geoserver_layer} ` : '') +
+            (extra.error_message ? `err="${String(extra.error_message).slice(0, 80)}"` : ''));
+    }
     const sets = ['status = $2', 'updated_at = NOW()'];
     const vals = [id, status];
     let   idx  = 3;
@@ -90,6 +104,7 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gee_map_id',           extra.gee_map_id);
     addField('gee_tile_url',         extra.gee_tile_url);
     addField('gee_tile_generated_at',extra.gee_tile_generated_at);
+    addField('gee_download_url',     extra.gee_download_url);
     addField('gt_zone_count',        extra.gt_zone_count);
     addField('gt_point_count',       extra.gt_point_count);
     addField('gt_window_days',       extra.gt_window_days);
@@ -120,12 +135,21 @@ const getById = async (id) => {
 };
 
 const getLatestCompleted = async () => {
+    const t0 = Date.now();
     const { rows } = await db.query(
         `SELECT * FROM forest.forest_snapshots
          WHERE status IN ('completed','published')
          ORDER BY year DESC, month DESC
          LIMIT 1`,
     );
+    if (DEBUG) {
+        const r = rows[0];
+        console.debug(
+            `[FOREST-REPO:DBG:getLatestCompleted] (${Date.now() - t0}ms) → ` +
+            (r ? `id=${r.id} y/m=${r.year}/${r.month} status=${r.status} ` +
+                 `hasLayer=${Boolean(r.geoserver_layer)} hasDlUrl=${Boolean(r.gee_download_url)}` : 'null'),
+        );
+    }
     return rows[0] || null;
 };
 
@@ -146,16 +170,34 @@ const getByYearMonth = async (year, month) => {
     return rows[0] || null;
 };
 
-const listCompleted = async ({ page = 1, limit = 24 } = {}) => {
+/**
+ * List snapshots đã completed. Mirror fire-risk repo:
+ *   hasGeoserverLayer=true  → chỉ item đã publish GeoServer (client browse
+ *                              để add overlay WMS so sánh liên tháng).
+ *   hasGeoserverLayer=false → chỉ item chưa publish (admin xem để trigger).
+ *   undefined → tất cả (backward-compat).
+ */
+const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer, sortByPublishedAt = false } = {}) => {
+    const t0 = Date.now();
     const offset = (page - 1) * limit;
+    const whereClauses = [`status IN ('completed','published')`];
+    if (hasGeoserverLayer === true)  whereClauses.push('geoserver_layer IS NOT NULL');
+    if (hasGeoserverLayer === false) whereClauses.push('geoserver_layer IS NULL');
+    const whereSql = whereClauses.join(' AND ');
+    const orderSql = sortByPublishedAt
+        ? 'published_at DESC NULLS LAST, year DESC, month DESC, id DESC'
+        : 'year DESC, month DESC, created_at DESC, id DESC';
+    dbg('listCompleted', `page=${page} limit=${limit} filter=${hasGeoserverLayer ?? 'all'} WHERE=${whereSql}`);
+
     const { rows } = await db.query(
         `SELECT id, year, month, status, trigger, oob_accuracy, s2_image_count,
                 ls_image_count, duration_ms, province_summary, computed_at, published_at,
-                geoserver_layer,
+                gee_tile_url, gee_tile_generated_at, gee_download_url,
+                geoserver_layer, geoserver_store, minio_key,
                 COUNT(*) OVER()::int AS total_count
          FROM forest.forest_snapshots
-         WHERE status IN ('completed','published')
-         ORDER BY year DESC, month DESC
+         WHERE ${whereSql}
+         ORDER BY ${orderSql}
          LIMIT $1 OFFSET $2`,
         [limit, offset],
     );
@@ -165,15 +207,18 @@ const listCompleted = async ({ page = 1, limit = 24 } = {}) => {
         if (offset > 0) {
             const { rows: cnt } = await db.query(
                 `SELECT COUNT(*)::int AS total FROM forest.forest_snapshots
-                 WHERE status IN ('completed','published')`,
+                 WHERE ${whereSql}`,
             );
             total = cnt[0].total;
         }
+        dbg('listCompleted', `EMPTY result (${Date.now() - t0}ms) total=${total}`);
         return { items: [], total };
     }
 
     const total = rows[0].total_count;
     const items = rows.map(({ total_count, ...row }) => row);
+    const withLayer = items.filter((r) => r.geoserver_layer).length;
+    dbg('listCompleted', `(${Date.now() - t0}ms) items=${items.length} total=${total} withGeoLayer=${withLayer}`);
     return { items, total };
 };
 
@@ -220,14 +265,9 @@ const listAll = async ({ page = 1, limit = 24, status = null } = {}) => {
     return { items, total };
 };
 
-const listExporting = async () => {
-    const { rows } = await db.query(
-        `SELECT * FROM forest.forest_snapshots
-         WHERE status = 'exporting' AND gee_task_id IS NOT NULL
-         ORDER BY created_at`,
-    );
-    return rows;
-};
+// listExporting() đã BỎ — GCS batch export path không còn dùng (thay bằng
+// auto-ingest queue). Nếu về sau cần đọc snapshot status='exporting', dùng
+// `getById` hoặc query trực tiếp trong migration.
 
 // ── District area stats ───────────────────────────────────────────────────────
 
@@ -314,7 +354,6 @@ module.exports = {
     getByYearMonth,
     listCompleted,
     listAll,
-    listExporting,
     replaceDistrictAreas,
     getDistrictAreas,
     getPreviousCompleted,

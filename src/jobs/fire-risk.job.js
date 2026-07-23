@@ -3,13 +3,22 @@
 /**
  * Fire Risk Cron Job (EP-06).
  *
- * Tick 1 (daily, FIRE_RISK_CRON = '0 23 * * *' → 06:00 VN):
+ * Tick 1 (daily, FIRE_RISK_CRON = '0 6 * * *' → 06:00 VN):
  *   → runAnalysis(today) — tính stats từ GEE, lưu DB
  *   → nếu GCS được cấu hình: submit raster export task
  *   → auto-enqueue raster-ingest (MinIO → GeoServer), back-link snapshot
  *
  * Tick 2 (mỗi 30 phút, để poll task GEE export đang chạy):
  *   → pollExports() — kiểm tra task COMPLETED → harvest GeoServer
+ *
+ * Startup catch-up (v2 — 2026-07-22):
+ *   Sau khi lifecycle.start() schedule cron, delay 60s rồi check DB:
+ *     - Nếu snapshot mới nhất KHÔNG PHẢI hôm nay (VN) VÀ hiện đã QUÁ giờ cron
+ *       → chạy runDailyAnalysis(today) ngay để bù (server có thể vừa restart
+ *         sau khi miss tick sáng nay).
+ *     - Nếu đã có snapshot completed hôm nay → skip.
+ *   Toggle: FIRE_RISK_CATCHUP=false để tắt (default: true).
+ *   Delay 60s: tránh chạy analysis lúc server chưa initialize xong (GEE, GDAL).
  *
  * Cleanup: ĐÃ BỎ. Chính sách hiện tại là "giữ toàn bộ lịch sử snapshot" —
  * không xoá bất kỳ hàng nào để đảm bảo audit + so sánh long-term. Nếu về sau
@@ -35,6 +44,24 @@ const POLL_CRON     = process.env.FIRE_RISK_POLL_CRON || '*/30 * * * *';
 const DEBUG = process.env.FIRE_RISK_DEBUG === 'true'
     || process.env.NODE_ENV === 'development';
 const dbg = (msg) => { if (DEBUG) console.debug(`[FIRE-RISK-JOB] ${msg}`); };
+
+// Catch-up: mặc định ON. FIRE_RISK_CATCHUP=false để tắt (VD staging không
+// muốn tự chạy analysis khi restart pod).
+const CATCHUP_ENABLED = process.env.FIRE_RISK_CATCHUP !== 'false';
+
+// Parse "0 6 * * *" → { hour: 6, minute: 0 }. Trả null nếu không match dạng
+// chuẩn ngày-thường (dùng cho catch-up quyết định "đã qua giờ cron chưa").
+// Không handle cron phức tạp (step, list, range) — nếu user set expr đặc biệt,
+// catch-up sẽ skip (không risk sai) và trong log warn.
+function _parseCronHourMinute(expr) {
+    const parts = String(expr || '').trim().split(/\s+/);
+    if (parts.length !== 5) return null;
+    const minute = Number(parts[0]);
+    const hour   = Number(parts[1]);
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+    if (!Number.isInteger(hour)   || hour   < 0 || hour   > 23) return null;
+    return { hour, minute };
+}
 
 let analysisTask = null;
 let pollTask     = null;
@@ -109,6 +136,79 @@ const runPollExports = async () => {
     }
 };
 
+// ── Catch-up on startup ─────────────────────────────────────────────────────
+// Nếu server vừa restart sau khi miss cron tick sáng nay, chạy lại analysis
+// cho ngày hôm nay. Guard bằng "đã qua giờ cron chưa" — trước 06:00 VN thì
+// đợi tick tự nhiên, không chạy sớm.
+async function _catchupIfNeeded() {
+    if (!CATCHUP_ENABLED) {
+        console.log('[FIRE RISK] catch-up disabled (FIRE_RISK_CATCHUP=false) — skip startup check');
+        return;
+    }
+
+    const scheduled = _parseCronHourMinute(ANALYSIS_CRON);
+    if (!scheduled) {
+        console.warn(`[FIRE RISK] catch-up SKIPPED — không parse được cron "${ANALYSIS_CRON}" (expr đặc biệt)`);
+        return;
+    }
+    const cronTz = process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh';
+
+    // Lấy giờ + ngày hiện tại theo TZ cron (không phải UTC hay TZ server).
+    // Intl.DateTimeFormat với timeZone là cách chính xác nhất, không phụ thuộc
+    // env TZ hay Date.getTimezoneOffset() của process.
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: cronTz, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(now).reduce((a, p) => {
+        if (p.type !== 'literal') a[p.type] = p.value;
+        return a;
+    }, {});
+    const localDate = `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
+    const localHour = Number(parts.hour);
+    const localMin  = Number(parts.minute);
+
+    // "Đã qua giờ cron" — so sánh (hour, minute) hiện tại với scheduled.
+    const passedCronTime =
+        localHour > scheduled.hour ||
+        (localHour === scheduled.hour && localMin >= scheduled.minute);
+
+    if (!passedCronTime) {
+        console.log(
+            `[FIRE RISK] catch-up SKIP — chưa tới giờ cron. Now=${localDate} ${String(localHour).padStart(2,'0')}:${String(localMin).padStart(2,'0')} ` +
+            `cron=${String(scheduled.hour).padStart(2,'0')}:${String(scheduled.minute).padStart(2,'0')} tz=${cronTz}`,
+        );
+        return;
+    }
+
+    // Đã qua giờ — check DB xem hôm nay đã có snapshot completed chưa.
+    const latest = await repo.getLatestCompleted().catch((err) => {
+        console.warn(`[FIRE RISK] catch-up: getLatestCompleted failed: ${err.message}`);
+        return null;
+    });
+    const latestDate = latest?.analysis_date
+        ? (latest.analysis_date instanceof Date
+            ? latest.analysis_date.toISOString().slice(0, 10)
+            : String(latest.analysis_date).slice(0, 10))
+        : null;
+
+    if (latestDate === localDate) {
+        console.log(`[FIRE RISK] catch-up SKIP — snapshot cho ${localDate} đã tồn tại (id=${latest.id} status=${latest.status})`);
+        return;
+    }
+
+    console.log(
+        `[FIRE RISK] catch-up TRIGGER — server có thể miss cron sáng nay. ` +
+        `latest=${latestDate || 'none'} today=${localDate} tz=${cronTz}. ` +
+        `Chạy runAnalysis(${localDate}) ngay.`,
+    );
+    // Fire-and-forget — không chờ, không throw (analysis chạy vài phút, không
+    // được block server startup).
+    runDailyAnalysis().catch((err) => {
+        console.error(`[FIRE RISK] catch-up analysis error: ${err.message}`);
+    });
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 const start = () => {
@@ -133,12 +233,20 @@ const start = () => {
 
     console.log(
         `[FIRE RISK] STARTED analysis="${ANALYSIS_CRON}" poll="${POLL_CRON}" ` +
-        `timezone=${cronOpts.timezone} ` +
+        `timezone=${cronOpts.timezone} catchup=${CATCHUP_ENABLED ? 'on' : 'off'} ` +
         `gcsConfigured=${cfg.isGcsConfigured() ? 'yes' : 'NO — raster export skipped'} ` +
         `debug=${DEBUG} snapshot_retention=UNLIMITED (cleanup disabled)`,
     );
     console.log(`  ✓ Fire risk analysis job scheduled (${ANALYSIS_CRON} @ ${cronOpts.timezone})`);
     console.log(`  ✓ Fire risk export poll job scheduled (${POLL_CRON})`);
+
+    // Catch-up sau 60s — đợi GEE + DB + MinIO stable. Không await để start()
+    // trả về ngay (không block bootstrap khác). Fire-and-forget với catch inline.
+    setTimeout(() => {
+        _catchupIfNeeded().catch((err) => {
+            console.error(`[FIRE RISK] startup catch-up error: ${err.message}`);
+        });
+    }, 60_000);
 };
 
 const stop = () => {

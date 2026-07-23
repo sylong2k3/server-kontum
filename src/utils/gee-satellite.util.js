@@ -578,7 +578,10 @@ async function getEeDownloadUrl(eeImage, region, vizParams = {}, opts = {}) {
         const compactDate = String(date).replace(/-/g, '');
         const fileBase    = `${safeName}_${compactDate}`;
         const url = await new Promise((resolve) => {
-            const timer = setTimeout(() => resolve(null), timeoutMs);
+            const timer = setTimeout(() => {
+                console.warn(`[GEE-DOWNLOAD] Timed out after ${timeoutMs}ms (name=${fileBase}, scale=${scale}m).`);
+                resolve(null);
+            }, timeoutMs);
             visImage.getDownloadURL({
                 name: fileBase,
                 scale,
@@ -591,12 +594,16 @@ async function getEeDownloadUrl(eeImage, region, vizParams = {}, opts = {}) {
                 maxPixels,
             }, (u, err) => {
                 clearTimeout(timer);
+                if (err) {
+                    console.warn(`[GEE-DOWNLOAD] Failed (name=${fileBase}, scale=${scale}m): ${err.message || err}`);
+                }
                 resolve(err ? null : u);
             });
         });
         if (!url) return null;
         return { url, filename: `${fileBase}.zip` };
     } catch (e) {
+        console.warn(`[GEE-DOWNLOAD] Failed before URL generation: ${e.message || e}`);
         return null;
     }
 }

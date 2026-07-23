@@ -326,7 +326,13 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         // Threshold pseudo-labels still exercise all 11 classes.
         liteMode = false,
     } = opts;
-    const rfSeed  = seed ?? year;
+    // GEE `Image.stratifiedSample` yêu cầu `seed` là Integer (int32 signed,
+     // max 2^31-1 = 2,147,483,647). Derived seed bên dưới có phép nhân với
+     // 1000/2000 → phải đảm bảo input seed đủ nhỏ. Clamp về khoảng [0, MAX_SAFE]
+     // để tránh overflow bất kể caller truyền seed to đến đâu.
+    const MAX_INT32 = 2147483647;
+    const clampSeed = (n) => Math.abs(n) % MAX_INT32;
+    const rfSeed  = clampSeed(seed ?? year);
     // GT chỉ true khi có ít nhất 1 nguồn (inline GeoJSON hoặc asset).
     const hasGT   = Boolean(groundTruthGeoJson?.features?.length || groundTruthAssetId);
     const total   = liteMode ? cfg.LITE_SAMPLES_PER_CLASS : cfg.SAMPLES_PER_CLASS;
@@ -403,15 +409,15 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
                     gtFC = ee.FeatureCollection(groundTruthAssetId)
                         .filter(ee.Filter.notNull(['class']));
                 }
-                const gtWithSplit = gtFC.randomColumn('split_random', rfSeed + 101);
+                const gtWithSplit = gtFC.randomColumn('split_random', clampSeed(rfSeed + 101));
                 const gtTrainFC   = gtWithSplit.filter(ee.Filter.lt('split_random', 0.7));
                 const gtTestFC    = gtWithSplit.filter(ee.Filter.gte('split_random', 0.7));
 
                 exclusionMask     = buildExclusionMask(gtFC, gtBufferM, region);
                 inputTrainSamples = sampleGroundTruth(featureImage, gtTrainFC, inputQuota,
-                    regionGeom, rfSeed + 501);
+                    regionGeom, clampSeed(rfSeed + 501));
                 inputTestSamples  = sampleGroundTruth(featureImage, gtTestFC, inputTestQuota,
-                    regionGeom, rfSeed + 502);
+                    regionGeom, clampSeed(rfSeed + 502));
             },
         );
     }
@@ -421,14 +427,14 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     const thresholdSamples = await log.run(
         'Sample threshold pool via stratifiedSample [LAZY]',
         () => Promise.resolve(sampleFromLabel(featureImage, thresholdLabel,
-            thresholdQuota, regionGeom, rfSeed * 1000 + 1, exclusionMask, sampleScaleM)),
+            thresholdQuota, regionGeom, clampSeed(rfSeed * 1000 + 1), exclusionMask, sampleScaleM)),
         { note: `numPoints=${thresholdQuota} scale=${sampleScaleM}m tileScale=16` },
     );
     const datasetSamples = useDatasetLabels
         ? await log.run(
             'Sample dataset pool via stratifiedSample [LAZY]',
             () => Promise.resolve(sampleFromLabel(featureImage, datasetLabel,
-                datasetQuota, regionGeom, rfSeed * 2000 + 1, exclusionMask, sampleScaleM)),
+                datasetQuota, regionGeom, clampSeed(rfSeed * 2000 + 1), exclusionMask, sampleScaleM)),
             { note: `numPoints=${datasetQuota} scale=${sampleScaleM}m tileScale=16` },
         )
         : ee.FeatureCollection([]);

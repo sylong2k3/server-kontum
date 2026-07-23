@@ -20,6 +20,11 @@ router.post('/query',  optionalAuth, asyncHandler(ctrl.queryPeriod));
 // Poll a specific snapshot (for clients waiting on computing=true results).
 router.get('/snapshot/:id', optionalAuth, asyncHandler(ctrl.getSnapshot));
 
+// Public browse các snapshot ĐÃ publish GeoServer — client sidebar dùng để
+// hiển thị list history + add WMS overlay các tháng cũ. Trả subset field an
+// toàn (không leak error_message, minio_key, download URL...).
+router.get('/published-history', optionalAuth, asyncHandler(ctrl.getPublishedHistory));
+
 // ── Admin only ────────────────────────────────────────────────────────────────
 
 // Completed runs (existing public-facing history).
@@ -33,6 +38,13 @@ router.get('/logs', verifyToken, requirePermission('forest_classification', 'man
 // Manually trigger a run for a specific period.
 router.post('/refresh', verifyToken, requirePermission('forest_classification', 'manage'),
     asyncHandler(ctrl.refresh));
+
+// Publish snapshot GeoTIFF → MinIO → GeoServer, back-link `geoserver_layer` vào
+// snapshot khi job xong. Cùng permission `map_layers.ingest_raster` với
+// fire-risk (đã có ở system_admin + so_nnmt từ migration 031).
+router.post('/snapshots/:id/publish-raster',
+    verifyToken, requirePermission('map_layers', 'ingest_raster'),
+    asyncHandler(ctrl.publishRaster));
 
 // ── Ground truth ─────────────────────────────────────────────────────────────
 // Quyền `forest_classification.ground_truth` (migration 033).
