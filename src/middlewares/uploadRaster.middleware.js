@@ -17,8 +17,8 @@ const { t } = require('../utils/i18n.util');
 
 const MB = 1024 * 1024;
 
-// Giới hạn cho đường multipart (in-memory). Mặc định 100MB — file lớn hơn dùng presigned.
-const RASTER_MULTIPART_MAX_SIZE = Number(process.env.UPLOAD_RASTER_MULTIPART_MAX_MB || 100) * MB;
+// Giới hạn cho đường multipart (in-memory). Mặc định 1GB — file lớn hơn dùng presigned.
+const RASTER_MULTIPART_MAX_SIZE = Number(process.env.UPLOAD_RASTER_MULTIPART_MAX_MB || 1024) * MB;
 const MULTIPART_FIELD_MAX_SIZE = Number(process.env.UPLOAD_FIELD_MAX_MB || 1) * MB;
 
 // ── Định nghĩa các loại file được phép ────────────────────────────────────────
