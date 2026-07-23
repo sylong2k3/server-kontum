@@ -28,7 +28,9 @@ const MAX_BYTES = Number(process.env.RASTER_INGEST_MAX_MB || 3072) * MB;
 
 const FETCH_TIMEOUT_MS = Number(process.env.RASTER_INGEST_FETCH_TIMEOUT_MS || 900_000);
 const MAX_RETRIES      = Number(process.env.RASTER_INGEST_MAX_RETRIES || 3);
-const CONCURRENCY      = Math.max(1, Number(process.env.RASTER_INGEST_CONCURRENCY || 2));
+// Earth Engine Restricted Mode chỉ cho phép rất ít request getPixels đồng thời.
+// Chạy tuần tự mặc định để các URL forest/fire không tự tranh quota với nhau.
+const CONCURRENCY      = Math.max(1, Number(process.env.RASTER_INGEST_CONCURRENCY || 1));
 
 // GDAL cache khi merge band GEE zip → RGB GeoTIFF (MB).
 const GDAL_CACHEMAX_MB = Number(process.env.GDAL_CACHEMAX_MB || 512);

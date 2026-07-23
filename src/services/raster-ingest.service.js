@@ -125,6 +125,17 @@ async function enqueue({
     try {
         await client.query('BEGIN');
 
+        // URL GEE là tạm thời nên hai analysis cùng kỳ có thể sinh URL khác
+        // nhau cho cùng layer. Advisory lock làm check + insert atomic giữa
+        // nhiều request/process, rồi dedupe theo layer đích.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [layerCode]);
+        const activeLayerJob = await rasterRepo.findActiveByLayerCode(layerCode, client);
+        if (activeLayerJob) {
+            await client.query('COMMIT');
+            console.log(`[RASTER-INGEST] DEDUPE layer → job=${activeLayerJob.id} status=${activeLayerJob.status} layer=${layerCode}`);
+            return { job: activeLayerJob, deduplicated: true };
+        }
+
         const job = await rasterRepo.insertJob(client, {
             layerCode,
             sourceKind:    'gee_download_url',

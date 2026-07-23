@@ -174,11 +174,17 @@ async function sendTop3ChangesAlert(snapshot, prevSnapshot, provinceSummary) {
             return `  ${idx + 1}. ${c.name}: ${sign}${c.pct.toFixed(1)}% ` +
                    `(${c.prevHa.toLocaleString('vi')} → ${c.currHa.toLocaleString('vi')} ha)`;
         });
-        await notifSvc.createSystemNotification({
-            title:   `Cảnh báo biến động rừng ${period}`,
-            message: `So sánh với ${prevPeriod}. Top 3 lớp biến động mạnh nhất:\n${lines.join('\n')}`,
-            type:    'warning',
-        });
+        const title = `Cảnh báo biến động rừng ${period}`;
+        const body = `So sánh với ${prevPeriod}. Top 3 lớp biến động mạnh nhất:\n${lines.join('\n')}`;
+        for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
+            await notifSvc.broadcastToRole(role, {
+                type: 'forest_change_alert',
+                title,
+                body,
+                data: { snapshotId: snapshot.id, period, previousPeriod: prevPeriod, top3 },
+                channel: 'alert',
+            });
+        }
         console.log(`[FOREST] top-3 alert dispatched period=${period} vs ${prevPeriod} top1=${top3[0].name} ${top3[0].pct.toFixed(1)}%`);
     } catch (err) {
         console.warn('[FOREST] Alert notification failed:', err.message);
@@ -187,7 +193,7 @@ async function sendTop3ChangesAlert(snapshot, prevSnapshot, provinceSummary) {
 
 // ── Main analysis ─────────────────────────────────────────────────────────────
 
-async function runAnalysis(year, month, {
+async function executeAnalysis(year, month, {
     trigger            = 'cron',
     requestedBy        = null,
     groundTruthAssetId = process.env.FC_GROUND_TRUTH_ASSET_ID || '',
@@ -445,6 +451,23 @@ async function runAnalysis(year, month, {
         await repo.updateStatus(snapshot.id, 'failed', { error_message: err.message });
         throw err;
     }
+}
+
+// Chặn hai request manual/user/cron cùng materialize một graph GEE cho cùng kỳ.
+// Các caller đến sau dùng chung Promise và nhận cùng snapshot kết quả.
+const activeRuns = new Map();
+function runAnalysis(year, month, options = {}) {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    const active = activeRuns.get(key);
+    if (active) {
+        console.warn(`[FOREST-CLS] runAnalysis DEDUPE period=${key} — reuse active run`);
+        return active;
+    }
+
+    const run = executeAnalysis(year, month, options)
+        .finally(() => activeRuns.delete(key));
+    activeRuns.set(key, run);
+    return run;
 }
 
 // ── Notification / auto-ingest helpers ──────────────────────────────────────

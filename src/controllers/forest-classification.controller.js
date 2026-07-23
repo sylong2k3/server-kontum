@@ -111,13 +111,31 @@ const getPublishedHistory = async (req, res) => {
 const refresh = async (req, res) => {
     const year  = req.body?.year  ? parseInt(req.body.year,  10) : null;
     const month = req.body?.month ? parseInt(req.body.month, 10) : null;
+    const now = new Date();
+    const selectedYear = year || now.getUTCFullYear();
+    const selectedMonth = month || (now.getUTCMonth() + 1);
+    const isFuture = selectedYear > now.getUTCFullYear()
+        || (selectedYear === now.getUTCFullYear() && selectedMonth > now.getUTCMonth() + 1);
+    if (!Number.isInteger(selectedYear) || selectedYear < 1984 || selectedYear > now.getUTCFullYear()
+        || !Number.isInteger(selectedMonth) || selectedMonth < 1 || selectedMonth > 12 || isFuture) {
+        throw new Api400Error(
+            'Kỳ phân tích không hợp lệ. Chọn tháng từ 01/1984 đến tháng hiện tại.',
+            ['INVALID_ANALYSIS_PERIOD'],
+        );
+    }
     // Optional v3 ground-truth overrides — fall back to env defaults in svc.refresh.
     const groundTruthAssetId = req.body?.groundTruthAssetId
         ? String(req.body.groundTruthAssetId).trim() : undefined;
     const gtBufferM    = req.body?.gtBufferM    != null ? Number(req.body.gtBufferM)    : undefined;
     const minFieldTest = req.body?.minFieldTest != null ? Number(req.body.minFieldTest) : undefined;
 
-    const snapshot = await svc.refresh({ year, month, groundTruthAssetId, gtBufferM, minFieldTest });
+    const snapshot = await svc.refresh({
+        year: selectedYear,
+        month: selectedMonth,
+        groundTruthAssetId,
+        gtBufferM,
+        minFieldTest,
+    });
     CREATED(res, 'Đã kích hoạt phân loại lớp phủ rừng.', { snapshot });
 };
 

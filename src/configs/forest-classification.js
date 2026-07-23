@@ -91,10 +91,10 @@ const MINIO_BUCKET  = process.env.FC_MINIO_BUCKET || 'forest-classification';
 const EXPORT_SCALE_M = parseInt(process.env.FC_EXPORT_SCALE_M, 10) || 30;
 
 // Scale riêng cho getDownloadURL (preview/publish raster clip theo tỉnh).
-// Mặc định 250m, đồng bộ với FIRE_RISK_EXPORT_SCALE_M để raster-ingest không
-// phải kéo một ảnh RF 11 lớp quá lớn từ URL GEE tạm thời. Có thể override bằng
+// Mặc định 500m, đồng bộ với scale tính toán ổn định của fire-risk để GEE không
+// vượt memory limit khi materialize graph RF 11 lớp. Có thể override bằng
 // FC_DOWNLOAD_SCALE_M khi hạ tầng/quota cho phép xuất chi tiết hơn.
-const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 250;
+const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 500;
 
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 const SNAPSHOT_GRACE_MONTHS = parseInt(process.env.FC_SNAPSHOT_GRACE_MONTHS, 10) || 24;

@@ -55,6 +55,20 @@ async function findActiveBySourceHash(sourceHash) {
     return rows[0] || null;
 }
 
+async function findActiveByLayerCode(layerCode, queryable = db) {
+    const { rows } = await queryable.query(
+        `SELECT ${COLUMNS}
+         FROM gis.raster_ingest_jobs
+         WHERE layer_code = $1
+           AND status NOT IN ('completed','failed','cancelled')
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [layerCode],
+    );
+    if (rows[0]) dbg(`findActiveByLayerCode layer=${layerCode} → hit job=#${rows[0].id} status=${rows[0].status}`);
+    return rows[0] || null;
+}
+
 // ── Read ─────────────────────────────────────────────────────────────────────
 
 async function findById(id) {
@@ -182,6 +196,7 @@ async function claimPending({ batchSize, maxRetries }) {
 module.exports = {
     insertJob,
     findActiveBySourceHash,
+    findActiveByLayerCode,
     findById,
     listByLayerCode,
     updateStatus,
