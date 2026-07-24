@@ -849,14 +849,11 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
             StatusCodes.SERVICE_UNAVAILABLE,
         );
     }
-    const features = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
+    const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
+    const features = rows.map(toPublicFeatureRow);
     return {
         snapshot,
         features,
-        // Client render tile GEE trực tiếp — được publish khi runAnalysis chạy.
-        geeTileUrl:   snapshot.gee_tile_url || null,
-        geeMapId:     snapshot.gee_map_id || null,
-        riskLevelViz: RISK_LEVEL_VIZ,
         stale:        false,
         computing:    false,
     };
@@ -871,8 +868,6 @@ const getMap = async ({ minRiskLevel = 4 } = {}) => {
         return {
             type: 'FeatureCollection',
             features: [],
-            snapshotDate: null,
-            geeTileUrl: null,
         };
     }
     const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
@@ -885,21 +880,28 @@ const getMap = async ({ minRiskLevel = 4 } = {}) => {
             districtCode:  r.district_code,
             districtName:  r.district_name,
             areaHa:        r.area_ha,
-            pNesterovMean: r.p_nesterov_mean,
-            ndviMean:      r.ndvi_mean,
-            ...r.properties,
+            s2Coverage: r.properties?.s2Coverage ?? null,
+            centroid: r.properties?.centroid ?? null,
         },
     }));
     return {
-        type:           'FeatureCollection',
+        type: 'FeatureCollection',
         features,
-        snapshotDate:   snapshot.analysis_date,
-        geoserverLayer: snapshot.geoserver_layer || null,
-        geeTileUrl:     snapshot.gee_tile_url || null,
-        geeMapId:       snapshot.gee_map_id || null,
-        riskLevelViz:   RISK_LEVEL_VIZ,
     };
 };
+
+const toPublicFeatureRow = (row) => ({
+    id: row.id,
+    risk_level: row.risk_level,
+    district_code: row.district_code,
+    district_name: row.district_name,
+    area_ha: row.area_ha,
+    properties: {
+        s2Coverage: row.properties?.s2Coverage ?? null,
+        centroid: row.properties?.centroid ?? null,
+    },
+    geometry: row.geometry,
+});
 
 /**
  * List completed snapshots (history).

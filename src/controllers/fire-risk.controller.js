@@ -51,55 +51,37 @@ const buildGeoserverDownloadUrl = (layerFqn) => {
 // ── GET /fire-risk/latest ─────────────────────────────────────────────────────
 const getLatest = async (req, res) => {
     const minRiskLevel = parseInt(req.query.minRiskLevel, 10) || 1;
-    const {
-        snapshot, features, stale, computing,
-        geeTileUrl, geeMapId, riskLevelViz,
-    } = await svc.getLatest({ minRiskLevel });
+    const { snapshot, features, stale, computing } =
+        await svc.getLatest({ minRiskLevel });
     // NOTE — strip `geometry` field khỏi districtStats items để response gọn.
     // Polygon huyện đã có ở endpoint `/map` (fire_risk_features.geom), không
     // cần lặp trong `/latest`. Giữ centroid + stats.
     const districtStatsSlim = Array.isArray(snapshot.district_stats)
-        ? snapshot.district_stats.map(({ geometry, ...rest }) => rest)
-        : snapshot.district_stats;
+        ? snapshot.district_stats.map((district) => ({
+            unitCode: district.unitCode ?? null,
+            name: district.name ?? null,
+            centroid: district.centroid ?? null,
+            riskLevelDist: district.riskLevelDist || {},
+            s2Coverage: district.s2Coverage ?? null,
+        }))
+        : [];
 
     OK(res, t('get_detail_success', req.lang), {
         snapshot: {
             id:                  snapshot.id,
             analysisDate:        snapshot.analysis_date,
             status:              snapshot.status,
-            provinceSummary:     snapshot.province_summary,
+            provinceSummary:     formatProvinceSummary(snapshot.province_summary),
             // districtStats — thống kê per-huyện (unitCode, name, riskLevelDist,
             // pNesterovMean, s2Coverage, centroid). Đã strip geometry (xem trên).
             districtStats:       districtStatsSlim,
-            pNesterovStats:      snapshot.p_nesterov_stats,
-            s2CoverageRatio:     snapshot.s2_coverage_ratio,
-            // OOB accuracy % (0-100) của RF classifier. NULL khi RF disabled
-            // hoặc COMPUTE_OOB=false. FE hiển thị "N/A" nếu null.
-            oobAccuracy:         snapshot.oob_accuracy ?? null,
             geoserverLayer:      snapshot.geoserver_layer || null,
-            // Tile Earth Engine: client render trực tiếp bằng leaflet L.tileLayer(geeTileUrl).
             geeTileUrl:          snapshot.gee_tile_url || null,
-            geeMapId:            snapshot.gee_map_id || null,
-            geeTileGeneratedAt:  snapshot.gee_tile_generated_at || null,
-            // GEE getDownloadURL clip theo RanhGioiTinh_Polygon — trả GeoTIFF
-            // trần (image/tiff) valid ~24h. Client dùng để tải raster đầy đủ
-            // về máy. downloadFilename: gợi ý tên file cho `<a download>` (GEE
-            // default trả `<hash>:getPixels.tiff` không đọc được).
             geeDownloadUrl:      snapshot.gee_download_url || null,
-            // WCS GetCoverage — persistent, full-resolution, không expire.
-            // Client/admin nên ƯU TIÊN URL này khi có; fallback geeDownloadUrl.
             geoserverDownloadUrl: buildGeoserverDownloadUrl(snapshot.geoserver_layer),
             downloadFilename:    fireRiskFilename(snapshot.analysis_date),
-            // Giữ alias cũ `geeDownloadFilename` để không vỡ FE cũ.
-            geeDownloadFilename: fireRiskFilename(snapshot.analysis_date),
-            computedAt:          snapshot.computed_at,
-            publishedAt:         snapshot.published_at,
         },
         features,
-        // Trùng field ở tầng ngoài để client tiện lấy khi chỉ cần tile URL.
-        geeTileUrl,
-        geeMapId,
-        riskLevelViz,
         stale,
         computing,
     });
@@ -130,11 +112,22 @@ const getHistory = async (req, res) => {
     if (req.query.hasGeoserverLayer === 'true')  hasGeoserverLayer = true;
     if (req.query.hasGeoserverLayer === 'false') hasGeoserverLayer = false;
     const { items, total } = await svc.getHistory({ page, limit, hasGeoserverLayer });
-    OK_LIST(res, t('get_list_success', req.lang), items, {
+    const responseItems = items.map((item) => ({
+        ...item,
+        province_summary: formatProvinceSummary(item.province_summary),
+    }));
+    OK_LIST(res, t('get_list_success', req.lang), responseItems, {
         page, limit, total,
         ...(hasGeoserverLayer !== undefined ? { hasGeoserverLayer } : {}),
     });
 };
+
+const formatProvinceSummary = (summary = {}) => ({
+    maxLevel: summary.maxLevel ?? null,
+    avgRiskLevel: summary.avgRiskLevel ?? null,
+    riskLevelDist: summary.riskLevelDist || {},
+    s2CoverageRatio: summary.s2CoverageRatio ?? null,
+});
 
 // ── GET /fire-risk/published-history ─────────────────────────────────────────
 // Public sub-endpoint (optionalAuth) — chỉ trả snapshot ĐÃ publish GeoServer,
@@ -153,11 +146,7 @@ const getPublishedHistory = async (req, res) => {
     const safeItems = items.map((it) => ({
         id:                     it.id,
         analysis_date:          it.analysis_date,
-        status:                 it.status,
         geoserver_layer:        it.geoserver_layer,
-        gee_tile_url:           it.gee_tile_url,
-        gee_tile_generated_at:  it.gee_tile_generated_at,
-        computed_at:            it.computed_at,
         published_at:           it.published_at,
     }));
     OK_LIST(res, t('get_list_success', req.lang), safeItems, { page, limit, total });

@@ -51,16 +51,12 @@ const buildGeoserverDownloadUrl = (layerFqn) => {
 // ── GET /forest-classification/latest ────────────────────────────────────────
 const getLatest = async (req, res) => {
     dbg('LATEST', `caller user=${req.user?.id || 'anon'} lang=${req.lang}`);
-    const { snapshot, districtAreas, comparison, stale, computing, geeTileUrl, geeMapId, classifiedViz }
+    const { snapshot, districtAreas, comparison, stale, computing }
         = await svc.getLatest();
     OK(res, t('get_detail_success', req.lang), {
         snapshot: formatSnapshot(snapshot),
         districtAreas,
         comparison,
-        // Tile Earth Engine cho client render trực tiếp raster 11 lớp.
-        geeTileUrl,
-        geeMapId,
-        classifiedViz,
         stale,
         computing,
     });
@@ -101,11 +97,7 @@ const getPublishedHistory = async (req, res) => {
         id:                    it.id,
         year:                  it.year,
         month:                 it.month,
-        status:                it.status,
         geoserver_layer:       it.geoserver_layer,
-        gee_tile_url:          it.gee_tile_url,
-        gee_tile_generated_at: it.gee_tile_generated_at,
-        computed_at:           it.computed_at,
         published_at:          it.published_at,
     }));
     OK_LIST(res, t('get_list_success', req.lang), safeItems, { page, limit, total });
@@ -169,16 +161,6 @@ const queryPeriod = async (req, res) => {
     );
 };
 
-// ── GET /forest-classification/logs ──────────────────────────────────────────
-// Admin: full audit log of all runs (all statuses, all triggers).
-const getLogs = async (req, res) => {
-    const page   = parseInt(req.query.page,   10) || 1;
-    const limit  = parseInt(req.query.limit,  10) || 24;
-    const status = req.query.status || null;
-    const { items, total } = await svc.getLogs({ page, limit, status });
-    OK_LIST(res, t('get_list_success', req.lang), items.map(formatLogRow), { page, limit, total });
-};
-
 // ── GET /forest-classification/snapshot/:id ───────────────────────────────────
 // Poll a specific run by ID — used after POST /query returns computing=true.
 const getSnapshot = async (req, res) => {
@@ -210,26 +192,15 @@ function formatSnapshot(s) {
         year:               s.year,
         month:              s.month,
         status:             s.status,
-        trigger:            s.trigger || 'cron',
         provinceSummary:    s.province_summary,
         oobAccuracy:        s.oob_accuracy,
-        testAccuracy:       s.test_accuracy ?? null,
         testKappa:          s.test_kappa ?? null,
-        sampleQuotas:       s.sample_quotas ?? null,
-        modelParams:        s.model_params ?? null,
-        durationMs:         s.duration_ms ?? null,
         geoserverLayer:     s.geoserver_layer || null,
-        // Đưa cả 3 field GEE tile vào snapshot để client có sẵn khi chỉ đọc snapshot.
         geeTileUrl:         s.gee_tile_url || null,
-        geeMapId:           s.gee_map_id || null,
-        geeTileGeneratedAt: s.gee_tile_generated_at || null,
-        // Download URLs — client/admin ưu tiên `geoserverDownloadUrl` (WCS
-        // persistent, full-res) → fallback `geeDownloadUrl` (GEE trần, TTL 24h).
         geeDownloadUrl:       s.gee_download_url || null,
         geoserverDownloadUrl: buildGeoserverDownloadUrl(s.geoserver_layer),
         downloadFilename:     forestFilename(s.year, s.month),
         computedAt:         s.computed_at,
-        publishedAt:        s.published_at,
     };
 }
 
@@ -298,24 +269,4 @@ const publishRaster = async (req, res) => {
     });
 };
 
-function formatLogRow(s) {
-    return {
-        id:             s.id,
-        year:           s.year,
-        month:          s.month,
-        status:         s.status,
-        trigger:        s.trigger || 'cron',
-        requestedBy:    s.requested_by ?? null,
-        oobAccuracy:    s.oob_accuracy ?? null,
-        s2ImageCount:   s.s2_image_count ?? null,
-        lsImageCount:   s.ls_image_count ?? null,
-        durationMs:     s.duration_ms ?? null,
-        geoserverLayer: s.geoserver_layer || null,
-        errorMessage:   s.error_message || null,
-        computedAt:     s.computed_at,
-        publishedAt:    s.published_at,
-        createdAt:      s.created_at,
-    };
-}
-
-module.exports = { getLatest, getHistory, getPublishedHistory, refresh, queryPeriod, getLogs, getSnapshot, publishRaster };
+module.exports = { getLatest, getHistory, getPublishedHistory, refresh, queryPeriod, getSnapshot, publishRaster };

@@ -188,10 +188,10 @@ const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) =
     dbg('listCompleted', `page=${page} limit=${limit} filter=${hasGeoserverLayer ?? 'all'} WHERE=${whereSql}`);
 
     const { rows } = await db.query(
-        `SELECT id, year, month, status, trigger, oob_accuracy, s2_image_count,
-                ls_image_count, duration_ms, province_summary, computed_at, published_at,
-                gee_tile_url, gee_tile_generated_at, gee_download_url,
-                geoserver_layer, geoserver_store, minio_key,
+        `SELECT id, year, month, status, oob_accuracy,
+                duration_ms, province_summary, computed_at, published_at,
+                gee_tile_url, gee_download_url,
+                geoserver_layer, error_message,
                 COUNT(*) OVER()::int AS total_count
          FROM forest.forest_snapshots
          WHERE ${whereSql}
@@ -224,45 +224,6 @@ const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) =
  * Admin: list ALL runs (all statuses), with optional status filter.
  * Returns timing, trigger, requester, errors — full audit view.
  */
-const listAll = async ({ page = 1, limit = 24, status = null } = {}) => {
-    const offset = (page - 1) * limit;
-    const params = [limit, offset];
-    let where = '';
-    if (status) { where = 'WHERE status = $3'; params.push(status); }
-
-    const { rows } = await db.query(
-        `SELECT id, year, month, status, trigger, requested_by,
-                oob_accuracy, s2_image_count, ls_image_count, duration_ms,
-                province_summary, geoserver_layer,
-                error_message, computed_at, published_at,
-                created_at, updated_at,
-                COUNT(*) OVER()::int AS total_count
-         FROM forest.forest_snapshots
-         ${where}
-         ORDER BY year DESC, month DESC, created_at DESC
-         LIMIT $1 OFFSET $2`,
-        params,
-    );
-
-    if (rows.length === 0) {
-        let total = 0;
-        if (offset > 0) {
-            const cntParams = status ? [status] : [];
-            const cntWhere  = status ? 'WHERE status = $1' : '';
-            const { rows: cnt } = await db.query(
-                `SELECT COUNT(*)::int AS total FROM forest.forest_snapshots ${cntWhere}`,
-                cntParams,
-            );
-            total = cnt[0].total;
-        }
-        return { items: [], total };
-    }
-
-    const total = rows[0].total_count;
-    const items = rows.map(({ total_count, ...row }) => row);
-    return { items, total };
-};
-
 // listExporting() đã BỎ — GCS batch export path không còn dùng (thay bằng
 // auto-ingest queue). Nếu về sau cần đọc snapshot status='exporting', dùng
 // `getById` hoặc query trực tiếp trong migration.
@@ -351,7 +312,6 @@ module.exports = {
     getLatest,
     getByYearMonth,
     listCompleted,
-    listAll,
     replaceDistrictAreas,
     getDistrictAreas,
     getPreviousCompleted,

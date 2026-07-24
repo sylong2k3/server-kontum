@@ -170,12 +170,10 @@ const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =
     // Trả đầy đủ field admin cần cho "full snapshot payload" trong panel expand.
     const { rows } = await db.query(
         `SELECT id, analysis_date, status, s2_coverage_ratio,
-                province_summary, district_stats, p_nesterov_stats,
-                oob_accuracy,
+                province_summary,
                 computed_at, published_at,
-                gee_map_id, gee_tile_url, gee_tile_generated_at,
-                gee_download_url, gee_task_id,
-                geoserver_layer, geoserver_store, minio_key,
+                gee_tile_url, gee_download_url,
+                geoserver_layer,
                 error_message,
                 COUNT(*) OVER()::int AS total_count
          FROM fire.fire_risk_snapshots
@@ -281,7 +279,7 @@ const replaceFeatures = async (snapshotId, features) => {
 const getFeatures = async (snapshotId, { minLevel = 1 } = {}) => {
     const { rows } = await db.query(
         `SELECT id, risk_level, district_code, district_name,
-                area_ha, p_nesterov_mean, ndvi_mean, properties,
+                area_ha, properties,
                 CASE WHEN geom IS NOT NULL
                      THEN ST_AsGeoJSON(geom)::jsonb
                      ELSE NULL

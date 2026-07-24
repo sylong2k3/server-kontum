@@ -654,16 +654,7 @@ const buildSnapshotComparison = async (snapshot, districtAreas) => {
         return {
             districtCode: current?.districtCode || previous?.districtCode || null,
             districtName: current?.districtName || previous?.districtName || null,
-            total: buildAreaMetric(currentStats.totalHa, previousStats.totalHa),
             forest: buildAreaMetric(currentStats.forestHa, previousStats.forestHa),
-            classes: cfg.CLASS_NAMES.map((className, classId) => ({
-                classId,
-                className,
-                ...buildAreaMetric(
-                    currentStats.byClass[classId],
-                    previousStats.byClass[classId],
-                ),
-            })),
         };
     }) : [];
 
@@ -700,7 +691,6 @@ const getLatest = async () => {
             return {
                 snapshot: pending, districtAreas: [], stale: true, computing: true,
                 comparison: null,
-                geeTileUrl: null, geeMapId: null, classifiedViz: CLASSIFIED_VIZ,
             };
         }
         dbgTime('GET_LATEST', 'no snapshot in DB → throw FC_NO_DATA', t0);
@@ -718,9 +708,6 @@ const getLatest = async () => {
         `hasDlUrl=${Boolean(snapshot.gee_download_url)}`, t0);
     return {
         snapshot, districtAreas, comparison, stale: false, computing: false,
-        geeTileUrl:    snapshot.gee_tile_url || null,
-        geeMapId:      snapshot.gee_map_id   || null,
-        classifiedViz: CLASSIFIED_VIZ,
     };
 };
 
@@ -794,15 +781,10 @@ const queryForPeriod = async (year, month, userId = null) => {
     };
 };
 
-// ── Admin logs ────────────────────────────────────────────────────────────────
-
 /**
  * Full audit log of all forest classification runs.
  * Includes every trigger (cron/manual/user), timing, OOB accuracy, errors.
  */
-const getLogs = async ({ page = 1, limit = 24, status = null } = {}) =>
-    repo.listAll({ page, limit, status });
-
 // ── Snapshot by ID ────────────────────────────────────────────────────────────
 
 /**
@@ -825,6 +807,5 @@ module.exports = {
     getHistory,
     refresh,
     queryForPeriod,
-    getLogs,
     getSnapshotById,
 };

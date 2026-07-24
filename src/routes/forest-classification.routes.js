@@ -32,9 +32,6 @@ router.get('/history', verifyToken, requirePermission('forest_classification', '
     asyncHandler(ctrl.getHistory));
 
 // Full audit log — all runs, all statuses, timing, trigger, errors.
-router.get('/logs', verifyToken, requirePermission('forest_classification', 'manage'),
-    asyncHandler(ctrl.getLogs));
-
 // Manually trigger a run for a specific period.
 router.post('/refresh', verifyToken, requirePermission('forest_classification', 'manage'),
     asyncHandler(ctrl.refresh));
