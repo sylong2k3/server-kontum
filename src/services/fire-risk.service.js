@@ -538,9 +538,15 @@ async function runAnalysis(analysisDate, {
             blendCase,
             modelConfidenceClass,
             oobPct,
+            rfSkipReason,
+            trainingCounts,
+            modelMeta,
         } = analysis;
         const pNesterov    = currentPredictors.select('NesterovP').rename('NesterovP');
-        const s2Observed45 = currentPredictors.select('S2_Observed45').rename('S2_Observed45');
+        // Band renamed 'S2_Observed45' → 'S2_ObservedWindow' để trung tính về
+        // độ dài cửa sổ (FEATURE_WINDOW_DAYS mặc định 30, không phải 45).
+        // Alias `s2Observed45` giữ tên biến JS cũ chỉ để giảm diff downstream.
+        const s2Observed45 = currentPredictors.select('S2_ObservedWindow').rename('S2_ObservedWindow');
 
         // 1 evaluate() heavy cho districts. Bỏ hoàn toàn reduceRegion province
         // riêng — provinceSummary được aggregate từ districtStats phía dưới
@@ -655,9 +661,20 @@ async function runAnalysis(analysisDate, {
             console.warn(`[FIRE-RISK] getDownloadURL failed (non-fatal): ${err.message}`);
         }
 
+        // Nhét model_meta vào JSONB `province_summary` (piggyback) để không
+        // cần thêm migration. Consumer đọc `provinceSummary._modelMeta`.
+        const provinceSummaryWithMeta = {
+            ...provinceSummary,
+            _modelMeta: {
+                ...modelMeta,
+                rfSkipReason:   rfSkipReason || null,
+                trainingCounts: trainingCounts || null,
+            },
+        };
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
-                province_summary:  provinceSummary,
+                province_summary:  provinceSummaryWithMeta,
                 district_stats:    districtStats,
                 p_nesterov_stats:  pNesterovStats,
                 s2_coverage_ratio: provinceSummary.s2CoverageRatio,

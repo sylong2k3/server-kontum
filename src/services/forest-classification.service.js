@@ -3,7 +3,7 @@
 /**
  * Forest Classification Service (Phân loại lớp phủ rừng).
  *
- * Implements the 11-class Kon Tum forest classification from lopPhuRungFinal.txt v3.
+ * Implements the 13-class Kon Tum forest classification schema v5.3.
  * The scheduled/admin flow uses the same lite Random Forest mode as
  * `/satellite/classified` so interactive GEE operations stay within quota.
  *
@@ -31,7 +31,7 @@ const {
     getEeMapId,
 } = require('../utils/gee-satellite.util');
 
-// Palette 11-class trùng với §0 CẤU HÌNH LỚP trong docs/kontum_forest_classification_final.js.
+// Palette 13-class trùng với docs/kontum_forest_classification_final.js.
 const CLASSIFIED_VIZ = {
     bands:   ['classification'],
     min:     0,
@@ -298,37 +298,38 @@ async function executeAnalysis(year, month, {
         // Lite mode: threshold-only pseudo-labels + 80 trees + 100m sample →
         // graph nhẹ, getMapId trả trong ~15-30s. Chấp nhận sai số accuracy
         // vài % — snapshot vẫn dùng được để so sánh liên tháng.
-        const { classified, quotas, oobPct } = await runRfClassification(
+        const rfResult = await runRfClassification(
             year,
             region,
             region.geometry(),
             {
-                // Seed nhỏ — pipeline nhân với 2000 khi derive cho dataset
-                // sample, phải bảo đảm không vượt int32 (2^31-1). Cũ:
-                // `year*1000+month` → 2026007 → *2000 → overflow. Xem
-                // commit fix clampSeed trong pipeline.
-                // Đồng bộ với satellite `/classified`: cùng năm + cùng ROI +
-                // cùng ground truth sẽ tạo cùng mô hình RF.
-                seed: year,
+                // v4.1: truyền thêm month để pipeline neo season windows đúng
+                // (base = 12 tháng trước end-of-month, green/dry/defol chọn
+                // cửa sổ gần nhất kết thúc ≤ anchor).
+                month,
+                // Seed = year*100+month (default trong pipeline nếu không truyền).
+                // Đồng bộ với satellite `/classified` khi cùng năm + tháng + ROI.
+                seed: year * 100 + month,
                 groundTruthAssetId,
                 groundTruthGeoJson,
                 gtBufferM,
                 minFieldTest,
                 logger:    log,
-                // KEY CHANGES:
-                liteMode:           true,  // skip DW+WC+JRC dataset labels
-                computeOob:         true,  // classifier.explain().getInfo(callback)
-                computeTestMetrics: false, // chỉ bật khi có holdout GT đủ tin cậy
+                // Snapshot nghiệp vụ phải chạy đúng cấu hình v5.3 đầy đủ:
+                // 1.800 mẫu, 100 cây RF và toàn bộ prior.
+                liteMode:           false,
+                computeOob:         true,
+                computeTestMetrics: false,
             },
         );
+        const { classified, quotas, oobPct } = rfResult;
+        const modelMeta = rfResult.modelMeta || null;
         const testAccuracyPct = null, testKappa = null;
 
-        // Area stats — dùng coarse scale (200m) như satellite `/classified` để
-        // reduceRegion mất ~10-20s thay vì 5+ phút. Chấp nhận sai số ±3% cho
-        // trend liên tháng. AREA_STATS_SCALE_M cũ = 60m → replace 200m.
-        const AREA_SCALE_M = 200;
+        // v5.3 thống kê ở 100 m (1 pixel xấp xỉ 1 ha), đồng bộ script chuẩn.
+        const AREA_SCALE_M = cfg.AREA_STATS_SCALE_M;
         const provinceSummary = await log.run(
-            'EVALUATE province area stats (reduceRegion sum groupBy class, coarse 200m)',
+            'EVALUATE province area stats (reduceRegion sum groupBy class)',
             () => computeProvinceAreaStats(classified, region, AREA_SCALE_M),
             { note: `scale=${AREA_SCALE_M}m tileScale=8 bestEffort` },
         );
@@ -342,13 +343,13 @@ async function executeAnalysis(year, month, {
         );
         log.mark('District area rows', `${districtAreas.length}`);
 
-        // GEE tile URL — client render trực tiếp raster phân loại 11 lớp.
+        // GEE tile URL — client render trực tiếp raster phân loại 13 lớp.
         // Không phụ thuộc GeoServer/GCS.
         let geeMapId = null;
         let geeTileUrl = null;
         try {
             const mapInfo = await log.run(
-                'Register GEE map (11-class viz → geeTileUrl)',
+                'Register GEE map (13-class viz → geeTileUrl)',
                 () => getEeMapId(classified, CLASSIFIED_VIZ),
                 { note: 'ee.data.getMapId — tile URL for /latest response' },
             );
@@ -382,9 +383,7 @@ async function executeAnalysis(year, month, {
                         resolve(null);
                     }, DL_TIMEOUT_MS);
                     classified
-                        // Mask class=0 ("Đất khác") để pixel không thuộc rừng
-                        // render trong suốt trên WMS overlay — cùng cơ chế
-                        // đã fix fire-risk.
+                        // v5.3: class=0 là pixel không có ảnh, cần trong suốt.
                         .updateMask(classified.gt(0))
                         .visualize(CLASSIFIED_VIZ)
                         .clip(region.geometry())
@@ -424,9 +423,14 @@ async function executeAnalysis(year, month, {
             console.warn(`[FOREST-CLS] getDownloadURL failed (non-fatal): ${err.message}`);
         }
 
+        // Piggyback modelMeta vào province_summary._modelMeta (không cần migration).
+        const provinceSummaryWithMeta = modelMeta
+            ? { ...provinceSummary, _modelMeta: modelMeta }
+            : provinceSummary;
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
-                province_summary: provinceSummary,
+                province_summary: provinceSummaryWithMeta,
                 oob_accuracy:     oobPct != null ? Math.round(oobPct * 100) / 100 : null,
                 test_accuracy:    testAccuracyPct != null ? Math.round(testAccuracyPct * 100) / 100 : null,
                 test_kappa:       testKappa != null ? Math.round(testKappa * 1000) / 1000 : null,

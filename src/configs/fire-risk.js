@@ -54,6 +54,11 @@ const TRAIN_USE_FALLBACK          = process.env.FIRE_RISK_TRAIN_USE_FALLBACK ===
 // Nesterov P daily-reset rain threshold (mm). Days above this reset P to 0.
 const RAIN_RESET_MM               = parseFloat(process.env.FIRE_RISK_RAIN_RESET_MM) || 5;
 
+// Minimum stratified samples per class required before RF training proceeds.
+// Guards against degenerate one-class training when a month yields few
+// positive or negative samples. Checked in service.js after evaluate().
+const MIN_SAMPLES_PER_CLASS       = parseInt(process.env.FIRE_RISK_MIN_SAMPLES_PER_CLASS, 10) || 20;
+
 // MCD64A1 max acceptable Uncertainty (days) for burned-label training samples.
 const MCD_MAX_UNCERTAINTY_DAY     = parseInt(process.env.FIRE_RISK_MCD_MAX_UNCERTAINTY, 10) || 30;
 const FIRECCI_MIN_CONFIDENCE      = parseInt(process.env.FIRE_RISK_FIRECCI_MIN_CONFIDENCE, 10) || 50;
@@ -172,6 +177,7 @@ module.exports = {
     TRAIN_USE_FALLBACK,
     RAIN_RESET_MM,
     MCD_MAX_UNCERTAINTY_DAY,
+    MIN_SAMPLES_PER_CLASS,
     FIRECCI_MIN_CONFIDENCE,
     FIRMS_MIN_CONFIDENCE,
     FIRMS_MIN_T21_K,

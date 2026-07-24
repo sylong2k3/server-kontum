@@ -7,8 +7,8 @@ const polygonGeom = Joi.object({
     coordinates: Joi.array().required(),
 }).unknown(true);
 
-// class_id 0-10 (11 class Kon Tum)
-const classId = Joi.number().integer().min(0).max(10);
+// Schema v5.3: 0=no-data, 1-11=lớp phủ, 12=không xác định.
+const classId = Joi.number().integer().min(0).max(12);
 
 const zoneCreate = Joi.object({
     name:        Joi.string().max(200).allow('', null),
