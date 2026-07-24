@@ -11,12 +11,14 @@
  * Tick 2 (mỗi 30 phút, để poll task GEE export đang chạy):
  *   → pollExports() — kiểm tra task COMPLETED → harvest GeoServer
  *
- * Startup catch-up (v2 — 2026-07-22):
- *   Sau khi lifecycle.start() schedule cron, delay 60s rồi check DB:
+ * Recovery watchdog (v3 — 2026-07-24):
+ *   Sau khi lifecycle.start() schedule cron, delay 60s rồi check DB; sau đó
+ *   kiểm tra lại mỗi 5 phút:
  *     - Nếu snapshot mới nhất KHÔNG PHẢI hôm nay (VN) VÀ hiện đã QUÁ giờ cron
  *       → chạy runDailyAnalysis(today) ngay để bù (server có thể vừa restart
- *         sau khi miss tick sáng nay).
- *     - Nếu đã có snapshot completed hôm nay → skip.
+ *         sau khi miss tick sáng nay, hoặc node-cron thức dậy trễ).
+ *     - Nếu hôm nay đã có snapshot ở bất kỳ trạng thái nào → skip để tránh
+ *       chạy trùng/retry nóng khi GEE đang tính hoặc vừa thất bại.
  *   Toggle: FIRE_RISK_CATCHUP=false để tắt (default: true).
  *   Delay 60s: tránh chạy analysis lúc server chưa initialize xong (GEE, GDAL).
  *
@@ -48,6 +50,7 @@ const dbg = (msg) => { if (DEBUG) console.debug(`[FIRE-RISK-JOB] ${msg}`); };
 // Catch-up: mặc định ON. FIRE_RISK_CATCHUP=false để tắt (VD staging không
 // muốn tự chạy analysis khi restart pod).
 const CATCHUP_ENABLED = process.env.FIRE_RISK_CATCHUP !== 'false';
+const WATCHDOG_INTERVAL_MS = 5 * 60_000;
 
 // Parse "0 6 * * *" → { hour: 6, minute: 0 }. Trả null nếu không match dạng
 // chuẩn ngày-thường (dùng cho catch-up quyết định "đã qua giờ cron chưa").
@@ -65,6 +68,8 @@ function _parseCronHourMinute(expr) {
 
 let analysisTask = null;
 let pollTask     = null;
+let watchdogStartupTimer = null;
+let watchdogInterval     = null;
 
 // Overlap protection cho poll (30-min tick nhưng GCS→MinIO→GeoServer harvest
 // đôi khi mất > 30 min khi có nhiều task cùng lúc).
@@ -77,14 +82,34 @@ let pollIdleTicks = 0;
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-const runDailyAnalysis = async () => {
+function _getCronLocalTime(now = new Date()) {
+    const cronTz = process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: cronTz, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(now).reduce((a, p) => {
+        if (p.type !== 'literal') a[p.type] = p.value;
+        return a;
+    }, {});
+
+    return {
+        date: `${parts.year}-${parts.month}-${parts.day}`,
+        hour: Number(parts.hour),
+        minute: Number(parts.minute),
+        timezone: cronTz,
+    };
+}
+
+const runDailyAnalysis = async (analysisDate) => {
     if (analysisRunning) {
         console.warn('[FIRE RISK] Daily analysis skipped: previous run still active');
         return;
     }
     analysisRunning = true;
     const t0 = Date.now();
-    const today = svc.todayUtc();
+    // Cron chạy lúc 06:00 VN, khi UTC vẫn có thể là ngày hôm trước. Luôn lấy
+    // analysis_date theo timezone của cron thay vì Date#toISOString().
+    const today = analysisDate || _getCronLocalTime().date;
     console.log(`[FIRE RISK] Daily analysis START date=${today} gcs=${cfg.isGcsConfigured() ? 'on' : 'off'}`);
     try {
         const snap = await svc.runAnalysis(today);
@@ -151,22 +176,11 @@ async function _catchupIfNeeded() {
         console.warn(`[FIRE RISK] catch-up SKIPPED — không parse được cron "${ANALYSIS_CRON}" (expr đặc biệt)`);
         return;
     }
-    const cronTz = process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh';
-
-    // Lấy giờ + ngày hiện tại theo TZ cron (không phải UTC hay TZ server).
-    // Intl.DateTimeFormat với timeZone là cách chính xác nhất, không phụ thuộc
-    // env TZ hay Date.getTimezoneOffset() của process.
-    const now = new Date();
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: cronTz, year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hour12: false,
-    }).formatToParts(now).reduce((a, p) => {
-        if (p.type !== 'literal') a[p.type] = p.value;
-        return a;
-    }, {});
-    const localDate = `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
-    const localHour = Number(parts.hour);
-    const localMin  = Number(parts.minute);
+    const local = _getCronLocalTime();
+    const cronTz = local.timezone;
+    const localDate = local.date;
+    const localHour = local.hour;
+    const localMin  = local.minute;
 
     // "Đã qua giờ cron" — so sánh (hour, minute) hiện tại với scheduled.
     const passedCronTime =
@@ -174,16 +188,17 @@ async function _catchupIfNeeded() {
         (localHour === scheduled.hour && localMin >= scheduled.minute);
 
     if (!passedCronTime) {
-        console.log(
-            `[FIRE RISK] catch-up SKIP — chưa tới giờ cron. Now=${localDate} ${String(localHour).padStart(2,'0')}:${String(localMin).padStart(2,'0')} ` +
+        dbg(
+            `recovery watchdog SKIP — chưa tới giờ cron. Now=${localDate} ${String(localHour).padStart(2,'0')}:${String(localMin).padStart(2,'0')} ` +
             `cron=${String(scheduled.hour).padStart(2,'0')}:${String(scheduled.minute).padStart(2,'0')} tz=${cronTz}`,
         );
         return;
     }
 
-    // Đã qua giờ — check DB xem hôm nay đã có snapshot completed chưa.
-    const latest = await repo.getLatestCompleted().catch((err) => {
-        console.warn(`[FIRE RISK] catch-up: getLatestCompleted failed: ${err.message}`);
+    // Đã qua giờ — check mọi trạng thái. Snapshot computing/failed cũng chứng
+    // minh lịch hôm nay đã được gọi; không tự tạo retry loop gây quá tải GEE.
+    const latest = await repo.getLatest().catch((err) => {
+        console.warn(`[FIRE RISK] recovery watchdog: getLatest failed: ${err.message}`);
         return null;
     });
     const latestDate = latest?.analysis_date
@@ -193,19 +208,19 @@ async function _catchupIfNeeded() {
         : null;
 
     if (latestDate === localDate) {
-        console.log(`[FIRE RISK] catch-up SKIP — snapshot cho ${localDate} đã tồn tại (id=${latest.id} status=${latest.status})`);
+        dbg(`recovery watchdog SKIP — snapshot ${localDate} exists (id=${latest.id} status=${latest.status})`);
         return;
     }
 
     console.log(
-        `[FIRE RISK] catch-up TRIGGER — server có thể miss cron sáng nay. ` +
+        `[FIRE RISK] recovery watchdog TRIGGER — daily cron may have been missed. ` +
         `latest=${latestDate || 'none'} today=${localDate} tz=${cronTz}. ` +
         `Chạy runAnalysis(${localDate}) ngay.`,
     );
     // Fire-and-forget — không chờ, không throw (analysis chạy vài phút, không
     // được block server startup).
-    runDailyAnalysis().catch((err) => {
-        console.error(`[FIRE RISK] catch-up analysis error: ${err.message}`);
+    runDailyAnalysis(localDate).catch((err) => {
+        console.error(`[FIRE RISK] recovery analysis error: ${err.message}`);
     });
 }
 
@@ -240,19 +255,31 @@ const start = () => {
     console.log(`  ✓ Fire risk analysis job scheduled (${ANALYSIS_CRON} @ ${cronOpts.timezone})`);
     console.log(`  ✓ Fire risk export poll job scheduled (${POLL_CRON})`);
 
-    // Catch-up sau 60s — đợi GEE + DB + MinIO stable. Không await để start()
-    // trả về ngay (không block bootstrap khác). Fire-and-forget với catch inline.
-    setTimeout(() => {
+    // Watchdog dùng setInterval thay vì một cron khác: nếu event loop bị block,
+    // timer sẽ chạy ngay sau khi được giải phóng và tự bù tick node-cron đã miss.
+    const runWatchdog = () => {
         _catchupIfNeeded().catch((err) => {
-            console.error(`[FIRE RISK] startup catch-up error: ${err.message}`);
+            console.error(`[FIRE RISK] recovery watchdog error: ${err.message}`);
         });
-    }, 60_000);
+    };
+    if (CATCHUP_ENABLED) {
+        watchdogStartupTimer = setTimeout(() => {
+            runWatchdog();
+            watchdogInterval = setInterval(runWatchdog, WATCHDOG_INTERVAL_MS);
+            watchdogInterval.unref?.();
+        }, 60_000);
+        watchdogStartupTimer.unref?.();
+    }
 };
 
 const stop = () => {
     [analysisTask, pollTask].forEach((t) => { if (t) t.stop(); });
+    if (watchdogStartupTimer) clearTimeout(watchdogStartupTimer);
+    if (watchdogInterval) clearInterval(watchdogInterval);
     analysisTask = null;
     pollTask     = null;
+    watchdogStartupTimer = null;
+    watchdogInterval     = null;
     console.log(`[FIRE RISK] STOPPED — pollTicks=${pollTicks} pollIdle=${pollIdleTicks}`);
 };
 

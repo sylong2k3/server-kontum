@@ -15,8 +15,10 @@
  *   - Pipeline chuyển sang liteMode + skipStats để tránh 5-phút timeout ở
  *     stage OOB accuracy evaluate() (root cause fail trước đây).
  *
- * Nếu server down đúng ngày 1, startup catch-up kiểm tra kỳ đầy đủ mới nhất và
- * chạy bù. Snapshot completed/published của cùng kỳ sẽ được bỏ qua.
+ * Recovery watchdog kiểm tra kỳ đầy đủ mới nhất sau startup và mỗi 5 phút.
+ * Nếu server down hoặc node-cron bỏ tick đúng ngày 1, watchdog sẽ chạy bù.
+ * Snapshot đã tồn tại ở bất kỳ trạng thái nào được giữ nguyên để tránh chạy
+ * trùng hoặc retry nóng khi GEE đang tính/vừa thất bại.
  *
  * Debug: bật FC_DEBUG=true (hoặc NODE_ENV=development) để thấy chi tiết
  * mỗi tick + counters. Log info luôn ghi bất kể flag để trace state.
@@ -31,6 +33,8 @@ const ANALYSIS_CRON = cfg.CRON;
 const CRON_TZ = process.env.FC_CRON_TZ || 'Asia/Ho_Chi_Minh';
 const CATCHUP_ENABLED = process.env.FC_CATCHUP_ENABLED !== 'false';
 const CATCHUP_DELAY_MS = Math.max(0, Number(process.env.FC_CATCHUP_DELAY_MS) || 60_000);
+const WATCHDOG_INTERVAL_MS = 5 * 60_000;
+const ACTIVE_STALE_MS = 2 * 60 * 60_000;
 
 const DEBUG = process.env.FC_DEBUG === 'true'
     || process.env.NODE_ENV === 'development';
@@ -38,10 +42,17 @@ const dbg = (msg) => { if (DEBUG) console.debug(`[FOREST-JOB] ${msg}`); };
 
 let analysisTask = null;
 let catchupTimer = null;
+let watchdogInterval = null;
 
 // Overlap protection — daily tick với 45-day guard nên overlap rất hiếm, nhưng
 // vẫn giữ flag để phòng edge case (server restart giữa run).
 let analysisRunning = false;
+
+const isActiveSnapshotStale = (snapshot, now = Date.now()) => {
+    if (!snapshot || !['pending', 'computing', 'exporting'].includes(snapshot.status)) return false;
+    const touchedAt = new Date(snapshot.updated_at || snapshot.created_at).getTime();
+    return Number.isFinite(touchedAt) && now - touchedAt >= ACTIVE_STALE_MS;
+};
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -60,7 +71,7 @@ const resolveTargetPeriod = (now = new Date(), timezone = CRON_TZ) => {
     return { year: previous.getUTCFullYear(), month: previous.getUTCMonth() + 1 };
 };
 
-const runScheduledAnalysis = async () => {
+const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
     if (analysisRunning) {
         console.warn('[FOREST] scheduled classification skipped: previous run still active');
         return;
@@ -74,9 +85,16 @@ const runScheduledAnalysis = async () => {
         dbg(`skip — period=${year}/${month} already ${existing.status} snapshotId=${existing.id}`);
         return;
     }
-    if (!force && existing && ['pending', 'computing', 'exporting'].includes(existing.status)) {
+    const staleActive = recoverStale && isActiveSnapshotStale(existing);
+    if (!force && existing && ['pending', 'computing', 'exporting'].includes(existing.status) && !staleActive) {
         console.warn(`[FOREST] scheduled classification skipped: period=${year}/${month} is ${existing.status}`);
         return;
+    }
+    if (staleActive) {
+        console.warn(
+            `[FOREST] stale ${existing.status} snapshot detected: period=${year}/${month} ` +
+            `snapshotId=${existing.id} updatedAt=${existing.updated_at || existing.created_at} — retrying`,
+        );
     }
 
     analysisRunning = true;
@@ -108,6 +126,25 @@ const runScheduledAnalysis = async () => {
     }
 };
 
+// setInterval vẫn chạy sau khi event loop được giải phóng, khác với node-cron
+// v4 vốn bỏ hẳn tick bị trễ. Chỉ chạy bù khi kỳ tháng trước chưa có snapshot;
+// mọi trạng thái hiện hữu đều được giữ nguyên để tránh chạy trùng/retry nóng.
+const runRecoveryCheck = async () => {
+    const { year, month } = resolveTargetPeriod();
+    const existing = await repo.getByYearMonth(year, month);
+    if (existing && !isActiveSnapshotStale(existing)) {
+        dbg(`recovery watchdog skip — period=${year}/${month} exists status=${existing.status} snapshotId=${existing.id}`);
+        return;
+    }
+
+    console.warn(
+        `[FOREST] recovery watchdog TRIGGER — period=${year}/${month} ` +
+        `${existing ? `has stale ${existing.status} snapshotId=${existing.id}` : 'is missing'}; ` +
+        'monthly cron may have been missed or interrupted',
+    );
+    await runScheduledAnalysis({ recoverStale: true });
+};
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 const start = () => {
@@ -125,10 +162,17 @@ const start = () => {
     if (CATCHUP_ENABLED) {
         catchupTimer = setTimeout(() => {
             catchupTimer = null;
-            runScheduledAnalysis().catch((err) => {
-                console.error(`[FOREST] startup catch-up failed: ${err.message}`);
+            runRecoveryCheck().catch((err) => {
+                console.error(`[FOREST] recovery watchdog failed: ${err.message}`);
             });
+            watchdogInterval = setInterval(() => {
+                runRecoveryCheck().catch((err) => {
+                    console.error(`[FOREST] recovery watchdog failed: ${err.message}`);
+                });
+            }, WATCHDOG_INTERVAL_MS);
+            watchdogInterval.unref?.();
         }, CATCHUP_DELAY_MS);
+        catchupTimer.unref?.();
     }
 
     console.log(
@@ -142,7 +186,15 @@ const start = () => {
 const stop = () => {
     if (analysisTask) { analysisTask.stop(); analysisTask = null; }
     if (catchupTimer) { clearTimeout(catchupTimer); catchupTimer = null; }
+    if (watchdogInterval) { clearInterval(watchdogInterval); watchdogInterval = null; }
     console.log('[FOREST] STOPPED');
 };
 
-module.exports = { start, stop, runScheduledAnalysis, resolveTargetPeriod };
+module.exports = {
+    start,
+    stop,
+    runScheduledAnalysis,
+    runRecoveryCheck,
+    resolveTargetPeriod,
+    isActiveSnapshotStale,
+};
