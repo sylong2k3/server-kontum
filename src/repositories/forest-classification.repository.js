@@ -108,6 +108,8 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gt_zone_count',        extra.gt_zone_count);
     addField('gt_point_count',       extra.gt_point_count);
     addField('gt_window_days',       extra.gt_window_days);
+    addField('next_retry_at',        extra.next_retry_at);
+    addField('last_retry_error',     extra.last_retry_error);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
@@ -122,6 +124,20 @@ const updateStatus = async (id, status, extra = {}) => {
     const { rows } = await db.query(
         `UPDATE forest.forest_snapshots SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
         vals,
+    );
+    return rows[0] || null;
+};
+
+const scheduleRetry = async (id, delayMs, errorMessage) => {
+    const { rows } = await db.query(
+        `UPDATE forest.forest_snapshots
+         SET retry_count = retry_count + 1,
+             next_retry_at = NOW() + ($2 * INTERVAL '1 millisecond'),
+             last_retry_error = $3,
+             updated_at = NOW()
+         WHERE id = $1 AND retry_count < 3
+         RETURNING *`,
+        [id, delayMs, String(errorMessage || '').slice(0, 4000)],
     );
     return rows[0] || null;
 };
@@ -307,6 +323,7 @@ const getPreviousCompleted = async (year, month) => {
 module.exports = {
     upsertSnapshot,
     updateStatus,
+    scheduleRetry,
     getById,
     getLatestCompleted,
     getLatest,

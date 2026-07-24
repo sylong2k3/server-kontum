@@ -51,6 +51,7 @@ const dbg = (msg) => { if (DEBUG) console.debug(`[FIRE-RISK-JOB] ${msg}`); };
 // muốn tự chạy analysis khi restart pod).
 const CATCHUP_ENABLED = process.env.FIRE_RISK_CATCHUP !== 'false';
 const WATCHDOG_INTERVAL_MS = 5 * 60_000;
+const RETRY_DELAYS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
 
 // Parse "0 6 * * *" → { hour: 6, minute: 0 }. Trả null nếu không match dạng
 // chuẩn ngày-thường (dùng cho catch-up quyết định "đã qua giờ cron chưa").
@@ -100,6 +101,20 @@ function _getCronLocalTime(now = new Date()) {
     };
 }
 
+// Chuyển analysis_date (DATE trong Postgres → JS Date theo local tz của Node)
+// về "YYYY-MM-DD" trong CRON timezone. Trước đây dùng `toISOString().slice(0,10)`
+// → so sánh với `localDate` (đã format theo VN tz) luôn lệch 1 ngày do server
+// Node ở VN (+7): pg-node parse DATE '2026-07-24' thành `2026-07-24T00:00+07`
+// → ISO UTC = '2026-07-23T17:00Z' → slice = '2026-07-23'. Watchdog vì thế
+// TRIGGER lại phân tích mỗi 5 phút dù snapshot hôm nay đã completed
+// → spam GEE compute + broadcast notification tới 3 role.
+function _toCronLocalDate(dateLike) {
+    if (dateLike == null || dateLike === '') return null;
+    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    if (!Number.isFinite(d.getTime())) return null;
+    return _getCronLocalTime(d).date;
+}
+
 const runDailyAnalysis = async (analysisDate) => {
     if (analysisRunning) {
         console.warn('[FIRE RISK] Daily analysis skipped: previous run still active');
@@ -113,6 +128,10 @@ const runDailyAnalysis = async (analysisDate) => {
     console.log(`[FIRE RISK] Daily analysis START date=${today} gcs=${cfg.isGcsConfigured() ? 'on' : 'off'}`);
     try {
         const snap = await svc.runAnalysis(today);
+        await repo.updateStatus(snap.id, snap.status, {
+            next_retry_at: null,
+            last_retry_error: null,
+        });
         const riskDist = snap.province_summary?.riskLevelDist || {};
         console.log(
             `[FIRE RISK] Daily analysis DONE date=${today} status=${snap.status} ` +
@@ -125,6 +144,28 @@ const runDailyAnalysis = async (analysisDate) => {
         dbg(`riskDist=${JSON.stringify(riskDist)}`);
     } catch (err) {
         console.error(`[FIRE RISK] Daily analysis FAILED date=${today} elapsed=${Date.now() - t0}ms — ${err.code || err.name || 'ERR'}: ${err.message}`);
+        try {
+            const failed = await repo.getLatest();
+            const failedDate = _toCronLocalDate(failed?.analysis_date);
+            const retryIndex = Number(failed?.retry_count || 0);
+            if (failedDate === today && retryIndex < RETRY_DELAYS_MS.length) {
+                const scheduled = await repo.scheduleRetry(
+                    failed.id,
+                    RETRY_DELAYS_MS[retryIndex],
+                    err.message,
+                );
+                if (scheduled) {
+                    console.warn(
+                        `[FIRE RISK] retry ${scheduled.retry_count}/3 scheduled at ` +
+                        `${new Date(scheduled.next_retry_at).toISOString()}`,
+                    );
+                }
+            } else if (failedDate === today) {
+                console.error(`[FIRE RISK] retry limit reached for ${today} (3/3)`);
+            }
+        } catch (retryErr) {
+            console.error(`[FIRE RISK] failed to persist retry state: ${retryErr.message}`);
+        }
         if (DEBUG && err.stack) console.debug(err.stack);
     } finally {
         analysisRunning = false;
@@ -201,13 +242,21 @@ async function _catchupIfNeeded() {
         console.warn(`[FIRE RISK] recovery watchdog: getLatest failed: ${err.message}`);
         return null;
     });
-    const latestDate = latest?.analysis_date
-        ? (latest.analysis_date instanceof Date
-            ? latest.analysis_date.toISOString().slice(0, 10)
-            : String(latest.analysis_date).slice(0, 10))
-        : null;
+    const latestDate = _toCronLocalDate(latest?.analysis_date);
 
     if (latestDate === localDate) {
+        const retryCount = Number(latest.retry_count || 0);
+        const retryDue = latest.status === 'failed'
+            && retryCount < RETRY_DELAYS_MS.length
+            && latest.next_retry_at
+            && new Date(latest.next_retry_at).getTime() <= Date.now();
+        if (retryDue) {
+            console.warn(`[FIRE RISK] recovery watchdog starting retry ${retryCount}/3 for ${localDate}`);
+            runDailyAnalysis(localDate).catch((err) => {
+                console.error(`[FIRE RISK] retry analysis error: ${err.message}`);
+            });
+            return;
+        }
         dbg(`recovery watchdog SKIP — snapshot ${localDate} exists (id=${latest.id} status=${latest.status})`);
         return;
     }

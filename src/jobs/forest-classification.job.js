@@ -35,6 +35,7 @@ const CATCHUP_ENABLED = process.env.FC_CATCHUP_ENABLED !== 'false';
 const CATCHUP_DELAY_MS = Math.max(0, Number(process.env.FC_CATCHUP_DELAY_MS) || 60_000);
 const WATCHDOG_INTERVAL_MS = 5 * 60_000;
 const ACTIVE_STALE_MS = 2 * 60 * 60_000;
+const RETRY_DELAYS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
 
 const DEBUG = process.env.FC_DEBUG === 'true'
     || process.env.NODE_ENV === 'development';
@@ -106,6 +107,10 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
     );
     try {
         const snap = await svc.runAnalysis(year, month);
+        await repo.updateStatus(snap.id, snap.status, {
+            next_retry_at: null,
+            last_retry_error: null,
+        });
         const summary = snap.province_summary || {};
         let forestHa = 0;
         for (const id of cfg.FOREST_CLASS_IDS) {
@@ -120,6 +125,27 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
         dbg(`byClass=${JSON.stringify(summary.byClass || {})}`);
     } catch (err) {
         console.error(`[FOREST] scheduled classification FAILED period=${year}/${month} elapsed=${Date.now() - t0}ms — ${err.code || err.name || 'ERR'}: ${err.message}`);
+        try {
+            const failed = await repo.getByYearMonth(year, month);
+            const retryIndex = Number(failed?.retry_count || 0);
+            if (failed && retryIndex < RETRY_DELAYS_MS.length) {
+                const scheduled = await repo.scheduleRetry(
+                    failed.id,
+                    RETRY_DELAYS_MS[retryIndex],
+                    err.message,
+                );
+                if (scheduled) {
+                    console.warn(
+                        `[FOREST] retry ${scheduled.retry_count}/3 scheduled at ` +
+                        `${new Date(scheduled.next_retry_at).toISOString()} for period=${year}/${month}`,
+                    );
+                }
+            } else if (failed) {
+                console.error(`[FOREST] retry limit reached for period=${year}/${month} (3/3)`);
+            }
+        } catch (retryErr) {
+            console.error(`[FOREST] failed to persist retry state: ${retryErr.message}`);
+        }
         if (DEBUG && err.stack) console.debug(err.stack);
     } finally {
         analysisRunning = false;
@@ -132,14 +158,20 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
 const runRecoveryCheck = async () => {
     const { year, month } = resolveTargetPeriod();
     const existing = await repo.getByYearMonth(year, month);
-    if (existing && !isActiveSnapshotStale(existing)) {
+    const retryCount = Number(existing?.retry_count || 0);
+    const retryDue = existing?.status === 'failed'
+        && retryCount < RETRY_DELAYS_MS.length
+        && existing.next_retry_at
+        && new Date(existing.next_retry_at).getTime() <= Date.now();
+    if (existing && !isActiveSnapshotStale(existing) && !retryDue) {
         dbg(`recovery watchdog skip — period=${year}/${month} exists status=${existing.status} snapshotId=${existing.id}`);
         return;
     }
 
     console.warn(
         `[FOREST] recovery watchdog TRIGGER — period=${year}/${month} ` +
-        `${existing ? `has stale ${existing.status} snapshotId=${existing.id}` : 'is missing'}; ` +
+        `${retryDue ? `retry ${retryCount}/3 is due`
+            : existing ? `has stale ${existing.status} snapshotId=${existing.id}` : 'is missing'}; ` +
         'monthly cron may have been missed or interrupted',
     );
     await runScheduledAnalysis({ recoverStale: true });
