@@ -413,6 +413,10 @@ async function runAnalysis(analysisDate, {
     submitExport      = cfg.isGcsConfigured(),
     enableRf          = cfg.ENABLE_RF,
     inputFireAssetId  = cfg.INPUT_FIRE_ASSET_ID,
+    // OOB accuracy diagnostic (chỉ dùng khi enableRf=true). Mặc định lấy từ
+    // cfg.COMPUTE_OOB (env FIRE_RISK_COMPUTE_OOB). Bật thêm 30-90s vì force
+    // train RF materialize trên EE server, đổi lại có metric chất lượng model.
+    computeOob        = cfg.COMPUTE_OOB,
     // Cửa sổ query GT trước analysisDate (mặc định 30 ngày, cùng cửa sổ predictor S2).
     // Bỏ qua override khi caller explicit pass qua env FIRE_RISK_GT_WINDOW_DAYS.
     gtWindowDays      = Number(process.env.FIRE_RISK_GT_WINDOW_DAYS) || 30,
@@ -436,6 +440,7 @@ async function runAnalysis(analysisDate, {
                 nesterov_p_breaks:   cfg.NESTEROV_P_BREAKS,
                 risk_score_breaks:   cfg.RISK_SCORE_BREAKS,
                 rf_enabled:          enableRf,
+                rf_compute_oob:      enableRf && computeOob,
                 rf_trees:            cfg.RF_TREES,
                 rf_bag_fraction:     cfg.RF_BAG_FRACTION,
                 train_months:        cfg.TRAIN_MONTHS,
@@ -521,6 +526,7 @@ async function runAnalysis(analysisDate, {
         // pipeline sẽ chèn tiếp vào cùng bộ logger A→Z.
         const analysis = await runFireRiskAnalysis(region, analysisDate, {
             enableRf,
+            computeOob,
             inputFireAssetId,
             inputFireGeoJson,
             logger: log,
@@ -531,6 +537,7 @@ async function runAnalysis(analysisDate, {
             riskLevel,
             blendCase,
             modelConfidenceClass,
+            oobPct,
         } = analysis;
         const pNesterov    = currentPredictors.select('NesterovP').rename('NesterovP');
         const s2Observed45 = currentPredictors.select('S2_Observed45').rename('S2_Observed45');
@@ -662,6 +669,7 @@ async function runAnalysis(analysisDate, {
                 gt_zone_count:     gtData.counts.zones,
                 gt_point_count:    gtData.counts.points,
                 gt_window_days:    gtWindowDays,
+                oob_accuracy:      oobPct != null ? Number(oobPct.toFixed(2)) : null,
             }));
 
         const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);
@@ -903,12 +911,13 @@ const getHistory = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =>
  * Trigger manual analysis for today (admin only).
  * Accepts optional v8.1 overrides: enableRf, inputFireAssetId.
  */
-const refresh = async ({ analysisDate, submitExport, enableRf, inputFireAssetId } = {}) => {
+const refresh = async ({ analysisDate, submitExport, enableRf, inputFireAssetId, computeOob } = {}) => {
     const date = analysisDate || todayUtc();
     return runAnalysis(date, {
         ...(submitExport     !== undefined ? { submitExport }     : {}),
         ...(enableRf         !== undefined ? { enableRf }         : {}),
         ...(inputFireAssetId !== undefined ? { inputFireAssetId } : {}),
+        ...(computeOob       !== undefined ? { computeOob }       : {}),
     });
 };
 

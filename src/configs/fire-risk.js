@@ -83,6 +83,14 @@ const NEGATIVE_ELIGIBLE_MODE      = process.env.FIRE_RISK_NEGATIVE_ELIGIBLE_MODE
 // a scaled ThresholdScore (fast, but no learned signal).
 const ENABLE_RF                   = process.env.FIRE_RISK_ENABLE_RF !== 'false';
 
+// Compute OOB accuracy via `classifier.explain().getInfo()`. Chỉ có ý nghĩa
+// khi ENABLE_RF=true. Cost ~30-90s (force RF training materialize trên EE)
+// nên default OFF; bật để admin xem chất lượng model qua snapshot metadata.
+const COMPUTE_OOB                 = process.env.FIRE_RISK_COMPUTE_OOB === 'true';
+
+// Timeout riêng cho OOB getInfo (ms). Mặc định 10 phút giống forest-classification.
+const OOB_TIMEOUT_MS              = parseInt(process.env.FIRE_RISK_OOB_TIMEOUT_MS, 10) || 10 * 60 * 1000;
+
 // GEE export settings.
 const EXPORT_SCALE_M              = parseInt(process.env.FIRE_RISK_EXPORT_SCALE_M, 10) || 250;
 const EXPORT_FOLDER               = process.env.FIRE_RISK_EXPORT_FOLDER || 'GEE_FireWarning';
@@ -174,6 +182,8 @@ module.exports = {
     LOCAL_FUEL_TYPE_ASSET_ID,
     NEGATIVE_ELIGIBLE_MODE,
     ENABLE_RF,
+    COMPUTE_OOB,
+    OOB_TIMEOUT_MS,
     EXPORT_SCALE_M,
     EXPORT_FOLDER,
     GCS_BUCKET,

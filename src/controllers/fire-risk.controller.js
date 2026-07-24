@@ -73,6 +73,9 @@ const getLatest = async (req, res) => {
             districtStats:       districtStatsSlim,
             pNesterovStats:      snapshot.p_nesterov_stats,
             s2CoverageRatio:     snapshot.s2_coverage_ratio,
+            // OOB accuracy % (0-100) của RF classifier. NULL khi RF disabled
+            // hoặc COMPUTE_OOB=false. FE hiển thị "N/A" nếu null.
+            oobAccuracy:         snapshot.oob_accuracy ?? null,
             geoserverLayer:      snapshot.geoserver_layer || null,
             // Tile Earth Engine: client render trực tiếp bằng leaflet L.tileLayer(geeTileUrl).
             geeTileUrl:          snapshot.gee_tile_url || null,
@@ -172,9 +175,14 @@ const refresh = async (req, res) => {
         ? Boolean(req.body.enableRf) : undefined;
     const inputFireAssetId = req.body?.inputFireAssetId
         ? String(req.body.inputFireAssetId).trim() : undefined;
+    // Cho phép admin bật OOB per-request (đè env). Cost ~30-90s → không nên
+    // default on để tránh làm chậm cron. Bỏ qua khi enableRf=false (pipeline
+    // sẽ tự no-op).
+    const computeOob       = req.body?.computeOob !== undefined
+        ? Boolean(req.body.computeOob) : undefined;
 
     const snapshot = await svc.refresh({
-        analysisDate, submitExport, enableRf, inputFireAssetId,
+        analysisDate, submitExport, enableRf, inputFireAssetId, computeOob,
     });
     CREATED(res, 'Đã kích hoạt phân tích cháy rừng.', { snapshot });
 };

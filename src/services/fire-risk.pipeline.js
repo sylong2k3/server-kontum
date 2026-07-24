@@ -23,6 +23,7 @@
 const cfg = require('../configs/fire-risk');
 const { ee } = require('../configs/gge');
 const { makeStageLogger } = require('../utils/stage-logger.util');
+const { eeGetInfo } = require('../utils/gee-satellite.util');
 
 // ── Small utilities ──────────────────────────────────────────────────────────
 
@@ -448,6 +449,13 @@ function trainRf(trainingFeatures) {
 
 function classifyRfProbability(currentPredictors, trainingFeatures) {
     const classifier = trainRf(trainingFeatures);
+    return applyRfClassifier(currentPredictors, classifier);
+}
+
+// Reuse-friendly variant: apply a pre-trained classifier so the caller can
+// hold onto it (e.g. để tính OOB qua `.explain().getInfo()` sau khi
+// classify) — tránh train 2 lần.
+function applyRfClassifier(currentPredictors, classifier) {
     const probability = currentPredictors.select(RF_PREDICTOR_BANDS).classify(classifier);
     const bands = probability.arrayFlatten([['probability_no_fire', 'probability_fire']]);
     return bands.select('probability_fire').max(0).min(1).rename('DatasetModelScore');
@@ -676,6 +684,10 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
     const inputFireAssetId = opts.inputFireAssetId ?? cfg.INPUT_FIRE_ASSET_ID;
     // NEW: inline GT từ PostGIS. Ưu tiên hơn assetId nếu present.
     const inputFireGeoJson = opts.inputFireGeoJson || null;
+    // OOB accuracy: bật riêng, chỉ có ý nghĩa khi enableRf=true. Mặc định lấy
+    // từ config (env FIRE_RISK_COMPUTE_OOB). Tốn 1 getInfo() thêm ~30-90s vì
+    // force RF training materialize trên EE server.
+    const computeOob = (opts.computeOob ?? cfg.COMPUTE_OOB) && enableRf;
 
     // Logger có thể được caller cung cấp để hợp nhất luồng A→Z của service +
     // pipeline. Nếu không, dựng logger cục bộ để pipeline vẫn có dấu vết.
@@ -712,6 +724,8 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
         );
 
         let datasetModelScore;
+        let rfClassifier = null;
+        let oobPct       = null;
         if (enableRf) {
             const trainingFC = await log.run(
                 `Build RF training collection over ${cfg.TRAIN_MONTHS.length} months [LAZY]`,
@@ -720,11 +734,37 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
                     note: `MCD64A1 + FireCCI51 + FIRMS; ${cfg.TRAIN_SAMPLES_PER_CLASS}/class/month, scale=${cfg.TRAIN_SCALE_M}m tileScale=${cfg.TRAIN_HEAVY_TILE_SCALE}`,
                 },
             );
-            datasetModelScore = await log.run(
-                'Classify RF probability (train + apply) [LAZY — deferred until evaluate()]',
-                () => Promise.resolve(classifyRfProbability(currentPredictors, trainingFC)),
+            // Split train + apply để giữ tham chiếu classifier cho OOB (tránh
+            // train 2 lần). Vẫn LAZY: `trainRf` chỉ build graph.
+            rfClassifier = await log.run(
+                'Assemble RF classifier graph (train deferred) [LAZY]',
+                () => Promise.resolve(trainRf(trainingFC)),
                 { note: `${cfg.RF_TREES} trees, bag=${cfg.RF_BAG_FRACTION}` },
             );
+            datasetModelScore = await log.run(
+                'Classify RF probability (apply pre-trained classifier) [LAZY — deferred until evaluate()]',
+                () => Promise.resolve(applyRfClassifier(currentPredictors, rfClassifier)),
+            );
+            // OOB accuracy: `.explain()` trả outOfBagErrorEstimate. getInfo()
+            // force RF training materialize trên EE server, thường 30-90s. Chạy
+            // trước khi evaluate() các reduceRegion để leverage cache RF.
+            if (computeOob) {
+                oobPct = await log.run(
+                    'GETINFO OOB accuracy (forces sampling + RF training on EE)',
+                    async () => {
+                        const diagnostics = ee.Dictionary(rfClassifier.explain())
+                            .select(['outOfBagErrorEstimate']);
+                        const info = await eeGetInfo(diagnostics, cfg.OOB_TIMEOUT_MS);
+                        const oobError = Number(info?.outOfBagErrorEstimate);
+                        if (!Number.isFinite(oobError)) {
+                            throw new Error('GEE classifier diagnostics did not return outOfBagErrorEstimate');
+                        }
+                        return Math.max(0, Math.min(100, (1 - oobError) * 100));
+                    },
+                    { note: `async getInfo(callback), timeout=${cfg.OOB_TIMEOUT_MS}ms` },
+                );
+                log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
+            }
         } else {
             datasetModelScore = await log.run(
                 'RF disabled — DatasetModelScore = 0.85 × ThresholdScore [LAZY]',
@@ -786,6 +826,8 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
             ...risk,
             // Metadata for callers
             rfEnabled:        enableRf,
+            rfClassifier,             // ee.Classifier (null nếu enableRf=false)
+            oobPct,                   // number 0-100 (null nếu !computeOob hoặc !enableRf)
             inputFireAssetId: inputFireAssetId || null,
             fuelSource:       fuelVal.source,
         };
@@ -809,6 +851,7 @@ module.exports = {
     buildTrainingCollection,
     trainRf,
     classifyRfProbability,
+    applyRfClassifier,
     computeFixedThresholdScore,
     buildInputImages,
     buildRiskProducts,

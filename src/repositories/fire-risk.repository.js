@@ -90,6 +90,7 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gt_zone_count',        extra.gt_zone_count);
     addField('gt_point_count',       extra.gt_point_count);
     addField('gt_window_days',       extra.gt_window_days);
+    addField('oob_accuracy',         extra.oob_accuracy);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
@@ -170,6 +171,7 @@ const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =
     const { rows } = await db.query(
         `SELECT id, analysis_date, status, s2_coverage_ratio,
                 province_summary, district_stats, p_nesterov_stats,
+                oob_accuracy,
                 computed_at, published_at,
                 gee_map_id, gee_tile_url, gee_tile_generated_at,
                 gee_download_url, gee_task_id,
