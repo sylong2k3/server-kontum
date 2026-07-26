@@ -29,7 +29,10 @@ const query = async (text, params) => {
         const duration = Date.now() - start;
         if (duration > SLOW_QUERY_THRESHOLD_MS) {
             const shortSql = text.replace(/\s+/g, ' ').substring(0, 200);
-            console.warn(`[SLOW QUERY] ${duration}ms | rows=${res.rowCount} | ${shortSql}`);
+            const { totalCount, idleCount, waitingCount } = pool;
+            console.warn(
+                `[SLOW QUERY] ${duration}ms | rows=${res.rowCount} | pool(active=${totalCount - idleCount},waiting=${waitingCount},total=${totalCount}/${pool.options.max}) | ${shortSql}`
+            );
         }
         return res;
     } catch (err) {
