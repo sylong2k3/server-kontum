@@ -114,6 +114,27 @@ describe('field-measurement.service.createMeasurement — idempotency theo clien
         expect(repo.assignCode).not.toHaveBeenCalled();
     });
 
+    test('ON CONFLICT trúng bản ghi đã xoá mềm: fallback SELECT (deleted_at IS NULL) không thấy gì -> ném Api409Error thay vì crash null.id', async () => {
+        // Bug thực tế (production, 2026-07-26): trước migration 039, unique index
+        // client_uuid không loại trừ deleted_at. Nếu bản ghi cũ cùng client_uuid đã
+        // bị xoá mềm (deleteMeasurement), INSERT mới vẫn đụng UNIQUE với nó ->
+        // ON CONFLICT DO NOTHING -> fallback findByClientUuid (có filter deleted_at
+        // IS NULL) không thấy bản ghi đã xoá -> trả về null -> service cũ crash tại
+        // toMeasurementItem(null).id. Service phải chặn và trả lỗi rõ ràng thay vì crash.
+        repo.findByClientUuid
+            .mockResolvedValueOnce(null) // pre-check ngoài transaction
+            .mockResolvedValueOnce(null); // fallback trong transaction — bản ghi trùng đã bị xoá mềm
+
+        db.pool.connect.mockResolvedValueOnce(makeFakeClient());
+        repo.create.mockResolvedValueOnce(null); // ON CONFLICT DO NOTHING
+
+        await expect(
+            service.createMeasurement(ACTOR, { points: VALID_POINTS, clientUuid: 'uuid-3' }, 'vi')
+        ).rejects.toMatchObject({ status: 409 });
+
+        expect(repo.assignCode).not.toHaveBeenCalled();
+    });
+
     test('không có clientUuid: tạo bình thường, không pre-check, không lỗi', async () => {
         db.pool.connect.mockResolvedValueOnce(makeFakeClient());
         repo.create.mockResolvedValueOnce({ id: 99, client_uuid: null });

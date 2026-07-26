@@ -201,9 +201,15 @@ async function _catchupIfNeeded() {
         console.warn(`[FIRE RISK] recovery watchdog: getLatest failed: ${err.message}`);
         return null;
     });
+    // pg parse cột DATE thành Date object theo GIỜ LOCAL của process
+    // (xem postgres-date: `new Date(year, month, day)`), không phải UTC.
+    // Dùng .toISOString() ở đây sẽ lệch -1 ngày khi server chạy ở timezone
+    // dương (VD Asia/Ho_Chi_Minh, +7) → watchdog tưởng snapshot hôm nay
+    // chưa tồn tại và cứ retrigger runDailyAnalysis() mỗi 5 phút. Phải đọc
+    // Y/M/D bằng local getters để khớp với cách Date được dựng.
     const latestDate = latest?.analysis_date
         ? (latest.analysis_date instanceof Date
-            ? latest.analysis_date.toISOString().slice(0, 10)
+            ? `${latest.analysis_date.getFullYear()}-${String(latest.analysis_date.getMonth() + 1).padStart(2, '0')}-${String(latest.analysis_date.getDate()).padStart(2, '0')}`
             : String(latest.analysis_date).slice(0, 10))
         : null;
 

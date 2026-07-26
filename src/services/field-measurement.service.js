@@ -11,7 +11,7 @@ const areaRepo = require('../repositories/monitored-area.repository');
 const layerRepo = require('../repositories/map-layer.repository');
 const minio = require('./minio.service');
 const notificationService = require('./notification.service');
-const { Api400Error, Api403Error, Api404Error } = require('../core/error.response');
+const { Api400Error, Api403Error, Api404Error, Api409Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 const { v4: uuidv4 } = require('uuid');
 const ExcelJS = require('exceljs');
@@ -166,6 +166,13 @@ const createMeasurement = async (actor, payload, lang) => {
         if (!created) {
             // Thua race trên ON CONFLICT — request song song kia đã tạo bản ghi trước.
             created = await repo.findByClientUuid(client, { measuredBy: actor.id, clientUuid });
+            if (!created) {
+                // Không nên xảy ra khi migration 039 đã áp dụng (unique index loại trừ
+                // deleted_at), nhưng vẫn chặn ở đây để tránh crash null.id nếu index cũ
+                // còn tồn tại trên môi trường chưa migrate — bản ghi trùng ON CONFLICT
+                // là bản ghi đã xoá mềm nên findByClientUuid (deleted_at IS NULL) không thấy.
+                throw new Api409Error(t('field_measurement_conflict_retry', lang));
+            }
             duplicated = true;
         } else {
             created = await repo.assignCode(client, created.id);
