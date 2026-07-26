@@ -236,6 +236,11 @@
       "type": "string"
     },
     {
+      "key": "fieldMeasurementClientUuid",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "monitoredAreaId",
       "value": "1",
       "type": "string"
@@ -11586,6 +11591,19 @@
               "name": "POST /field-measurements",
               "event": [
                 {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Mỗi lần Send tạo một phiên đo MỚI -> luôn sinh clientUuid mới.",
+                      "// Muốn test retry/idempotency: đừng bấm lại request này, dùng request",
+                      "// \"POST /field-measurements (Retry — clientUuid trùng)\" ngay bên dưới,",
+                      "// nó KHÔNG sinh lại clientUuid nên sẽ gửi trùng với lần tạo gần nhất.",
+                      "pm.collectionVariables.set(\"fieldMeasurementClientUuid\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                    ]
+                  }
+                },
+                {
                   "listen": "test",
                   "script": {
                     "type": "text/javascript",
@@ -11595,7 +11613,9 @@
                       "if (data.id) pm.collectionVariables.set(\"fieldMeasurementId\", String(data.id));",
                       "pm.test(\"HTTP success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 202, 204]); });",
                       "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });",
-                      "pm.test(\"Content-Type present\", function () { pm.response.to.have.header(\"Content-Type\"); });"
+                      "pm.test(\"Content-Type present\", function () { pm.response.to.have.header(\"Content-Type\"); });",
+                      "pm.test(\"Response has duplicated flag\", function () { pm.expect(data).to.have.property(\"duplicated\"); });",
+                      "console.log(\"[field-measurements] clientUuid=\" + pm.collectionVariables.get(\"fieldMeasurementClientUuid\") + \" duplicated=\" + data.duplicated + \" id=\" + data.id);"
                     ]
                   }
                 }
@@ -11623,10 +11643,64 @@
                     "field-measurements"
                   ]
                 },
-                "description": "Tạo phiên đo từ tối thiểu 3 điểm GPS; server khép polygon, tính diện tích và tạo trạng thái draft. Quyền field_measurements.create.",
+                "description": "Tạo phiên đo từ tối thiểu 3 điểm GPS; server khép polygon, tính diện tích và tạo trạng thái draft. Quyền field_measurements.create.\n- clientUuid (String max 80, không bắt buộc): Khoá idempotency do app sinh 1 lần/phiên đo (UUID v4) và gửi lại y nguyên ở mọi lần retry — server dedupe theo (measured_by, clientUuid); trả về HTTP 200 + duplicated=true kèm bản ghi cũ thay vì tạo trùng.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"points\": [\n    { \"lng\": 107.9500, \"lat\": 14.3500, \"accuracy_m\": 5.2, \"recorded_at\": \"2026-07-19T08:00:00.000Z\" },\n    { \"lng\": 107.9510, \"lat\": 14.3500, \"accuracy_m\": 6.1, \"recorded_at\": \"2026-07-19T08:01:00.000Z\" },\n    { \"lng\": 107.9510, \"lat\": 14.3510, \"accuracy_m\": 4.8, \"recorded_at\": \"2026-07-19T08:02:00.000Z\" }\n  ],\n  \"areaId\": {{monitoredAreaId}},\n  \"oldLandUse\": \"Đất rừng\",\n  \"newLandUse\": \"Đất xây dựng\",\n  \"note\": \"Ghi nhận biến đổi thực địa\",\n  \"deviceInfo\": { \"platform\": \"android\", \"model\": \"Field device\" },\n  \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n  \"finishedAt\": \"2026-07-19T08:02:00.000Z\"\n}",
+                  "raw": "{\n  \"points\": [\n    { \"lng\": 107.9500, \"lat\": 14.3500, \"accuracy_m\": 5.2, \"recorded_at\": \"2026-07-19T08:00:00.000Z\" },\n    { \"lng\": 107.9510, \"lat\": 14.3500, \"accuracy_m\": 6.1, \"recorded_at\": \"2026-07-19T08:01:00.000Z\" },\n    { \"lng\": 107.9510, \"lat\": 14.3510, \"accuracy_m\": 4.8, \"recorded_at\": \"2026-07-19T08:02:00.000Z\" }\n  ],\n  \"areaId\": {{monitoredAreaId}},\n  \"oldLandUse\": \"Đất rừng\",\n  \"newLandUse\": \"Đất xây dựng\",\n  \"note\": \"Ghi nhận biến đổi thực địa\",\n  \"deviceInfo\": { \"platform\": \"android\", \"model\": \"Field device\" },\n  \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n  \"finishedAt\": \"2026-07-19T08:02:00.000Z\",\n  \"clientUuid\": \"{{fieldMeasurementClientUuid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /field-measurements (Retry — clientUuid trùng)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const json = pm.response.json();",
+                      "const data = json.data || {};",
+                      "pm.test(\"HTTP 200 (idempotent replay, khong phai 201 Created)\", function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"duplicated = true\", function () { pm.expect(data.duplicated).to.eql(true); });",
+                      "pm.test(\"Tra ve DUNG ID phien do da tao lan truoc (khong tao ban ghi moi)\", function () { pm.expect(String(data.id)).to.eql(pm.collectionVariables.get(\"fieldMeasurementId\")); });",
+                      "console.log(\"[field-measurements retry] clientUuid=\" + pm.collectionVariables.get(\"fieldMeasurementClientUuid\") + \" -> id=\" + data.id + \" (khong doi so voi lan tao dau)\");"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/field-measurements",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "field-measurements"
+                  ]
+                },
+                "description": "Mô phỏng app hiện trường mất sóng NGAY SAU KHI server đã tạo phiên đo ở request \"POST /field-measurements\" phía trên (server commit thành công nhưng response không về tới máy) — app coi là timeout và tự động gửi lại NGUYÊN VẸN payload, cùng clientUuid.\n\nCHẠY NGAY SAU request \"POST /field-measurements\" (không sửa gì, không chạy lại request gốc — request gốc luôn sinh clientUuid mới). Kỳ vọng: HTTP 200 (không phải 201), body có \"duplicated\": true, và \"id\" trả về giống hệt phiên đo vừa tạo — chứng minh không có bản ghi trùng nào được tạo thêm trong DB.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"points\": [\n    { \"lng\": 107.9500, \"lat\": 14.3500, \"accuracy_m\": 5.2, \"recorded_at\": \"2026-07-19T08:00:00.000Z\" },\n    { \"lng\": 107.9510, \"lat\": 14.3500, \"accuracy_m\": 6.1, \"recorded_at\": \"2026-07-19T08:01:00.000Z\" },\n    { \"lng\": 107.9510, \"lat\": 14.3510, \"accuracy_m\": 4.8, \"recorded_at\": \"2026-07-19T08:02:00.000Z\" }\n  ],\n  \"areaId\": {{monitoredAreaId}},\n  \"oldLandUse\": \"Đất rừng\",\n  \"newLandUse\": \"Đất xây dựng\",\n  \"note\": \"Ghi nhận biến đổi thực địa\",\n  \"deviceInfo\": { \"platform\": \"android\", \"model\": \"Field device\" },\n  \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n  \"finishedAt\": \"2026-07-19T08:02:00.000Z\",\n  \"clientUuid\": \"{{fieldMeasurementClientUuid}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -12162,6 +12236,57 @@
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"points\": [\n    {\n      \"lng\": 120,\n      \"lat\": 14.35\n    },\n    {\n      \"lng\": 107.951,\n      \"lat\": 14.35\n    },\n    {\n      \"lng\": 107.951,\n      \"lat\": 14.351\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "[400] POST /field-measurements — clientUuid vượt quá 80 ký tự",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });",
+                      "pm.test(\"Validation error shape\", function () { const json = pm.response.json(); pm.expect(json).to.be.an(\"object\"); pm.expect(JSON.stringify(json).toLowerCase()).to.match(/error|valid|fail|required|invalid|không hợp lệ|bắt buộc/); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/field-measurements",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "field-measurements"
+                  ]
+                },
+                "description": "Kỳ vọng HTTP 400: clientUuid dài 81 ký tự, vượt giới hạn Joi max(80).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"points\": [\n    {\n      \"lng\": 107.95,\n      \"lat\": 14.35\n    },\n    {\n      \"lng\": 107.951,\n      \"lat\": 14.35\n    },\n    {\n      \"lng\": 107.951,\n      \"lat\": 14.351\n    }\n  ],\n  \"clientUuid\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

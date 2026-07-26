@@ -24,7 +24,7 @@ const createMeasurementSchema = Joi.object({
     deviceInfo: Joi.object().optional(),
     startedAt: Joi.date().iso().optional().allow(null),
     finishedAt: Joi.date().iso().optional().allow(null),
-    clientUuid: Joi.string().trim().max(80).optional().allow('', null),
+    clientUuid: Joi.string().trim().guid({ version: 'uuidv4' }).optional().allow('', null),
 });
 
 const updateMeasurementSchema = Joi.object({
