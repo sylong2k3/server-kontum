@@ -22,7 +22,7 @@ const tableRef = (layer) => `${qid(layer.schema_name)}.${qid(layer.table_name)}`
 const geomCol = (layer) => qid(layer.geometry_column || 'geom');
 
 const MEASUREMENT_COLUMNS = `
-    id, code, area_id, layer_id, points,
+    id, code, area_id, layer_id, points, client_uuid,
     CASE WHEN geom IS NULL THEN NULL ELSE ST_AsGeoJSON(geom)::json END AS geom,
     area_m2, avg_accuracy_m, commune_code, affected_features,
     old_land_use, new_land_use, note, status, review_note, device_info,
@@ -141,17 +141,23 @@ const findCommuneCode = async (geomGeoJSON) => {
     return rows[0]?.code || null;
 };
 
+// ON CONFLICT DO NOTHING trên uq_field_measurements_measured_by_client_uuid là chốt
+// chặn atomic — nếu 2 request cùng client_uuid chạy song song (app timeout rồi retry
+// khi request đầu đã commit), chỉ 1 request INSERT thành công; request kia nhận về
+// undefined (không phải throw) và caller (service) tự SELECT lại bản ghi đã tồn tại.
 const create = async (client, payload) => {
     const { rows } = await exec(client)(
         `INSERT INTO gis.field_measurements (
             area_id, layer_id, points, geom, area_m2, avg_accuracy_m, commune_code,
             affected_features, old_land_use, new_land_use, note, device_info,
-            measured_by, started_at, finished_at
+            measured_by, started_at, finished_at, client_uuid
         ) VALUES (
             $1, $2, $3, ST_SetSRID(ST_GeomFromGeoJSON($4), 4326), $5, $6, $7,
             $8, $9, $10, $11, $12,
-            $13, $14, $15
-        ) RETURNING ${MEASUREMENT_COLUMNS}`,
+            $13, $14, $15, $16
+        )
+        ON CONFLICT (measured_by, client_uuid) WHERE client_uuid IS NOT NULL DO NOTHING
+        RETURNING ${MEASUREMENT_COLUMNS}`,
         [
             payload.areaId || null,
             payload.layerId || null,
@@ -168,9 +174,21 @@ const create = async (client, payload) => {
             payload.measuredBy || null,
             payload.startedAt || null,
             payload.finishedAt || null,
+            payload.clientUuid || null,
         ]
     );
-    return rows[0];
+    return rows[0] || null;
+};
+
+const findByClientUuid = async (client, { measuredBy, clientUuid }) => {
+    if (!clientUuid) { return null; }
+    const { rows } = await exec(client)(
+        `SELECT ${MEASUREMENT_COLUMNS} FROM gis.field_measurements
+         WHERE measured_by = $1 AND client_uuid = $2 AND deleted_at IS NULL
+         LIMIT 1`,
+        [measuredBy, clientUuid]
+    );
+    return rows[0] || null;
 };
 
 const assignCode = async (client, id) => {
@@ -297,6 +315,7 @@ module.exports = {
     intersectWithLayer,
     findCommuneCode,
     create,
+    findByClientUuid,
     assignCode,
     findById,
     findAll,

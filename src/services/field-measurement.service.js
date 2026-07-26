@@ -38,6 +38,7 @@ const toMeasurementItem = (row) => ({
     code: row.code,
     areaId: row.area_id,
     layerId: row.layer_id,
+    clientUuid: row.client_uuid,
     points: row.points,
     geom: row.geom,
     areaM2: row.area_m2,
@@ -88,6 +89,18 @@ const toAreaItem = (row) => ({
 const createMeasurement = async (actor, payload, lang) => {
     if (!Array.isArray(payload.points) || payload.points.length < MIN_POINTS) {
         throw new Api400Error(t('field_measurement_invalid_points', lang));
+    }
+
+    // Idempotency: app hiện trường mất sóng ngay sau khi server đã commit thì tự
+    // retry cùng clientUuid — trả lại phiên đo đã có, bỏ qua tính toán geom/layer
+    // tốn kém phía dưới. Đây chỉ là tối ưu; chốt chặn atomic thật sự nằm ở
+    // ON CONFLICT trong repo.create (xử lý race khi 2 request trùng chạy song song).
+    const clientUuid = payload.clientUuid || null;
+    if (clientUuid) {
+        const existing = await repo.findByClientUuid(null, { measuredBy: actor.id, clientUuid });
+        if (existing) {
+            return { measurement: toMeasurementItem(existing), duplicated: true };
+        }
     }
 
     const { geom, areaM2, avgAccuracyM } = await repo.buildValidPolygon(payload.points);
@@ -146,10 +159,20 @@ const createMeasurement = async (actor, payload, lang) => {
             measuredBy: actor.id,
             startedAt: payload.startedAt || null,
             finishedAt: payload.finishedAt || null,
+            clientUuid,
         });
-        created = await repo.assignCode(client, created.id);
+
+        let duplicated = false;
+        if (!created) {
+            // Thua race trên ON CONFLICT — request song song kia đã tạo bản ghi trước.
+            created = await repo.findByClientUuid(client, { measuredBy: actor.id, clientUuid });
+            duplicated = true;
+        } else {
+            created = await repo.assignCode(client, created.id);
+        }
+
         await client.query('COMMIT');
-        return toMeasurementItem(created);
+        return { measurement: toMeasurementItem(created), duplicated };
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;

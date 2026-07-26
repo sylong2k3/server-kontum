@@ -7,8 +7,9 @@ const { buildActor } = require('../utils/actor.util');
 // ── Phiên đo ──────────────────────────────────────────────────────────────────
 
 const createMeasurement = async (req, res) => {
-    const measurement = await service.createMeasurement(buildActor(req), req.body, req.lang);
-    CREATED(res, t('field_measurement_created_success', req.lang), measurement);
+    const result = await service.createMeasurement(buildActor(req), req.body, req.lang);
+    const respond = result.duplicated ? OK : CREATED;
+    respond(res, t('field_measurement_created_success', req.lang), { ...result.measurement, duplicated: result.duplicated });
 };
 
 const listMeasurements = async (req, res) => {
