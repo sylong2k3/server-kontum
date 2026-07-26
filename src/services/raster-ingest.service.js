@@ -402,18 +402,49 @@ async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minio
             cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'status'],
             values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`, 'published'],
         },
+        // Migration 040: per-district export tables. `id` trong linkedResource
+        // là ID của row district_exports (không phải snapshot). FE dựa vào
+        // geoserver_layer/minio_key ở dòng này để hiển thị nút "Đã có bản đồ"
+        // cho từng huyện.
+        fire_risk_district: {
+            table:  'fire.fire_risk_district_exports',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key'],
+            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`],
+        },
+        forest_district: {
+            table:  'forest.forest_district_exports',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key'],
+            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`],
+        },
     };
     const target = targets[linked.type];
     if (!target) {
         console.warn(`[RASTER-INGEST] unknown linkedResource.type=${linked.type} — skip back-link`);
         return;
     }
-    const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
-    await db.query(
-        `UPDATE ${target.table} SET ${setClauses} WHERE id = $${target.cols.length + 1}`,
-        [...target.values, idNum],
-    );
-    console.log(`[RASTER-INGEST] backlink ok ${linked.type}#${idNum} → ${geoserverLayer}`);
+    // District exports linkedResource dùng {type,id:snapshot_id,districtCode}.
+    // Query row theo (snapshot_id, district_code) thay vì id — vì id trong
+    // linkedResource của service pipeline là snapshot_id.
+    let sql, bindValues;
+    if (linked.type === 'fire_risk_district' || linked.type === 'forest_district') {
+        const dcode = String(linked.districtCode || '');
+        const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+        sql = `UPDATE ${target.table} SET ${setClauses}
+               WHERE snapshot_id = $${target.cols.length + 1}
+                 AND district_code = $${target.cols.length + 2}`;
+        bindValues = [...target.values, idNum, dcode];
+    } else {
+        const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+        sql = `UPDATE ${target.table} SET ${setClauses}
+               WHERE id = $${target.cols.length + 1}`;
+        bindValues = [...target.values, idNum];
+    }
+    const result = await db.query(sql, bindValues);
+    if (result.rowCount === 0) {
+        console.warn(`[RASTER-INGEST] backlink ${linked.type}#${idNum}${linked.districtCode ? '/' + linked.districtCode : ''} → 0 rows updated`);
+    } else {
+        console.log(`[RASTER-INGEST] backlink ok ${linked.type}#${idNum}${linked.districtCode ? '/' + linked.districtCode : ''} → ${geoserverLayer}`);
+    }
 }
 
 async function _upsertRasterLayer({ job, params, storeName, geoserverLayer, objectKey, sha }) {
