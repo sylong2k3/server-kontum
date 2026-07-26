@@ -204,6 +204,78 @@ function formatSnapshot(s) {
     };
 }
 
+// ── GET /forest-classification/snapshots/:id/districts ──────────────────────
+// Trả list per-district GEE download URL + area_by_class cho 1 snapshot.
+// Migration 040: pipeline chia download theo huyện thay vì 1 URL toàn tỉnh.
+// Aggregate lên tỉnh = SUM area huyện. optionalAuth để dashboard public đọc.
+const getDistrictExports = async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+        throw new Api400Error('ID snapshot không hợp lệ.', ['INVALID_ID']);
+    }
+    const snap = await repo.getById(id);
+    if (!snap) throw new Api404Error('Snapshot không tồn tại.', ['SNAPSHOT_NOT_FOUND']);
+
+    const rows = await repo.listDistrictExports(id);
+
+    // Aggregate byClass + totalHa + forestHa (dùng FOREST_CLASS_IDS).
+    let completed = 0, failed = 0, skipped = 0, pending = 0;
+    let totalHa = 0, forestHa = 0;
+    const byClass = {};
+    for (const r of rows) {
+        if (r.status === 'completed') completed += 1;
+        else if (r.status === 'failed')  failed  += 1;
+        else if (r.status === 'skipped') skipped += 1;
+        else pending += 1;
+        totalHa  += Number(r.total_area_ha)  || 0;
+        forestHa += Number(r.forest_area_ha) || 0;
+        for (const [cid, ha] of Object.entries(r.area_by_class || {})) {
+            byClass[cid] = (byClass[cid] || 0) + (Number(ha) || 0);
+        }
+    }
+
+    const districts = rows.map((r) => ({
+        id:                   r.id,
+        districtCode:         r.district_code,
+        districtName:         r.district_name,
+        status:               r.status,
+        scaleM:               r.scale_m,
+        areaByClass:          r.area_by_class || null,
+        totalAreaHa:          r.total_area_ha  != null ? Number(r.total_area_ha)  : null,
+        forestAreaHa:         r.forest_area_ha != null ? Number(r.forest_area_ha) : null,
+        geeTileUrl:           r.gee_tile_url || null,
+        geeDownloadUrl:       r.gee_download_url || null,
+        geeDownloadFilename:  r.gee_download_filename || null,
+        geeGeneratedAt:       r.gee_generated_at,
+        minioKey:             r.minio_key || null,
+        geoserverLayer:       r.geoserver_layer || null,
+        geoserverStore:       r.geoserver_store || null,
+        rasterIngestJobId:    r.raster_ingest_job_id || null,
+        errorMessage:         r.error_message || null,
+        durationMs:           r.duration_ms || null,
+        startedAt:            r.started_at,
+        completedAt:          r.completed_at,
+    }));
+
+    OK(res, t('get_detail_success', req.lang), {
+        snapshotId: id,
+        year:       snap.year,
+        month:      snap.month,
+        attempt:    snap.attempt,
+        scaleM:     snap.download_scale_m ?? districts[0]?.scaleM ?? null,
+        total:      rows.length,
+        completed, failed, skipped, pending,
+        aggregate:  {
+            totalHa:  Math.round(totalHa  * 100) / 100,
+            forestHa: Math.round(forestHa * 100) / 100,
+            byClass:  Object.fromEntries(
+                Object.entries(byClass).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+            ),
+        },
+        districts,
+    });
+};
+
 // ── POST /forest-classification/snapshots/:id/publish-raster ────────────────
 // Enqueue raster-ingest job (GEE download URL → MinIO → GeoServer). Snapshot
 // được back-link `geoserver_layer` khi job xong (linkedResource type='forest'
@@ -269,4 +341,4 @@ const publishRaster = async (req, res) => {
     });
 };
 
-module.exports = { getLatest, getHistory, getPublishedHistory, refresh, queryPeriod, getSnapshot, publishRaster };
+module.exports = { getLatest, getHistory, getPublishedHistory, refresh, queryPeriod, getSnapshot, publishRaster, getDistrictExports };

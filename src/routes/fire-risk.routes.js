@@ -14,6 +14,11 @@ const router = Router();
 router.get('/latest',  optionalAuth, asyncHandler(ctrl.getLatest));
 router.get('/map',     optionalAuth, asyncHandler(ctrl.getMap));
 
+// Per-district downloads (migration 040): list 10 URL/huyện + area stats.
+// optionalAuth để cả public + admin đọc được. Không lộ sensitive info — URL
+// GEE tự expire 24h.
+router.get('/snapshots/:id/districts', optionalAuth, asyncHandler(ctrl.getDistrictExports));
+
 // Public browse các snapshot ĐÃ publish GeoServer — client sidebar dùng để
 // hiển thị list history + add WMS overlay. Force hasGeoserverLayer=true trong
 // controller. Trả subset field (bỏ error_message, minio_key, download URL...)

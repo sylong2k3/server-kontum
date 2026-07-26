@@ -122,12 +122,17 @@ const getHistory = async (req, res) => {
     });
 };
 
-const formatProvinceSummary = (summary = {}) => ({
-    maxLevel: summary.maxLevel ?? null,
-    avgRiskLevel: summary.avgRiskLevel ?? null,
-    riskLevelDist: summary.riskLevelDist || {},
-    s2CoverageRatio: summary.s2CoverageRatio ?? null,
-});
+// Snapshot đang `computing` chưa có province_summary → NULL trong DB → phá vỡ
+// default param `= {}`. Bảo vệ tường minh bằng `?? {}`.
+const formatProvinceSummary = (summary) => {
+    const s = summary || {};
+    return {
+        maxLevel:        s.maxLevel ?? null,
+        avgRiskLevel:    s.avgRiskLevel ?? null,
+        riskLevelDist:   s.riskLevelDist || {},
+        s2CoverageRatio: s.s2CoverageRatio ?? null,
+    };
+};
 
 // ── GET /fire-risk/published-history ─────────────────────────────────────────
 // Public sub-endpoint (optionalAuth) — chỉ trả snapshot ĐÃ publish GeoServer,
@@ -174,6 +179,79 @@ const refresh = async (req, res) => {
         analysisDate, submitExport, enableRf, inputFireAssetId, computeOob,
     });
     CREATED(res, 'Đã kích hoạt phân tích cháy rừng.', { snapshot });
+};
+
+// ── GET /fire-risk/snapshots/:id/districts ───────────────────────────────────
+// Trả về danh sách per-district download URL + area stats cho 1 snapshot.
+// Migration 040: pipeline chia GEE download URL theo huyện (10 URL/tỉnh), lưu
+// vào fire.fire_risk_district_exports. Endpoint này expose ra FE để render
+// list "Tải theo huyện" thay cho single download URL cũ. optionalAuth để dashboard
+// public đọc được.
+const getDistrictExports = async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+        throw new Api400Error('ID snapshot không hợp lệ.', ['INVALID_ID']);
+    }
+    const snap = await repo.getById(id);
+    if (!snap) throw new Api404Error('Snapshot không tồn tại.', ['SNAPSHOT_NOT_FOUND']);
+
+    const rows = await repo.listDistrictExports(id);
+
+    // Aggregate cho FE: tổng huyện completed/failed/skipped + tổng ha, byLevel.
+    let completed = 0, failed = 0, skipped = 0, pending = 0;
+    let totalHa   = 0;
+    const byLevel = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of rows) {
+        if (r.status === 'completed') completed += 1;
+        else if (r.status === 'failed')  failed  += 1;
+        else if (r.status === 'skipped') skipped += 1;
+        else pending += 1;
+        totalHa += Number(r.total_area_ha) || 0;
+        const dist = r.area_stats?.riskLevelDist || {};
+        for (let lv = 1; lv <= 5; lv++) byLevel[lv] += Number(dist[lv]) || 0;
+    }
+
+    // Response gọn cho FE — không expose raw column names DB.
+    const districts = rows.map((r) => ({
+        id:                   r.id,
+        districtCode:         r.district_code,
+        districtName:         r.district_name,
+        status:               r.status,
+        scaleM:               r.scale_m,
+        areaStats:            r.area_stats || null,
+        totalAreaHa:          r.total_area_ha != null ? Number(r.total_area_ha) : null,
+        geeTileUrl:           r.gee_tile_url  || null,
+        geeDownloadUrl:       r.gee_download_url || null,
+        geeDownloadFilename:  r.gee_download_filename || null,
+        geeGeneratedAt:       r.gee_generated_at,
+        minioKey:             r.minio_key || null,
+        geoserverLayer:       r.geoserver_layer || null,
+        geoserverStore:       r.geoserver_store || null,
+        rasterIngestJobId:    r.raster_ingest_job_id || null,
+        errorMessage:         r.error_message || null,
+        durationMs:           r.duration_ms || null,
+        startedAt:            r.started_at,
+        completedAt:          r.completed_at,
+    }));
+
+    OK(res, t('get_detail_success', req.lang), {
+        snapshotId:    id,
+        analysisDate:  snap.analysis_date,
+        attempt:       snap.attempt,
+        scaleM:        snap.export_scale_m ?? districts[0]?.scaleM ?? null,
+        total:         rows.length,
+        completed,
+        failed,
+        skipped,
+        pending,
+        aggregate:     {
+            totalHa: Math.round(totalHa * 100) / 100,
+            byLevel: Object.fromEntries(
+                Object.entries(byLevel).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+            ),
+        },
+        districts,
+    });
 };
 
 // ── POST /fire-risk/snapshots/:id/publish-raster ─────────────────────────────
@@ -229,4 +307,4 @@ const publishRaster = async (req, res) => {
     });
 };
 
-module.exports = { getLatest, getMap, getHistory, getPublishedHistory, refresh, publishRaster };
+module.exports = { getLatest, getMap, getHistory, getPublishedHistory, refresh, publishRaster, getDistrictExports };
