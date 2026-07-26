@@ -443,13 +443,19 @@ async function executeAnalysis(year, month, {
                     const districtGeom = d.epsg && d.epsg !== 4326
                         ? ee.Geometry(d.geometry, `EPSG:${d.epsg}`, false)
                         : ee.Geometry(d.geometry);
+                    // Timeout 5 phút/huyện — forest classify graph rất nặng
+                    // (27-band + Landsat/S2 harmonization + 13-class RF training
+                    // + JRC water override + threshold + visualize + clip). Lần
+                    // gọi getDownloadURL đầu tiên phải chờ EE materialize toàn bộ
+                    // pipeline; các lần sau nhanh hơn vì classifier đã cache.
+                    // 60s cũ không đủ ngay cả cho huyện nhỏ nhất — cả 9 huyện
+                    // timeout đồng loạt (xem log 2026-07-27 01:12+). Env override
+                    // FC_DOWNLOAD_TIMEOUT_MS nếu cần tinh chỉnh sau.
+                    const DL_TIMEOUT_MS = Number(process.env.FC_DOWNLOAD_TIMEOUT_MS) || 5 * 60_000;
                     const url = await new Promise((resolve, reject) => {
-                        // Per-huyện timeout 60s — huyện lớn nhất Kon Tum ~1500 km²
-                        // ~15M pixel ở 100m, GeoTIFF ~60MB. Nếu vượt 60s → coi
-                        // như huyện đó fail (không kéo theo cả snapshot).
                         const timer = setTimeout(
-                            () => reject(new Error(`getDownloadURL timeout huyện=${code}`)),
-                            60_000,
+                            () => reject(new Error(`getDownloadURL timeout huyện=${code} sau ${DL_TIMEOUT_MS}ms`)),
+                            DL_TIMEOUT_MS,
                         );
                         classifiedForDownload
                             .updateMask(classifiedForDownload.gt(0))

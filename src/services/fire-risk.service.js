@@ -669,10 +669,16 @@ async function runAnalysis(analysisDate, {
                 const fileBase = `fire_risk_${code || 'unknown'}_${dateTag}`;
                 try {
                     const districtGeom = ee.Geometry(d.geometry);
+                    // Timeout 2 phút/huyện — fire-risk graph nhẹ hơn forest classify
+                    // (không có RF 13-class training), 60s vẫn có thể đủ nhưng
+                    // GEE trong Restricted Mode hay bị 429/slow → nới lên để
+                    // tránh timeout khi quota bị siết. Env FIRE_RISK_DOWNLOAD_TIMEOUT_MS
+                    // override nếu cần.
+                    const DL_TIMEOUT_MS = Number(process.env.FIRE_RISK_DOWNLOAD_TIMEOUT_MS) || 120_000;
                     const url = await new Promise((resolve, reject) => {
                         const timer = setTimeout(
-                            () => reject(new Error(`getDownloadURL timeout huyện=${code}`)),
-                            60_000,
+                            () => reject(new Error(`getDownloadURL timeout huyện=${code} sau ${DL_TIMEOUT_MS}ms`)),
+                            DL_TIMEOUT_MS,
                         );
                         riskLevel
                             .updateMask(riskLevel.gt(0))
