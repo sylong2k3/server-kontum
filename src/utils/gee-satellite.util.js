@@ -256,6 +256,62 @@ function getKonTumDistrictsSource() {
     return _cachedDistrictsSource;
 }
 
+// GeoJSON raw huyện dùng cho district-chunked download (migration 040).
+// Trả về mảng `[{ADM2_CODE, ADM2_NAME, geometry, source}]` KHÔNG bọc ee.Geometry
+// — caller tự convert qua `ee.Geometry(feature.geometry)` khi cần clip. Đọc
+// cùng file với `getKonTumDistricts()`, cache riêng để không mất cache khi
+// caller invalidate FC.
+let _cachedDistrictsGeoJson = null;
+function getKonTumDistrictsGeoJson() {
+    if (_cachedDistrictsGeoJson) return _cachedDistrictsGeoJson;
+    if (!fs.existsSync(KON_TUM_DISTRICTS_PATH)) {
+        console.warn(`[GEE-SAT] Districts GeoJSON file KHÔNG tồn tại: ${KON_TUM_DISTRICTS_PATH}`);
+        _cachedDistrictsGeoJson = [];
+        return _cachedDistrictsGeoJson;
+    }
+    let doc;
+    try {
+        doc = JSON.parse(fs.readFileSync(KON_TUM_DISTRICTS_PATH, 'utf8'));
+    } catch (err) {
+        console.warn(`[GEE-SAT] Districts GeoJSON parse lỗi: ${err.message}`);
+        _cachedDistrictsGeoJson = [];
+        return _cachedDistrictsGeoJson;
+    }
+    if (doc?.type !== 'FeatureCollection' || !Array.isArray(doc.features)) {
+        _cachedDistrictsGeoJson = [];
+        return _cachedDistrictsGeoJson;
+    }
+    const crsName = doc.crs?.properties?.name;
+    const epsg    = _parseEpsgCode(crsName);
+    const seen    = new Set();
+    const out     = [];
+    let idx = 0;
+    for (const f of doc.features) {
+        const g = f?.geometry;
+        if (!g || !Array.isArray(g.coordinates) || g.coordinates.length === 0) continue;
+        const p = f.properties || {};
+        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2 || p.NAME_EN || null;
+        const name    = rawName || `Huyện ${idx + 1}`;
+        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
+        const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${idx + 1}`;
+        const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        out.push({
+            ADM2_CODE: code,
+            ADM2_NAME: name,
+            NAME_EN:   p.NAME_EN || p.VARNAME_2 || null,
+            TYPE_2:    p.TYPE_2 || p.ENGTYPE_2 || null,
+            geometry:  { type: g.type, coordinates: _stripZ(g.coordinates) },
+            epsg:      epsg ? Number(epsg) : 4326,
+        });
+        idx += 1;
+    }
+    _cachedDistrictsGeoJson = out;
+    console.log(`[GEE-SAT] Districts GeoJSON ✓ ${out.length} huyện đọc từ file (raw).`);
+    return _cachedDistrictsGeoJson;
+}
+
 // ── Local Kon Tum boundary polygon ────────────────────────────────────────────
 
 // Recursively strip Z/M components so ee.Geometry accepts the coords —
@@ -642,6 +698,7 @@ module.exports = {
     getEeDownloadUrl,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumDistrictsGeoJson,
     getKonTumDistrictsSource,
     invalidateKonTumDistricts,
     getKonTumBoundaryGeometry,

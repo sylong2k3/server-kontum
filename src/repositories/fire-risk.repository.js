@@ -5,60 +5,61 @@ const db = require('../configs/database');
 // ── Snapshots ─────────────────────────────────────────────────────────────────
 
 /**
- * Tạo snapshot mới với trạng thái 'pending'.
- * Nếu đã có snapshot cho analysis_date đó → cập nhật thay vì tạo mới.
+ * Tạo snapshot mới cho analysis_date + attempt tự động tăng.
+ *
+ * Sau migration 040: (analysis_date, attempt) UNIQUE — mỗi lần chạy refresh
+ * tạo ra 1 dòng history mới, KHÔNG ghi đè dòng completed cũ. Attempt được
+ * chọn = max(attempt của cùng analysis_date) + 1 (default 1).
+ *
+ * Fix bug "history bị mất sau khi refresh": trước đây UPSERT flip status =
+ * 'computing' + reset province_summary → listCompleted (WHERE status IN
+ * ('completed','published')) không thấy dòng đó. Giờ dòng completed cũ vẫn
+ * còn, dòng mới đi qua computing → completed riêng biệt.
  */
-const upsertSnapshot = async ({
+const createSnapshot = async ({
     analysis_date,
     status = 'pending',
     model_params = {},
-    province_summary = null,
-    district_stats = null,
-    p_nesterov_stats = null,
-    s2_coverage_ratio = null,
-    gee_task_id = null,
-    minio_key = null,
-    geoserver_layer = null,
-    geoserver_store = null,
-    error_message = null,
-    computed_at = null,
-    published_at = null,
+    export_scale_m = null,
 }) => {
-    const { rows } = await db.query(
-        `INSERT INTO fire.fire_risk_snapshots
-            (analysis_date, status, model_params, province_summary, district_stats,
-             p_nesterov_stats, s2_coverage_ratio, gee_task_id, minio_key,
-             geoserver_layer, geoserver_store, error_message, computed_at, published_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (analysis_date) DO UPDATE SET
-            status            = EXCLUDED.status,
-            model_params      = EXCLUDED.model_params,
-            province_summary  = CASE WHEN EXCLUDED.province_summary  IS NOT NULL THEN EXCLUDED.province_summary  ELSE fire.fire_risk_snapshots.province_summary  END,
-            district_stats    = CASE WHEN EXCLUDED.district_stats    IS NOT NULL THEN EXCLUDED.district_stats    ELSE fire.fire_risk_snapshots.district_stats    END,
-            p_nesterov_stats  = CASE WHEN EXCLUDED.p_nesterov_stats  IS NOT NULL THEN EXCLUDED.p_nesterov_stats  ELSE fire.fire_risk_snapshots.p_nesterov_stats  END,
-            s2_coverage_ratio = COALESCE(EXCLUDED.s2_coverage_ratio, fire.fire_risk_snapshots.s2_coverage_ratio),
-            gee_task_id       = COALESCE(EXCLUDED.gee_task_id,       fire.fire_risk_snapshots.gee_task_id),
-            minio_key         = COALESCE(EXCLUDED.minio_key,         fire.fire_risk_snapshots.minio_key),
-            geoserver_layer   = COALESCE(EXCLUDED.geoserver_layer,   fire.fire_risk_snapshots.geoserver_layer),
-            geoserver_store   = COALESCE(EXCLUDED.geoserver_store,   fire.fire_risk_snapshots.geoserver_store),
-            error_message     = EXCLUDED.error_message,
-            computed_at       = COALESCE(EXCLUDED.computed_at,       fire.fire_risk_snapshots.computed_at),
-            published_at      = COALESCE(EXCLUDED.published_at,      fire.fire_risk_snapshots.published_at),
-            updated_at        = NOW()
-         RETURNING *`,
-        [
-            analysis_date, status,
-            JSON.stringify(model_params),
-            province_summary  ? JSON.stringify(province_summary)  : null,
-            district_stats    ? JSON.stringify(district_stats)    : null,
-            p_nesterov_stats  ? JSON.stringify(p_nesterov_stats)  : null,
-            s2_coverage_ratio,
-            gee_task_id, minio_key, geoserver_layer, geoserver_store,
-            error_message, computed_at, published_at,
-        ],
-    );
-    return rows[0];
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { rows: attemptRows } = await client.query(
+            `SELECT COALESCE(MAX(attempt), 0) + 1 AS next_attempt
+             FROM fire.fire_risk_snapshots
+             WHERE analysis_date = $1`,
+            [analysis_date],
+        );
+        const attempt = attemptRows[0].next_attempt;
+
+        const { rows } = await client.query(
+            `INSERT INTO fire.fire_risk_snapshots
+                (analysis_date, attempt, status, model_params, export_scale_m)
+             VALUES ($1, $2, $3, $4, COALESCE($5, 100))
+             RETURNING *`,
+            [
+                analysis_date, attempt, status,
+                JSON.stringify(model_params),
+                export_scale_m,
+            ],
+        );
+        await client.query('COMMIT');
+        return rows[0];
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 };
+
+/**
+ * DEPRECATED — giữ để backward-compat cho code cũ có thể còn gọi tới. Trả về
+ * `createSnapshot` behavior (tạo dòng mới) thay vì UPSERT như trước. Nên loại
+ * dần sau khi mọi caller chuyển sang `createSnapshot`.
+ */
+const upsertSnapshot = async (params) => createSnapshot(params);
 
 /**
  * Cập nhật status (và error_message) của snapshot theo ID.
@@ -93,6 +94,7 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('oob_accuracy',         extra.oob_accuracy);
     addField('next_retry_at',        extra.next_retry_at);
     addField('last_retry_error',     extra.last_retry_error);
+    addField('export_scale_m',       extra.export_scale_m);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
@@ -105,6 +107,10 @@ const updateStatus = async (id, status, extra = {}) => {
     if (extra.p_nesterov_stats !== undefined) {
         sets.push(`p_nesterov_stats = $${idx++}`);
         vals.push(extra.p_nesterov_stats ? JSON.stringify(extra.p_nesterov_stats) : null);
+    }
+    if (extra.district_export_summary !== undefined) {
+        sets.push(`district_export_summary = $${idx++}`);
+        vals.push(extra.district_export_summary ? JSON.stringify(extra.district_export_summary) : null);
     }
 
     const { rows } = await db.query(
@@ -126,6 +132,58 @@ const scheduleRetry = async (id, delayMs, errorMessage) => {
         [id, delayMs, String(errorMessage || '').slice(0, 4000)],
     );
     return rows[0] || null;
+};
+
+/**
+ * Đếm số attempt failed cho analysis_date (dùng bởi cron retry logic).
+ *
+ * Sau migration 040 mỗi lần chạy tạo dòng mới (attempt++). retry_count trên
+ * từng dòng reset về 0 → không đại diện cho "tổng lần fail hôm nay". Job code
+ * dùng COUNT này để giới hạn retry tổng ≤ 3, tránh infinite loop.
+ */
+const countFailedAttempts = async (analysisDate) => {
+    const { rows } = await db.query(
+        `SELECT COUNT(*)::int AS n
+         FROM fire.fire_risk_snapshots
+         WHERE analysis_date = $1 AND status = 'failed'`,
+        [analysisDate],
+    );
+    return rows[0]?.n ?? 0;
+};
+
+/**
+ * TRUE nếu có ít nhất 1 attempt với status IN ('completed','published','exporting')
+ * cho analysis_date đó → dùng bởi watchdog / catch-up để SKIP thay vì trigger
+ * run mới. Bao gồm 'exporting' vì stats DB đã hoàn tất, chỉ chờ raster ingest.
+ */
+const hasCompletedAttempt = async (analysisDate) => {
+    const { rows } = await db.query(
+        `SELECT 1
+         FROM fire.fire_risk_snapshots
+         WHERE analysis_date = $1
+           AND status IN ('completed','published','exporting')
+         LIMIT 1`,
+        [analysisDate],
+    );
+    return rows.length > 0;
+};
+
+/**
+ * Đếm số attempt completed/published TRƯỚC snapshot này cho cùng analysis_date.
+ * Dùng bởi service để dedup notification — chỉ gửi noti lần đầu succeeded/day.
+ * Snapshot vừa mới complete tự nó chưa được đếm vì so sánh created_at.
+ */
+const countPriorCompletedAttempts = async (snapshotId) => {
+    const { rows } = await db.query(
+        `SELECT COUNT(*)::int AS n
+         FROM fire.fire_risk_snapshots s
+         JOIN fire.fire_risk_snapshots me ON me.id = $1
+         WHERE s.id <> me.id
+           AND s.analysis_date = me.analysis_date
+           AND s.status IN ('completed','published','exporting')`,
+        [snapshotId],
+    );
+    return rows[0]?.n ?? 0;
 };
 
 /**
@@ -308,10 +366,93 @@ const getFeatures = async (snapshotId, { minLevel = 1 } = {}) => {
     return rows;
 };
 
+// ── District exports (migration 040) ──────────────────────────────────────────
+// Track per-district GEE download URL + area stats. Aggregation lên tỉnh =
+// SUM(total_area_ha). Mỗi row có state riêng để không kéo theo snapshot fail
+// khi 1 huyện lỗi.
+
+const insertDistrictExports = async (snapshotId, districts, scaleM = 100) => {
+    if (!Array.isArray(districts) || districts.length === 0) return [];
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query(
+            'DELETE FROM fire.fire_risk_district_exports WHERE snapshot_id = $1',
+            [snapshotId],
+        );
+        const inserted = [];
+        for (const d of districts) {
+            const { rows } = await client.query(
+                `INSERT INTO fire.fire_risk_district_exports
+                    (snapshot_id, district_code, district_name, scale_m, status)
+                 VALUES ($1, $2, $3, $4, 'pending')
+                 RETURNING *`,
+                [snapshotId, d.district_code || null, d.district_name || null, scaleM],
+            );
+            inserted.push(rows[0]);
+        }
+        await client.query('COMMIT');
+        return inserted;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+const updateDistrictExport = async (id, patch) => {
+    const sets = ['updated_at = NOW()'];
+    const vals = [id];
+    let   idx  = 2;
+    const add = (col, val, isJson = false) => {
+        if (val === undefined) return;
+        sets.push(`${col} = $${idx++}`);
+        vals.push(isJson && val !== null ? JSON.stringify(val) : (val ?? null));
+    };
+    add('status',                patch.status);
+    add('area_stats',            patch.area_stats, true);
+    add('total_area_ha',         patch.total_area_ha);
+    add('gee_map_id',            patch.gee_map_id);
+    add('gee_tile_url',          patch.gee_tile_url);
+    add('gee_download_url',      patch.gee_download_url);
+    add('gee_download_filename', patch.gee_download_filename);
+    add('gee_generated_at',      patch.gee_generated_at);
+    add('minio_key',             patch.minio_key);
+    add('geoserver_layer',       patch.geoserver_layer);
+    add('geoserver_store',       patch.geoserver_store);
+    add('raster_ingest_job_id',  patch.raster_ingest_job_id);
+    add('error_message',         patch.error_message);
+    add('duration_ms',           patch.duration_ms);
+    add('started_at',            patch.started_at);
+    add('completed_at',          patch.completed_at);
+
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_district_exports SET ${sets.join(', ')}
+         WHERE id = $1 RETURNING *`,
+        vals,
+    );
+    return rows[0] || null;
+};
+
+const listDistrictExports = async (snapshotId) => {
+    const { rows } = await db.query(
+        `SELECT * FROM fire.fire_risk_district_exports
+         WHERE snapshot_id = $1
+         ORDER BY district_name, id`,
+        [snapshotId],
+    );
+    return rows;
+};
+
 module.exports = {
+    createSnapshot,
     upsertSnapshot,
     updateStatus,
     scheduleRetry,
+    countFailedAttempts,
+    hasCompletedAttempt,
+    countPriorCompletedAttempts,
     getLatestCompleted,
     getLatest,
     getById,
@@ -320,4 +461,8 @@ module.exports = {
     deleteOld,
     replaceFeatures,
     getFeatures,
+    // District exports (migration 040)
+    insertDistrictExports,
+    updateDistrictExport,
+    listDistrictExports,
 };

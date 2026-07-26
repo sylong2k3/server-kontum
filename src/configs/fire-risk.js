@@ -97,7 +97,11 @@ const COMPUTE_OOB                 = process.env.FIRE_RISK_COMPUTE_OOB === 'true'
 const OOB_TIMEOUT_MS              = parseInt(process.env.FIRE_RISK_OOB_TIMEOUT_MS, 10) || 10 * 60 * 1000;
 
 // GEE export settings.
-const EXPORT_SCALE_M              = parseInt(process.env.FIRE_RISK_EXPORT_SCALE_M, 10) || 250;
+// EXPORT_SCALE_M — mặc định 100m sau migration 040 (đồng bộ resolution với forest).
+// getDownloadURL sẽ chia theo huyện (RanhGioiHuyen_Polygon.geojson) để không vượt
+// maxPixels 1e9. Reduce provinces vẫn dùng scale 100m nhưng qua reduceRegions
+// per district → tránh rebuild graph nặng.
+const EXPORT_SCALE_M              = parseInt(process.env.FIRE_RISK_EXPORT_SCALE_M, 10) || 100;
 const EXPORT_FOLDER               = process.env.FIRE_RISK_EXPORT_FOLDER || 'GEE_FireWarning';
 
 // ── GCS (Google Cloud Storage) for raster export ─────────────────────────────

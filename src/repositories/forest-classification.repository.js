@@ -10,63 +10,61 @@ const dbg = (tag, msg) => { if (DEBUG) console.debug(`[FOREST-REPO:DBG:${tag}] $
 
 // ── Snapshots ─────────────────────────────────────────────────────────────────
 
-const upsertSnapshot = async ({
+/**
+ * Tạo snapshot mới cho (year, month) — attempt tự động tăng.
+ *
+ * Sau migration 040: (year, month, attempt) UNIQUE. Mỗi refresh tạo ra 1 dòng
+ * history mới, KHÔNG ghi đè dòng completed cũ. Fix bug "history reload lại bị
+ * mất": trước đây UPSERT flip status = 'computing' → listCompleted không thấy
+ * dòng đó trong ~5-15 phút cron chạy, hoặc mất vĩnh viễn khi run fail.
+ */
+const createSnapshot = async ({
     year,
     month,
     status         = 'pending',
     trigger        = 'cron',
     requested_by   = null,
     model_params   = {},
-    province_summary = null,
-    oob_accuracy   = null,
-    s2_image_count = null,
-    ls_image_count = null,
-    gee_task_id    = null,
-    minio_key      = null,
-    geoserver_layer = null,
-    geoserver_store = null,
-    error_message  = null,
-    computed_at    = null,
-    published_at   = null,
+    download_scale_m = null,
 }) => {
-    const { rows } = await db.query(
-        `INSERT INTO forest.forest_snapshots
-            (year, month, status, trigger, requested_by, model_params,
-             province_summary, oob_accuracy, s2_image_count, ls_image_count,
-             gee_task_id, minio_key, geoserver_layer, geoserver_store,
-             error_message, computed_at, published_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-         ON CONFLICT (year, month) DO UPDATE SET
-            status           = EXCLUDED.status,
-            trigger          = EXCLUDED.trigger,
-            requested_by     = COALESCE(EXCLUDED.requested_by, forest.forest_snapshots.requested_by),
-            model_params     = EXCLUDED.model_params,
-            province_summary = CASE WHEN EXCLUDED.province_summary IS NOT NULL
-                               THEN EXCLUDED.province_summary
-                               ELSE forest.forest_snapshots.province_summary END,
-            oob_accuracy     = COALESCE(EXCLUDED.oob_accuracy,     forest.forest_snapshots.oob_accuracy),
-            s2_image_count   = COALESCE(EXCLUDED.s2_image_count,   forest.forest_snapshots.s2_image_count),
-            ls_image_count   = COALESCE(EXCLUDED.ls_image_count,   forest.forest_snapshots.ls_image_count),
-            gee_task_id      = COALESCE(EXCLUDED.gee_task_id,      forest.forest_snapshots.gee_task_id),
-            minio_key        = COALESCE(EXCLUDED.minio_key,        forest.forest_snapshots.minio_key),
-            geoserver_layer  = COALESCE(EXCLUDED.geoserver_layer,  forest.forest_snapshots.geoserver_layer),
-            geoserver_store  = COALESCE(EXCLUDED.geoserver_store,  forest.forest_snapshots.geoserver_store),
-            error_message    = EXCLUDED.error_message,
-            computed_at      = COALESCE(EXCLUDED.computed_at,      forest.forest_snapshots.computed_at),
-            published_at     = COALESCE(EXCLUDED.published_at,     forest.forest_snapshots.published_at),
-            updated_at       = NOW()
-         RETURNING *`,
-        [
-            year, month, status, trigger, requested_by,
-            JSON.stringify(model_params),
-            province_summary ? JSON.stringify(province_summary) : null,
-            oob_accuracy, s2_image_count, ls_image_count,
-            gee_task_id, minio_key, geoserver_layer, geoserver_store,
-            error_message, computed_at, published_at,
-        ],
-    );
-    return rows[0];
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { rows: attemptRows } = await client.query(
+            `SELECT COALESCE(MAX(attempt), 0) + 1 AS next_attempt
+             FROM forest.forest_snapshots
+             WHERE year = $1 AND month = $2`,
+            [year, month],
+        );
+        const attempt = attemptRows[0].next_attempt;
+
+        const { rows } = await client.query(
+            `INSERT INTO forest.forest_snapshots
+                (year, month, attempt, status, trigger, requested_by,
+                 model_params, download_scale_m)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 100))
+             RETURNING *`,
+            [
+                year, month, attempt, status, trigger, requested_by,
+                JSON.stringify(model_params),
+                download_scale_m,
+            ],
+        );
+        await client.query('COMMIT');
+        return rows[0];
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 };
+
+/**
+ * DEPRECATED — backward-compat shim. Chuyển hướng sang `createSnapshot` để
+ * mọi UPSERT cũ giờ đây tạo attempt mới thay vì overwrite.
+ */
+const upsertSnapshot = async (params) => createSnapshot(params);
 
 const updateStatus = async (id, status, extra = {}) => {
     // Debug — chỉ log key/value flag để tránh spam JSON dài. Đủ để trace việc
@@ -110,6 +108,7 @@ const updateStatus = async (id, status, extra = {}) => {
     addField('gt_window_days',       extra.gt_window_days);
     addField('next_retry_at',        extra.next_retry_at);
     addField('last_retry_error',     extra.last_retry_error);
+    addField('download_scale_m',     extra.download_scale_m);
 
     if (extra.province_summary !== undefined) {
         sets.push(`province_summary = $${idx++}`);
@@ -119,6 +118,11 @@ const updateStatus = async (id, status, extra = {}) => {
     if (extra.sample_quotas !== undefined) {
         sets.push(`sample_quotas = $${idx++}`);
         vals.push(extra.sample_quotas ? JSON.stringify(extra.sample_quotas) : null);
+    }
+
+    if (extra.district_export_summary !== undefined) {
+        sets.push(`district_export_summary = $${idx++}`);
+        vals.push(extra.district_export_summary ? JSON.stringify(extra.district_export_summary) : null);
     }
 
     const { rows } = await db.query(
@@ -140,6 +144,54 @@ const scheduleRetry = async (id, delayMs, errorMessage) => {
         [id, delayMs, String(errorMessage || '').slice(0, 4000)],
     );
     return rows[0] || null;
+};
+
+/**
+ * Đếm số attempt failed cho (year, month) — dùng bởi cron retry logic sau
+ * migration 040. Mỗi attempt là dòng riêng nên retry_count trên 1 dòng không
+ * còn đại diện cho tổng lần fail của kỳ đó.
+ */
+const countFailedAttempts = async (year, month) => {
+    const { rows } = await db.query(
+        `SELECT COUNT(*)::int AS n
+         FROM forest.forest_snapshots
+         WHERE year = $1 AND month = $2 AND status = 'failed'`,
+        [year, month],
+    );
+    return rows[0]?.n ?? 0;
+};
+
+/**
+ * TRUE nếu (year, month) đã có attempt thành công (completed/published/exporting).
+ * Dùng để watchdog SKIP thay vì trigger run mới.
+ */
+const hasCompletedAttempt = async (year, month) => {
+    const { rows } = await db.query(
+        `SELECT 1
+         FROM forest.forest_snapshots
+         WHERE year = $1 AND month = $2
+           AND status IN ('completed','published','exporting')
+         LIMIT 1`,
+        [year, month],
+    );
+    return rows.length > 0;
+};
+
+/**
+ * Đếm số attempt completed trước snapshot này cho cùng (year, month). Dùng
+ * dedup notification — chỉ gửi noti lần đầu succeeded/kỳ.
+ */
+const countPriorCompletedAttempts = async (snapshotId) => {
+    const { rows } = await db.query(
+        `SELECT COUNT(*)::int AS n
+         FROM forest.forest_snapshots s
+         JOIN forest.forest_snapshots me ON me.id = $1
+         WHERE s.id <> me.id
+           AND s.year = me.year AND s.month = me.month
+           AND s.status IN ('completed','published','exporting')`,
+        [snapshotId],
+    );
+    return rows[0]?.n ?? 0;
 };
 
 const getById = async (id) => {
@@ -306,6 +358,37 @@ const getDistrictAreas = async (snapshotId) => {
 };
 
 /**
+ * Danh sách năm có ít nhất 1 snapshot completed. Dùng cho dropdown năm ở
+ * trang /statistics (thay thế landcover_statistics.getAvailableYears sau
+ * migration 041).
+ */
+const getSnapshotYears = async () => {
+    const { rows } = await db.query(
+        `SELECT DISTINCT year
+         FROM forest.forest_snapshots
+         WHERE status IN ('completed','published','exporting')
+         ORDER BY year DESC`,
+    );
+    return rows.map((r) => r.year);
+};
+
+/**
+ * Snapshot completed mới nhất trong 1 năm (tháng lớn nhất có completed).
+ * Dùng để lấy "hiện trạng cuối năm" cho endpoint /statistics/landcover.
+ */
+const getLatestCompletedByYear = async (year) => {
+    const { rows } = await db.query(
+        `SELECT * FROM forest.forest_snapshots
+         WHERE year = $1
+           AND status IN ('completed','published','exporting')
+         ORDER BY month DESC, created_at DESC
+         LIMIT 1`,
+        [year],
+    );
+    return rows[0] || null;
+};
+
+/**
  * Previous completed snapshot before year/month, for area-change detection.
  */
 const getPreviousCompleted = async (year, month) => {
@@ -320,10 +403,94 @@ const getPreviousCompleted = async (year, month) => {
     return rows[0] || null;
 };
 
+// ── District exports (migration 040) ──────────────────────────────────────────
+// Track per-district GEE download + area stats. Snapshot completed = SUM area
+// từ tất cả district_export rows completed. Nếu 1 huyện fail, snapshot vẫn
+// completed (partial coverage) — không kéo theo toàn bộ.
+
+const insertDistrictExports = async (snapshotId, districts, scaleM = 100) => {
+    if (!Array.isArray(districts) || districts.length === 0) return [];
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query(
+            'DELETE FROM forest.forest_district_exports WHERE snapshot_id = $1',
+            [snapshotId],
+        );
+        const inserted = [];
+        for (const d of districts) {
+            const { rows } = await client.query(
+                `INSERT INTO forest.forest_district_exports
+                    (snapshot_id, district_code, district_name, scale_m, status)
+                 VALUES ($1, $2, $3, $4, 'pending')
+                 RETURNING *`,
+                [snapshotId, d.district_code || null, d.district_name || null, scaleM],
+            );
+            inserted.push(rows[0]);
+        }
+        await client.query('COMMIT');
+        return inserted;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+const updateDistrictExport = async (id, patch) => {
+    const sets = ['updated_at = NOW()'];
+    const vals = [id];
+    let   idx  = 2;
+    const add = (col, val, isJson = false) => {
+        if (val === undefined) return;
+        sets.push(`${col} = $${idx++}`);
+        vals.push(isJson && val !== null ? JSON.stringify(val) : (val ?? null));
+    };
+    add('status',                patch.status);
+    add('area_by_class',         patch.area_by_class, true);
+    add('total_area_ha',         patch.total_area_ha);
+    add('forest_area_ha',        patch.forest_area_ha);
+    add('gee_map_id',            patch.gee_map_id);
+    add('gee_tile_url',          patch.gee_tile_url);
+    add('gee_download_url',      patch.gee_download_url);
+    add('gee_download_filename', patch.gee_download_filename);
+    add('gee_generated_at',      patch.gee_generated_at);
+    add('minio_key',             patch.minio_key);
+    add('geoserver_layer',       patch.geoserver_layer);
+    add('geoserver_store',       patch.geoserver_store);
+    add('raster_ingest_job_id',  patch.raster_ingest_job_id);
+    add('error_message',         patch.error_message);
+    add('duration_ms',           patch.duration_ms);
+    add('started_at',            patch.started_at);
+    add('completed_at',          patch.completed_at);
+
+    const { rows } = await db.query(
+        `UPDATE forest.forest_district_exports SET ${sets.join(', ')}
+         WHERE id = $1 RETURNING *`,
+        vals,
+    );
+    return rows[0] || null;
+};
+
+const listDistrictExports = async (snapshotId) => {
+    const { rows } = await db.query(
+        `SELECT * FROM forest.forest_district_exports
+         WHERE snapshot_id = $1
+         ORDER BY district_name, id`,
+        [snapshotId],
+    );
+    return rows;
+};
+
 module.exports = {
+    createSnapshot,
     upsertSnapshot,
     updateStatus,
     scheduleRetry,
+    countFailedAttempts,
+    hasCompletedAttempt,
+    countPriorCompletedAttempts,
     getById,
     getLatestCompleted,
     getLatest,
@@ -332,4 +499,10 @@ module.exports = {
     replaceDistrictAreas,
     getDistrictAreas,
     getPreviousCompleted,
+    getSnapshotYears,
+    getLatestCompletedByYear,
+    // District exports (migration 040)
+    insertDistrictExports,
+    updateDistrictExport,
+    listDistrictExports,
 };

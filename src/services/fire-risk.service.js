@@ -427,10 +427,11 @@ async function runAnalysis(analysisDate, {
 
     await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
 
-    let snapshot = await log.run('Upsert snapshot → status=computing', () =>
-        repo.upsertSnapshot({
+    let snapshot = await log.run('Create snapshot (new attempt) → status=computing', () =>
+        repo.createSnapshot({
             analysis_date: analysisDate,
             status: 'computing',
+            export_scale_m: cfg.EXPORT_SCALE_M,
             model_params: {
                 version:             'v8.1',
                 feature_window_days: cfg.FEATURE_WINDOW_DAYS,
@@ -605,60 +606,124 @@ async function runAnalysis(analysisDate, {
             console.warn(`[FIRE-RISK] getEeMapId failed (non-fatal): ${err.message}`);
         }
 
-        // Download URL clip theo ranh giới tỉnh Kon Tum (RanhGioiTinh_Polygon).
-        // GEE `image.getDownloadURL` trả 1 GeoTIFF nén .zip, valid ~24h.
-        // Region = province polygon (WGS84 2D). Scale 500m matches raster gốc.
-        // Non-fatal: nếu lỗi (image quá lớn hoặc GEE timeout), snapshot vẫn
-        // completed, chỉ thiếu link download — user có thể refresh sau.
+        // Download URL — chia PER HUYỆN thay vì 1 URL toàn tỉnh (migration 040).
+        // Lý do: EXPORT_SCALE_M mới = 100m → toàn tỉnh 9.677 km² × 3 band RGB
+        // ≈ 30M pixel → GeoTIFF ~120MB, vượt maxPixels 1e9 và dễ timeout GEE.
+        // Chia theo huyện: mỗi huyện ~50-1500 km² → ~5M pixel/huyện, an toàn.
+        // Diện tích toàn tỉnh = Σ area huyện (aggregate ở dashboard/query).
         //
-        // Dùng callback API vì `image.getDownloadURL()` trong Node SDK là
-        // async callback, không phải Promise.
-        // Ảnh trước đây `.toInt8()` (band đơn 0-5) → download về xem là ĐEN TRẮNG
-        // vì không có palette metadata trong GeoTIFF. Chuyển sang `.visualize()` với
-        // cùng palette dùng cho tile → GeoTIFF 3 band RGB uint8, mở ra là ảnh MÀU.
-        let geeDownloadUrl      = null;
+        // Persist state per huyện vào fire.fire_risk_district_exports — mỗi
+        // row có riêng gee_download_url + area_stats. Nếu 1 huyện fail, các
+        // huyện khác vẫn completed, snapshot vẫn có thể publish.
+        let geeDownloadUrl      = null;      // Giữ NULL — không còn URL toàn tỉnh
         let geeDownloadFilename = null;
+        const districtExportRows = [];
         try {
-            const fileBase = `fire_risk_kontum_${analysisDate.replace(/-/g, '')}`;
-            geeDownloadUrl = await log.run(
-                'Generate GEE download URL (riskLevel visualize → GeoTIFF RGB, filePerBand=false)',
-                () => new Promise((resolve) => {
-                    const timer = setTimeout(() => resolve(null), 30_000);
-                    // Mask pixel level=0 giống flow tile — output TIFF sẽ có
-                    // nodata tại các pixel không dữ liệu (GEE lưu ở alpha band
-                    // hoặc metadata). GeoServer coverage sẽ render trong suốt
-                    // cho các pixel này, không còn ô trắng phủ basemap.
-                    riskLevel
-                        .updateMask(riskLevel.gt(0))
-                        .visualize(RISK_LEVEL_VIZ)
-                        .clip(region.geometry())
-                        .getDownloadURL(
-                            {
-                                name:        fileBase,
-                                scale:       cfg.EXPORT_SCALE_M || 500,
-                                region:      region.geometry(),
-                                crs:         'EPSG:4326',
-                                format:      'GEO_TIFF',
-                                // KHÔNG chia band ra 3 file — trả 1 GeoTIFF
-                                // 3-band RGB duy nhất (user chỉ cần unzip
-                                // 1 lần thấy 1 ảnh màu đủ, không phải 3 file).
-                                filePerBand: false,
-                                maxPixels:   1e9,
-                            },
-                            (url, err) => {
-                                clearTimeout(timer);
-                                if (err) {
-                                    console.warn(`[FIRE-RISK] getDownloadURL err: ${err.message || err}`);
-                                }
-                                resolve(err ? null : url);
-                            },
-                        );
-                }),
-                { note: 'filePerBand=false → 1 file GeoTIFF RGB (không phải 3 file per band)' },
+            const dateTag = analysisDate.replace(/-/g, '');
+            // Reuse geometry từ districtStats đã có (đã evaluate xong, chứa
+            // ADM2_CODE/ADM2_NAME + geometry). Không cần evaluate() lại.
+            const skeletons = districtStats.map((d) => ({
+                district_code: d.unitCode ? String(d.unitCode) : null,
+                district_name: d.name || null,
+                geometry:      d.geometry || null,
+            }));
+
+            // Chèn skeleton rows status=pending vào bảng district_exports.
+            const seeded = await log.run(
+                `Seed ${skeletons.length} district_exports (status=pending)`,
+                () => repo.insertDistrictExports(snapshot.id, skeletons, cfg.EXPORT_SCALE_M),
             );
-            if (geeDownloadUrl) geeDownloadFilename = `${fileBase}.zip`;
+
+            // Map district_code → row id để update patch sau.
+            const rowByCode = new Map();
+            for (const r of seeded) rowByCode.set(r.district_code, r);
+
+            let completed = 0, failed = 0, skipped = 0;
+            for (const d of districtStats) {
+                const code = d.unitCode ? String(d.unitCode) : null;
+                const row  = rowByCode.get(code);
+                if (!row) continue;
+                const t0 = Date.now();
+                await repo.updateDistrictExport(row.id, {
+                    status: 'computing', started_at: new Date(),
+                });
+
+                // Tính tổng area level 1-5 của huyện (dùng để aggregate lên tỉnh).
+                const levelDist  = d.riskLevelDist || {};
+                let districtHa = 0;
+                for (let l = 1; l <= 5; l++) districtHa += Number(levelDist[l]) || 0;
+
+                if (districtHa === 0 || !d.geometry) {
+                    await repo.updateDistrictExport(row.id, {
+                        status:        'skipped',
+                        area_stats:    d,
+                        total_area_ha: 0,
+                        duration_ms:   Date.now() - t0,
+                        completed_at:  new Date(),
+                        error_message: !d.geometry ? 'district geometry missing' : 'no pixels ≥ level 1',
+                    });
+                    skipped += 1;
+                    continue;
+                }
+
+                const fileBase = `fire_risk_${code || 'unknown'}_${dateTag}`;
+                try {
+                    const districtGeom = ee.Geometry(d.geometry);
+                    const url = await new Promise((resolve, reject) => {
+                        const timer = setTimeout(
+                            () => reject(new Error(`getDownloadURL timeout huyện=${code}`)),
+                            60_000,
+                        );
+                        riskLevel
+                            .updateMask(riskLevel.gt(0))
+                            .visualize(RISK_LEVEL_VIZ)
+                            .clip(districtGeom)
+                            .getDownloadURL(
+                                {
+                                    name:        fileBase,
+                                    scale:       cfg.EXPORT_SCALE_M || 100,
+                                    region:      districtGeom,
+                                    crs:         'EPSG:4326',
+                                    format:      'GEO_TIFF',
+                                    filePerBand: false,
+                                    maxPixels:   1e9,
+                                },
+                                (u, err) => {
+                                    clearTimeout(timer);
+                                    if (err) reject(new Error(String(err.message || err)));
+                                    else resolve(u);
+                                },
+                            );
+                    });
+                    await repo.updateDistrictExport(row.id, {
+                        status:                'completed',
+                        area_stats:            d,
+                        total_area_ha:         Math.round(districtHa * 100) / 100,
+                        gee_download_url:      url,
+                        gee_download_filename: `${fileBase}.zip`,
+                        gee_generated_at:      new Date(),
+                        duration_ms:           Date.now() - t0,
+                        completed_at:          new Date(),
+                    });
+                    districtExportRows.push({ code, name: d.name, url, districtHa });
+                    completed += 1;
+                } catch (dErr) {
+                    console.warn(`[FIRE-RISK] district=${code} download fail: ${dErr.message}`);
+                    await repo.updateDistrictExport(row.id, {
+                        status:        'failed',
+                        area_stats:    d,
+                        total_area_ha: Math.round(districtHa * 100) / 100,
+                        error_message: dErr.message,
+                        duration_ms:   Date.now() - t0,
+                        completed_at:  new Date(),
+                    });
+                    failed += 1;
+                }
+            }
+            log.mark('District downloads',
+                `completed=${completed} failed=${failed} skipped=${skipped} of ${skeletons.length}`);
         } catch (err) {
-            console.warn(`[FIRE-RISK] getDownloadURL failed (non-fatal): ${err.message}`);
+            console.warn(`[FIRE-RISK] district-chunked download setup failed (non-fatal): ${err.message}`);
         }
 
         // Nhét model_meta vào JSONB `province_summary` (piggyback) để không
@@ -672,6 +737,15 @@ async function runAnalysis(analysisDate, {
             },
         };
 
+        // Aggregate district_exports → 1 object summary lưu ở snapshot cho FE.
+        const districtExportSummary = {
+            scaleM:  cfg.EXPORT_SCALE_M,
+            total:   districtExportRows.length,
+            byLevel: provinceSummary.riskLevelDist,
+            totalHa: Object.values(provinceSummary.riskLevelDist || {})
+                .reduce((s, v) => s + (Number(v) || 0), 0),
+        };
+
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
                 province_summary:  provinceSummaryWithMeta,
@@ -682,11 +756,15 @@ async function runAnalysis(analysisDate, {
                 gee_map_id:        geeMapId,
                 gee_tile_url:      geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
-                gee_download_url:  geeDownloadUrl,
+                // gee_download_url giữ NULL — client lấy URL per huyện từ
+                // fire_risk_district_exports (endpoint mới sẽ list).
+                gee_download_url:  null,
+                district_export_summary: districtExportSummary,
                 gt_zone_count:     gtData.counts.zones,
                 gt_point_count:    gtData.counts.points,
                 gt_window_days:    gtWindowDays,
                 oob_accuracy:      oobPct != null ? Number(oobPct.toFixed(2)) : null,
+                export_scale_m:    cfg.EXPORT_SCALE_M,
             }));
 
         const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);
@@ -712,15 +790,26 @@ async function runAnalysis(analysisDate, {
         log.summary();
 
         // ── Auto ingest → MinIO → GeoServer (persistent COG) ──────────────
-        // Không cần admin bấm nút thủ công — cron chạy xong sẽ tự enqueue
-        // raster-ingest job. Job worker (poll 15s) tự pick up. Snapshot
-        // được back-link `geoserver_layer` khi ingest complete (queue service).
-        // KHÔNG throw nếu enqueue fail — không được chặn pipeline chính.
-        _safe(() => _autoIngestSnapshot(snapshot, geeDownloadUrl, analysisDate));
+        // Sau migration 040: mỗi huyện có 1 URL riêng thay vì 1 URL tỉnh.
+        // Enqueue N ingest job (1/huyện) — thay vì 1 job như trước. Nếu job
+        // nào fail vẫn không kéo theo snapshot fail.
+        for (const dRow of districtExportRows) {
+            _safe(() => _autoIngestDistrict(snapshot, dRow, analysisDate));
+        }
 
         // ── Notification khi phân tích thành công ─────────────────────────
-        // Gửi broadcast tới role admin + sở NN&MT + UBND tỉnh.
-        _safe(() => _notifyFireRiskCompleted(snapshot, provinceSummary));
+        // Gửi broadcast tới role admin + sở NN&MT + UBND tỉnh — CHỈ 1 LẦN
+        // cho mỗi analysis_date. Nếu đã có attempt completed trước đó (VD
+        // watchdog retry, hoặc admin refresh thủ công sau khi cron xong),
+        // KHÔNG gửi noti lần 2 để tránh spam người dùng.
+        _safe(async () => {
+            const prior = await repo.countPriorCompletedAttempts(snapshot.id).catch(() => 0);
+            if (prior > 0) {
+                console.log(`[FIRE-RISK] notification SKIP — đã có ${prior} attempt completed trước (dedup theo analysis_date)`);
+                return;
+            }
+            await _notifyFireRiskCompleted(snapshot, provinceSummary);
+        });
 
         return snapshot;
     } catch (err) {
@@ -737,42 +826,52 @@ async function runAnalysis(analysisDate, {
 // ── Notification / auto-ingest helpers ──────────────────────────────────────
 const _safe = (fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn('[FIRE-RISK] async helper err:', e.message)); } catch (e) { console.warn('[FIRE-RISK] sync helper err:', e.message); } };
 
-async function _autoIngestSnapshot(snapshot, geeDownloadUrl, analysisDate) {
-    if (!geeDownloadUrl) {
-        console.log('[FIRE-RISK] auto-ingest SKIP — no gee_download_url');
-        return;
-    }
-    if (snapshot.geoserver_layer) {
-        console.log(`[FIRE-RISK] auto-ingest SKIP — snapshot=${snapshot.id} already has geoserver_layer=${snapshot.geoserver_layer}`);
-        return;
-    }
+async function _autoIngestDistrict(snapshot, districtRow, analysisDate) {
+    if (!districtRow?.url) return;
     const ingestSvc = require('./raster-ingest.service');
-    const dateTag = String(analysisDate).slice(0, 10).replace(/-/g, '');
-    const layerCode = `fire_risk_${dateTag}`;
-    console.log(`[FIRE-RISK] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
+    const dateTag   = String(analysisDate).slice(0, 10).replace(/-/g, '');
+    const code      = districtRow.code || 'unknown';
+    const layerCode = `fire_risk_${code}_${dateTag}`;
+    console.log(`[FIRE-RISK] auto-ingest district=${code} enqueue snapshot=${snapshot.id} layer=${layerCode}`);
     const { job, deduplicated } = await ingestSvc.enqueue({
-        sourceUrl:  geeDownloadUrl,
+        sourceUrl:  districtRow.url,
         layerCode,
-        nameVi:     `Cảnh báo cháy rừng ${analysisDate}`,
+        nameVi:     `Cảnh báo cháy rừng ${analysisDate} — ${districtRow.name || code}`,
         isPublic:   true,
-        category:   'fire_risk',
+        category:   'fire_risk_district',
         requestParams: {
-            linkedResource: { type: 'fire_risk', id: snapshot.id },
+            linkedResource: { type: 'fire_risk_district', id: snapshot.id, districtCode: code },
             analysis_date:  analysisDate,
-            scale_m:        cfg.EXPORT_SCALE_M || 500,
-            autoIngested:   true,   // trace: enqueue tự động vs admin bấm
+            scale_m:        cfg.EXPORT_SCALE_M || 100,
+            autoIngested:   true,
         },
-        user: null,  // system-triggered
+        user: null,
         lang: 'vi',
     });
-    console.log(`[FIRE-RISK] auto-ingest ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
+    console.log(`[FIRE-RISK] auto-ingest district=${code} ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
+}
+
+// Format `analysis_date` (DATE trong Postgres → JS Date theo local tz) về
+// "YYYY-MM-DD" trong VN tz. Trước đây dùng `toISOString().slice(0,10)` — bị
+// lệch 1 ngày (UTC vs VN +7) → notification title in ra "2026-07-23" cho
+// analysis run ngày 2026-07-24. Cùng bug với watchdog fire-risk.job.js.
+function _formatDateVN(dateLike) {
+    if (dateLike == null || dateLike === '') return '';
+    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    if (!Number.isFinite(d.getTime())) return String(dateLike).slice(0, 10);
+    const tz = process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(d).reduce((a, p) => {
+        if (p.type !== 'literal') a[p.type] = p.value;
+        return a;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
     const notifSvc = require('./notification.service');
-    const dateStr  = (snapshot.analysis_date instanceof Date
-        ? snapshot.analysis_date.toISOString().slice(0, 10)
-        : String(snapshot.analysis_date).slice(0, 10));
+    const dateStr  = _formatDateVN(snapshot.analysis_date);
     const dist    = provinceSummary?.riskLevelDist || {};
 
     // Min/max/avg từ province summary (đã tính trong pipeline).
@@ -807,7 +906,7 @@ async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
 
 async function _notifyFireRiskFailed(analysisDate, errMsg) {
     const notifSvc = require('./notification.service');
-    const dateStr  = String(analysisDate).slice(0, 10);
+    const dateStr  = _formatDateVN(analysisDate);
     await notifSvc.broadcastToRole('system_admin', {
         type:    'fire_risk_failed',
         title:   `Phân tích cháy rừng ${dateStr} thất bại`,

@@ -6,9 +6,12 @@
  * US-060: Diện tích lớp phủ / che phủ rừng theo huyện + mốc thời gian.
  * US-063: Dashboard điều hành (tổng hợp + cache TTL).
  *
- * Nguồn dữ liệu: gis.landcover_statistics (seed số liệu thực Kon Tum) +
- * gis.administrative_units. Khi có lớp GIS rừng được import, có thể thay thế
- * bằng aggregate ST_Area(geom) trực tiếp (xem getLandcoverFromLayer — TODO).
+ * Nguồn dữ liệu (sau migration 041 — gis.landcover_statistics đã DROP):
+ *   • forest.forest_snapshots        — kết quả pipeline phân loại 13-class v5.3
+ *   • forest.forest_district_areas   — diện tích per huyện per class per snapshot
+ *   • gis.administrative_units       — 10 huyện + tỉnh (mã, diện tích km², dân số)
+ *   • fire.fire_risk_snapshots       — dashboard block cháy rừng
+ *   • field.feedback                 — dashboard block phản ánh
  */
 
 const repo = require('../repositories/statistics.repository');
@@ -150,10 +153,49 @@ const _buildForestClassificationDashboard = async () => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  US-060 — Diện tích lớp phủ theo huyện
+//  US-060 — Diện tích lớp phủ theo huyện (source: forest.forest_snapshots)
+//
+//  Migration 041: bảng gis.landcover_statistics đã bị DROP. Endpoint này giờ
+//  aggregate từ snapshot phân loại rừng 13-class v5.3 — nguồn nghiệp vụ duy
+//  nhất.
+//
+//  Cách chọn dữ liệu cho một năm Y:
+//     • Lấy snapshot completed/published mới nhất có forest_snapshots.year = Y.
+//     • Từ forest_district_areas → aggregate per district theo mapping:
+//         forest_type = 'total'      → sum FOREST_CLASS_IDS (4..9)
+//         forest_type = 'natural'    → sum classes [4,5,6,7,8]
+//         forest_type = 'planted'    → class 9
+//         forest_type = 'non_forest' → sum các class khác (0,1,2,3,10,11,12)
+//     • coveragePct = forestArea / (admin_units.area_km2 * 100) — dùng ranh
+//       giới hành chính chuẩn, KHÔNG dùng tổng pixel classify (dễ lệch khi
+//       class=0 no-data lớn).
 // ══════════════════════════════════════════════════════════════════════════════
+
+const _NATURAL_CLASS_IDS_LC = [4, 5, 6, 7, 8];
+const _PLANTED_CLASS_IDS_LC = [9];
+
+function _sumByClass(byClass, classIds) {
+    let s = 0;
+    for (const id of classIds) s += Number(byClass?.[id]) || 0;
+    return s;
+}
+
+function _pickForestArea(byClass, forestType, config) {
+    switch (forestType) {
+        case 'natural':    return _sumByClass(byClass, _NATURAL_CLASS_IDS_LC);
+        case 'planted':    return _sumByClass(byClass, _PLANTED_CLASS_IDS_LC);
+        case 'non_forest': {
+            const total = Object.values(byClass || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+            const forest = _sumByClass(byClass, config.FOREST_CLASS_IDS);
+            return Math.max(0, total - forest);
+        }
+        case 'total':
+        default:           return _sumByClass(byClass, config.FOREST_CLASS_IDS);
+    }
+}
+
 const getLandcover = async ({ year, forestType = 'total', lang }) => {
-    const years = await repo.getAvailableYears();
+    const years = await forestClassificationRepo.getSnapshotYears();
     if (years.length === 0) {
         return { year: null, forestType, items: [], summary: null, no_data: true, availableYears: [] };
     }
@@ -166,30 +208,69 @@ const getLandcover = async ({ year, forestType = 'total', lang }) => {
         );
     }
 
-    const rows = await repo.getLandcoverByDistrict({ year: targetYear, forestType });
+    // Lấy snapshot completed mới nhất cho năm đích.
+    const snap = await forestClassificationRepo.getLatestCompletedByYear(targetYear);
+    if (!snap) {
+        return {
+            year:           targetYear,
+            forestType,
+            availableYears: years,
+            items:          [],
+            summary:        null,
+            no_data:        true,
+            source:         'forest_snapshot',
+        };
+    }
 
-    const items = rows.map((r) => ({
-        unitCode:    r.unit_code,
-        name:        r.name_vi,
-        nameEn:      r.name_en,
-        areaKm2:     round(r.area_km2),
-        population:  r.population,
-        forestAreaHa: round(r.area_ha),
-        coveragePct: round(r.coverage_pct),
-        changePct:   round(r.change_pct),     // so với năm liền trước (null nếu không có)
-    }));
+    // Lấy danh sách huyện chuẩn từ administrative_units — join thủ công phía JS
+    // để đảm bảo mọi huyện đều xuất hiện (kể cả huyện không có pixel trong snapshot).
+    const [districts, districtAreas] = await Promise.all([
+        repo.listAdministrativeUnits('district'),
+        forestClassificationRepo.getDistrictAreas(snap.id),
+    ]);
+
+    // Map: districtCode → { classId: ha }
+    const byDistrict = new Map();
+    for (const d of districtAreas) {
+        const key = d.districtCode || d.districtName;
+        if (!key) continue;
+        if (!byDistrict.has(key)) byDistrict.set(key, {});
+        const bag = byDistrict.get(key);
+        for (const c of d.classes) {
+            bag[c.classId] = (bag[c.classId] || 0) + Number(c.areaHa || 0);
+        }
+    }
+
+    const items = districts.map((u) => {
+        const byClass  = byDistrict.get(u.code) || {};
+        const forestHa = _pickForestArea(byClass, forestType, forestClassificationConfig);
+        const areaHa   = Number(u.area_km2) * 100;   // km² → ha
+        const coverage = areaHa > 0 ? (forestHa / areaHa) * 100 : null;
+        return {
+            unitCode:     u.code,
+            name:         u.name_vi,
+            nameEn:       u.name_en,
+            areaKm2:      round(u.area_km2),
+            population:   u.population,
+            forestAreaHa: round(forestHa),
+            coveragePct:  coverage != null ? round(coverage) : null,
+            changePct:    null,   // TODO: so với snapshot cùng tháng năm trước
+        };
+    });
 
     const totalForestHa = items.reduce((s, i) => s + (i.forestAreaHa || 0), 0);
 
     return {
-        year:         targetYear,
+        year:           targetYear,
         forestType,
         availableYears: years,
+        source:         'forest_snapshot',
+        snapshotId:     snap.id,
+        snapshotPeriod: `${snap.year}-${String(snap.month).padStart(2, '0')}`,
         items,
         summary: {
             districtCount:  items.length,
             totalForestHa:  round(totalForestHa),
-            // Che phủ trung bình theo diện tích huyện (weighted) tham khảo.
             avgCoveragePct: items.length
                 ? round(items.reduce((s, i) => s + (i.coveragePct || 0), 0) / items.length)
                 : null,
@@ -229,9 +310,98 @@ const scopeForRole = (role) => (OPERATIONAL_ROLES.includes(role) ? 'operational'
 //    danh sách phản ánh đang chờ xử lý (new/in_progress, ưu tiên cao trước).
 //    Dùng để điều phối xử lý hiện trường.
 // ══════════════════════════════════════════════════════════════════════════════
+// Class ID cho rừng tự nhiên (schema v5.3 13-class):
+//   4 Rừng hỗn giao, 5 Rừng lá rộng thường xanh, 6 Rừng lá kim,
+//   7 Rừng lá rộng rụng lá, 8 Rừng tre nứa
+// Rừng trồng = class 9.
+// Tổng cây thân gỗ (natural + planted) = FOREST_CLASS_IDS (config đã có).
+const _NATURAL_FOREST_CLASS_IDS = [4, 5, 6, 7, 8];
+const _PLANTED_FOREST_CLASS_IDS = [9];
+
+/**
+ * Build 4 số nổi bật cho dashboard (Tổng, Tự nhiên, Trồng, Che phủ) từ
+ * snapshot forest-classification mới nhất — thay cho gis.landcover_statistics
+ * seed cứng (migration 041 đã dọn dữ liệu cũ).
+ */
+async function _buildForestSummaryFromSnapshot(snap, config) {
+    if (!snap?.province_summary) {
+        return {
+            source:               'no_snapshot',
+            totalForestHa:        null,
+            naturalForestHa:      null,
+            plantedForestHa:      null,
+            provinceCoveragePct:  null,
+        };
+    }
+
+    const byClass    = snap.province_summary.byClass || {};
+    const totalHa    = Number(snap.province_summary.totalHa) || 0;
+    const naturalHa  = _NATURAL_FOREST_CLASS_IDS.reduce(
+        (sum, id) => sum + (Number(byClass[id]) || 0), 0,
+    );
+    const plantedHa  = _PLANTED_FOREST_CLASS_IDS.reduce(
+        (sum, id) => sum + (Number(byClass[id]) || 0), 0,
+    );
+    const forestHa   = config.FOREST_CLASS_IDS.reduce(
+        (sum, id) => sum + (Number(byClass[id]) || 0), 0,
+    );
+
+    // Base để tính % che phủ: dùng PROVINCE_TOTAL_HA (967.417 ha) nếu totalHa
+    // classify < 90% (khả năng có class 0 no-data lớn). Nếu classify đủ
+    // (>= 90% diện tích tỉnh), lấy chính totalHa cho ổn định giữa các tháng.
+    const provinceTotal = config.PROVINCE_TOTAL_HA || 967417;
+    const coverageBase  = totalHa >= provinceTotal * 0.90 ? totalHa : provinceTotal;
+    const coveragePct   = coverageBase > 0
+        ? Math.round((forestHa / coverageBase) * 10000) / 100
+        : null;
+
+    return {
+        source:              'forest_snapshot',
+        snapshotId:          snap.id,
+        year:                snap.year,
+        month:               snap.month,
+        computedAt:          snap.computed_at,
+        totalForestHa:       round(forestHa),
+        naturalForestHa:     round(naturalHa),
+        plantedForestHa:     round(plantedHa),
+        provinceCoveragePct: coveragePct,
+    };
+}
+
+/**
+ * Top / low coverage districts từ forest_district_areas của snapshot mới nhất.
+ * Coverage % huyện = (Σ forest classes ha) / (Σ all classes ha) × 100.
+ */
+async function _buildDistrictCoverageFromSnapshot(snap, config) {
+    if (!snap) return [];
+    const rows = await forestClassificationRepo.getDistrictAreas(snap.id);
+    const items = rows.map((d) => {
+        const byId = {};
+        let total = 0, forest = 0;
+        for (const c of d.classes) {
+            byId[c.classId] = c.areaHa;
+            total += Number(c.areaHa) || 0;
+            if (config.FOREST_CLASS_IDS.includes(c.classId)) {
+                forest += Number(c.areaHa) || 0;
+            }
+        }
+        return {
+            unitCode:     d.districtCode,
+            name:         d.districtName,
+            coveragePct:  total > 0 ? round((forest / total) * 100) : null,
+            forestAreaHa: round(forest),
+            changePct:    null,   // TODO: so sánh với snapshot trước nếu cần
+        };
+    });
+    return items.sort((a, b) => (a.coveragePct || 0) - (b.coveragePct || 0));
+}
+
 const getDashboard = async ({ lang, force = false, role } = {}) => {
     const scope = scopeForRole(role);
-    const cacheKey = `dashboard:v2:${scope}`;
+    // Bump cache key sang v3 khi migration 041 đổi nguồn dữ liệu (từ
+    // gis.landcover_statistics → forest.forest_snapshots) — invalidate
+    // hoàn toàn payload v2 cũ để user không thấy số seed cứng cache lại.
+    const cacheKey = `dashboard:v3:${scope}`;
     if (!force) {
         const cached = await repo.getCache(cacheKey);
         if (cached) {
@@ -239,40 +409,32 @@ const getDashboard = async ({ lang, force = false, role } = {}) => {
         }
     }
 
-    const years = await repo.getAvailableYears();
-    const latestYear = years[0] || null;
+    // 4 số nổi bật + district items giờ derive từ forest_snapshots thay vì
+    // gis.landcover_statistics (migration 041). Snapshot mới nhất completed
+    // = "current state" cho toàn dashboard.
+    const forestSnap = await forestClassificationRepo.getLatestCompleted();
 
-    const [districts, provinceSummary, feedbackRows, pendingFeedback] = await Promise.all([
-        latestYear ? repo.getLandcoverByDistrict({ year: latestYear, forestType: 'total' }) : Promise.resolve([]),
-        latestYear ? repo.getProvinceSummary(latestYear) : Promise.resolve([]),
+    const [feedbackRows, pendingFeedback, forestSummary, districtItems] = await Promise.all([
         repo.getFeedbackCounts(),
         scope === 'operational' ? repo.getPendingFeedback(10) : Promise.resolve([]),
+        _buildForestSummaryFromSnapshot(forestSnap, forestClassificationConfig),
+        _buildDistrictCoverageFromSnapshot(forestSnap, forestClassificationConfig),
     ]);
-
-    const districtItems = districts
-        .map((d) => ({
-            unitCode:     d.unit_code,
-            name:         d.name_vi,
-            coveragePct:  round(d.coverage_pct),
-            forestAreaHa: round(d.area_ha),
-            changePct:    round(d.change_pct),
-        }))
-        .sort((a, b) => (a.coveragePct || 0) - (b.coveragePct || 0));
-
-    const provByType = {};
-    provinceSummary.forEach((p) => { provByType[p.forest_type] = round(p.area_ha); });
 
     const feedbackByStatus = {};
     feedbackRows.forEach((f) => { feedbackByStatus[f.status] = f.count; });
     const feedbackTotal = feedbackRows.reduce((s, f) => s + f.count, 0);
 
-    const provinceCoverage = provinceSummary.find((p) => p.forest_type === 'total');
-
     const forest = {
-        provinceCoveragePct: provinceCoverage ? round(provinceCoverage.coverage_pct) : null,
-        totalForestHa:       provByType.total ?? null,
-        naturalForestHa:     provByType.natural ?? null,
-        plantedForestHa:     provByType.planted ?? null,
+        source:              forestSummary.source,        // 'forest_snapshot' | 'no_snapshot'
+        snapshotId:          forestSummary.snapshotId ?? null,
+        snapshotPeriod:      forestSnap
+            ? `${forestSnap.year}-${String(forestSnap.month).padStart(2, '0')}`
+            : null,
+        provinceCoveragePct: forestSummary.provinceCoveragePct,
+        totalForestHa:       forestSummary.totalForestHa,
+        naturalForestHa:     forestSummary.naturalForestHa,
+        plantedForestHa:     forestSummary.plantedForestHa,
     };
 
     if (scope === 'operational') {
@@ -311,7 +473,10 @@ const getDashboard = async ({ lang, force = false, role } = {}) => {
 
     const payload = {
         scope,
-        year: latestYear,
+        // `year` giờ = năm của snapshot forest classify mới nhất (không phải
+        // "năm dữ liệu Bộ NN&PTNT" như trước). Client vẫn hiển thị "dữ liệu
+        // năm X" tự nhiên.
+        year: forestSnap?.year ?? null,
         forest,
         feedback,
         fireAlerts,

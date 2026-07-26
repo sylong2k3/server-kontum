@@ -81,11 +81,20 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
 
     const force = process.env.FC_FORCE_ANALYSIS === 'true';
     const { year, month } = resolveTargetPeriod();
-    const existing = await repo.getByYearMonth(year, month);
-    if (!force && existing && ['completed', 'published'].includes(existing.status)) {
-        dbg(`skip — period=${year}/${month} already ${existing.status} snapshotId=${existing.id}`);
+
+    // Guard theo hasCompletedAttempt (migration 040): dùng bất kỳ attempt nào
+    // ĐÃ completed/published/exporting cho kỳ (year, month) — không cần dòng
+    // mới nhất. Trước 040 chỉ có 1 dòng/kỳ nên getByYearMonth đủ; sau 040 có
+    // nhiều attempt, dòng mới nhất có thể là failed đè lên completed cũ.
+    if (!force && await repo.hasCompletedAttempt(year, month)) {
+        dbg(`skip — period=${year}/${month} đã có completed attempt (migration 040 guard)`);
         return;
     }
+
+    // Vẫn cần "existing" cho stale-active check (retry snapshot đang bị treo).
+    // Dùng getByYearMonth trả 1 dòng — thứ tự deterministic theo attempt hoặc
+    // theo id đủ để phát hiện snapshot pending/computing bị treo.
+    const existing = await repo.getByYearMonth(year, month);
     const staleActive = recoverStale && isActiveSnapshotStale(existing);
     if (!force && existing && ['pending', 'computing', 'exporting'].includes(existing.status) && !staleActive) {
         console.warn(`[FOREST] scheduled classification skipped: period=${year}/${month} is ${existing.status}`);
@@ -96,6 +105,21 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
             `[FOREST] stale ${existing.status} snapshot detected: period=${year}/${month} ` +
             `snapshotId=${existing.id} updatedAt=${existing.updated_at || existing.created_at} — retrying`,
         );
+    }
+
+    // Retry-limit guard: nếu đã fail đủ số lần RETRY_DELAYS_MS.length → dừng.
+    // Không dùng row.retry_count vì mỗi attempt sau migration 040 khởi tạo lại
+    // về 0 → không đại diện cho tổng lần fail của kỳ.
+    if (!force && !staleActive) {
+        try {
+            const failedCount = await repo.countFailedAttempts(year, month);
+            if (failedCount >= RETRY_DELAYS_MS.length) {
+                dbg(`skip — retry limit reached period=${year}/${month} (${failedCount}/${RETRY_DELAYS_MS.length})`);
+                return;
+            }
+        } catch (guardErr) {
+            console.warn(`[FOREST] countFailedAttempts fail (proceeding): ${guardErr.message}`);
+        }
     }
 
     analysisRunning = true;
@@ -126,22 +150,27 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
     } catch (err) {
         console.error(`[FOREST] scheduled classification FAILED period=${year}/${month} elapsed=${Date.now() - t0}ms — ${err.code || err.name || 'ERR'}: ${err.message}`);
         try {
-            const failed = await repo.getByYearMonth(year, month);
-            const retryIndex = Number(failed?.retry_count || 0);
-            if (failed && retryIndex < RETRY_DELAYS_MS.length) {
-                const scheduled = await repo.scheduleRetry(
-                    failed.id,
-                    RETRY_DELAYS_MS[retryIndex],
-                    err.message,
-                );
-                if (scheduled) {
-                    console.warn(
-                        `[FOREST] retry ${scheduled.retry_count}/3 scheduled at ` +
-                        `${new Date(scheduled.next_retry_at).toISOString()} for period=${year}/${month}`,
+            // Đếm tổng attempt failed cho kỳ (bao gồm attempt vừa fail này).
+            // Trước 040 dùng retry_count từ dòng UPSERT — chính xác. Sau 040 mỗi
+            // attempt là dòng riêng với retry_count=0 → phải dùng COUNT.
+            const failedCount = await repo.countFailedAttempts(year, month);
+            if (failedCount < RETRY_DELAYS_MS.length) {
+                const failed = await repo.getByYearMonth(year, month);
+                if (failed?.id) {
+                    const scheduled = await repo.scheduleRetry(
+                        failed.id,
+                        RETRY_DELAYS_MS[failedCount - 1] || RETRY_DELAYS_MS[0],
+                        err.message,
                     );
+                    if (scheduled) {
+                        console.warn(
+                            `[FOREST] retry ${failedCount}/${RETRY_DELAYS_MS.length} scheduled at ` +
+                            `${new Date(scheduled.next_retry_at).toISOString()} for period=${year}/${month}`,
+                        );
+                    }
                 }
-            } else if (failed) {
-                console.error(`[FOREST] retry limit reached for period=${year}/${month} (3/3)`);
+            } else {
+                console.error(`[FOREST] retry limit reached for period=${year}/${month} (${failedCount}/${RETRY_DELAYS_MS.length}) — dừng retry`);
             }
         } catch (retryErr) {
             console.error(`[FOREST] failed to persist retry state: ${retryErr.message}`);
@@ -157,10 +186,31 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
 // mọi trạng thái hiện hữu đều được giữ nguyên để tránh chạy trùng/retry nóng.
 const runRecoveryCheck = async () => {
     const { year, month } = resolveTargetPeriod();
+
+    // Guard theo hasCompletedAttempt (migration 040): kỳ đã có completed attempt
+    // → SKIP tuyệt đối. Bảo vệ khỏi watchdog re-trigger khi failed attempt mới
+    // hơn được thêm vào (retry, admin refresh) đè lên completed cũ trong logic
+    // dùng getLatest().
+    try {
+        if (await repo.hasCompletedAttempt(year, month)) {
+            dbg(`recovery watchdog skip — period=${year}/${month} đã có completed attempt`);
+            return;
+        }
+    } catch (err) {
+        console.warn(`[FOREST] watchdog hasCompletedAttempt fail: ${err.message}`);
+    }
+
+    // Retry-limit guard: nếu failedCount >= max, không trigger nữa để tránh spam.
+    let failedCount = 0;
+    try { failedCount = await repo.countFailedAttempts(year, month); }
+    catch (err) { console.warn(`[FOREST] watchdog countFailedAttempts fail: ${err.message}`); }
+    if (failedCount >= RETRY_DELAYS_MS.length) {
+        dbg(`recovery watchdog skip — retry limit reached period=${year}/${month} (${failedCount}/${RETRY_DELAYS_MS.length})`);
+        return;
+    }
+
     const existing = await repo.getByYearMonth(year, month);
-    const retryCount = Number(existing?.retry_count || 0);
     const retryDue = existing?.status === 'failed'
-        && retryCount < RETRY_DELAYS_MS.length
         && existing.next_retry_at
         && new Date(existing.next_retry_at).getTime() <= Date.now();
     if (existing && !isActiveSnapshotStale(existing) && !retryDue) {
@@ -170,7 +220,7 @@ const runRecoveryCheck = async () => {
 
     console.warn(
         `[FOREST] recovery watchdog TRIGGER — period=${year}/${month} ` +
-        `${retryDue ? `retry ${retryCount}/3 is due`
+        `${retryDue ? `retry ${failedCount + 1}/${RETRY_DELAYS_MS.length} is due`
             : existing ? `has stale ${existing.status} snapshotId=${existing.id}` : 'is missing'}; ` +
         'monthly cron may have been missed or interrupted',
     );

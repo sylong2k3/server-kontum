@@ -28,6 +28,7 @@ const {
     eeEval,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumDistrictsGeoJson,
     getEeMapId,
 } = require('../utils/gee-satellite.util');
 
@@ -228,12 +229,13 @@ async function executeAnalysis(year, month, {
 
     await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
 
-    let snapshot = await log.run('Upsert snapshot → status=computing', () =>
-        repo.upsertSnapshot({
+    let snapshot = await log.run('Create snapshot (new attempt) → status=computing', () =>
+        repo.createSnapshot({
             year, month,
             status: 'computing',
             trigger,
             requested_by: requestedBy,
+            download_scale_m: cfg.DOWNLOAD_SCALE_M,
             model_params: {
                 version:        'v3-lite',
                 mode:           'lite',
@@ -323,6 +325,11 @@ async function executeAnalysis(year, month, {
             },
         );
         const { classified, quotas, oobPct } = rfResult;
+        // Bản chưa reproject 200m — dùng cho getDownloadURL để GEE materialize
+        // trực tiếp ở scale download (500m) thay vì burst compute ở 200m rồi
+        // resample. Tránh HTTP 400 "User memory limit exceeded" khi ingest.
+        // Fallback về `classified` cho backward-compat với pipeline cũ.
+        const classifiedForDownload = rfResult.classifiedNative || classified;
         const modelMeta = rfResult.modelMeta || null;
         const testAccuracyPct = null, testKappa = null;
 
@@ -359,74 +366,169 @@ async function executeAnalysis(year, month, {
             console.warn(`[FOREST-CLS] getEeMapId failed (non-fatal): ${err.message}`);
         }
 
-        // GEE download URL clip theo ranh giới tỉnh — GeoTIFF trần (image/tiff)
-        // valid ~24h. Server auto-ingest sẽ pull về MinIO trước khi hết hạn.
-        // Non-fatal: nếu getDownloadURL lỗi, snapshot vẫn completed, chỉ thiếu
-        // link download + không auto-publish GeoServer (admin có thể refresh sau).
-        // .visualize() → RGB 3-band để mở ra là ảnh MÀU (không cần palette metadata).
-        let geeDownloadUrl = null;
+        // GEE download URL — chia PER HUYỆN (migration 040). Loop qua
+        // RanhGioiHuyen_Polygon.geojson, mỗi huyện gọi getDownloadURL riêng
+        // với scale 100m + clip theo geometry huyện. Nếu 1 huyện fail, các
+        // huyện khác vẫn completed. Diện tích toàn tỉnh = Σ area huyện.
+        //
+        // districtAreas[] đã có { district_code, class_id, area_ha } từ
+        // reduceRegions — dùng luôn để build area_by_class per huyện, không
+        // cần evaluate lại.
+        const districtGeoJson = getKonTumDistrictsGeoJson();
+        const districtExportRows = [];
+        let geeDownloadUrl = null; // Giữ NULL — không còn URL toàn tỉnh
         try {
             const tag = `${year}${String(month).padStart(2, '0')}`;
-            const fileBase = `forest_class_kontum_${tag}`;
-            const dlStart = Date.now();
-            // Timeout 300s: graph classified nặng (Landsat 5/7/8/9 + S2 + 3 composites
-            // + 8 indices ×3 + DEM + 11 threshold masks + RF80 + visualize + clip).
-            // 60s cũ hay hit trần khi bật computeOob → mất auto-ingest. Fire-risk
-            // dùng 30s được vì graph nhẹ hơn nhiều, không so sánh 1-1 với forest.
-            const DL_TIMEOUT_MS = 300_000;
-            let timedOut = false;
-            geeDownloadUrl = await log.run(
-                'Generate GEE download URL (classified visualize → GeoTIFF RGB)',
-                () => new Promise((resolve) => {
-                    const timer = setTimeout(() => {
-                        timedOut = true;
-                        resolve(null);
-                    }, DL_TIMEOUT_MS);
-                    classified
-                        // v5.3: class=0 là pixel không có ảnh, cần trong suốt.
-                        .updateMask(classified.gt(0))
-                        .visualize(CLASSIFIED_VIZ)
-                        .clip(region.geometry())
-                        .getDownloadURL(
-                            {
-                                name:        fileBase,
-                                // Đồng bộ pipeline download/publish fire-risk.
-                                scale:       cfg.DOWNLOAD_SCALE_M,
-                                region:      region.geometry(),
-                                crs:         'EPSG:4326',
-                                format:      'GEO_TIFF',
-                                filePerBand: false,
-                                maxPixels:   1e9,
-                            },
-                            (url, err) => {
-                                clearTimeout(timer);
-                                const ms = Date.now() - dlStart;
-                                if (err) {
-                                    console.warn(`[FOREST-CLS] getDownloadURL err (${ms}ms): ${err.message || err}`);
-                                } else if (!url) {
-                                    console.warn(`[FOREST-CLS] getDownloadURL null URL (${ms}ms) — no err returned`);
-                                }
-                                resolve(err ? null : (url || null));
-                            },
-                        );
-                }),
-            );
-            const dlMs = Date.now() - dlStart;
-            if (geeDownloadUrl) {
-                dbgTime('DOWNLOAD_URL', `ok fileBase=${fileBase} len=${geeDownloadUrl.length}`, dlStart);
-            } else if (timedOut) {
-                console.warn(`[FOREST-CLS] getDownloadURL TIMEOUT (${dlMs}ms / ${DL_TIMEOUT_MS}ms) — snapshot ${year}/${month} sẽ không auto-ingest`);
-            } else {
-                console.warn(`[FOREST-CLS] getDownloadURL NULL (${dlMs}ms) — snapshot ${year}/${month} sẽ không auto-ingest`);
+
+            // Aggregate districtAreas thành map district_code → { class_id: ha }.
+            const areaByDistrict = new Map();
+            for (const row of districtAreas) {
+                const code = row.district_code ? String(row.district_code) : null;
+                if (!code) continue;
+                if (!areaByDistrict.has(code)) {
+                    areaByDistrict.set(code, { name: row.district_name, byClass: {} });
+                }
+                const bag = areaByDistrict.get(code);
+                bag.byClass[row.class_id] = (bag.byClass[row.class_id] || 0) + Number(row.area_ha || 0);
             }
+
+            // Seed district_exports skeletons (status=pending) từ file GeoJSON huyện.
+            const skeletons = districtGeoJson.map((d) => ({
+                district_code: d.ADM2_CODE,
+                district_name: d.ADM2_NAME,
+            }));
+            const seeded = await log.run(
+                `Seed ${skeletons.length} forest_district_exports (status=pending)`,
+                () => repo.insertDistrictExports(snapshot.id, skeletons, cfg.DOWNLOAD_SCALE_M),
+            );
+            const rowByCode = new Map();
+            for (const r of seeded) rowByCode.set(r.district_code, r);
+
+            let completed = 0, failed = 0, skipped = 0;
+            for (const d of districtGeoJson) {
+                const code = d.ADM2_CODE;
+                const row  = rowByCode.get(code);
+                if (!row) continue;
+                const t0 = Date.now();
+                await repo.updateDistrictExport(row.id, {
+                    status: 'computing', started_at: new Date(),
+                });
+
+                const bag       = areaByDistrict.get(code) || { byClass: {} };
+                const byClass   = bag.byClass;
+                let totalHa   = 0, forestHa = 0;
+                for (const [cid, ha] of Object.entries(byClass)) {
+                    totalHa += Number(ha) || 0;
+                    if (cfg.FOREST_CLASS_IDS.includes(Number(cid))) {
+                        forestHa += Number(ha) || 0;
+                    }
+                }
+
+                if (totalHa === 0) {
+                    await repo.updateDistrictExport(row.id, {
+                        status:         'skipped',
+                        area_by_class:  byClass,
+                        total_area_ha:  0,
+                        forest_area_ha: 0,
+                        duration_ms:    Date.now() - t0,
+                        completed_at:   new Date(),
+                        error_message:  'no pixels classified',
+                    });
+                    skipped += 1;
+                    continue;
+                }
+
+                const fileBase = `forest_class_${code}_${tag}`;
+                try {
+                    const districtGeom = d.epsg && d.epsg !== 4326
+                        ? ee.Geometry(d.geometry, `EPSG:${d.epsg}`, false)
+                        : ee.Geometry(d.geometry);
+                    const url = await new Promise((resolve, reject) => {
+                        // Per-huyện timeout 60s — huyện lớn nhất Kon Tum ~1500 km²
+                        // ~15M pixel ở 100m, GeoTIFF ~60MB. Nếu vượt 60s → coi
+                        // như huyện đó fail (không kéo theo cả snapshot).
+                        const timer = setTimeout(
+                            () => reject(new Error(`getDownloadURL timeout huyện=${code}`)),
+                            60_000,
+                        );
+                        classifiedForDownload
+                            .updateMask(classifiedForDownload.gt(0))
+                            .visualize(CLASSIFIED_VIZ)
+                            .clip(districtGeom)
+                            .getDownloadURL(
+                                {
+                                    name:        fileBase,
+                                    scale:       cfg.DOWNLOAD_SCALE_M || 100,
+                                    region:      districtGeom,
+                                    crs:         'EPSG:4326',
+                                    format:      'GEO_TIFF',
+                                    filePerBand: false,
+                                    maxPixels:   1e9,
+                                },
+                                (u, err) => {
+                                    clearTimeout(timer);
+                                    if (err) reject(new Error(String(err.message || err)));
+                                    else resolve(u);
+                                },
+                            );
+                    });
+                    await repo.updateDistrictExport(row.id, {
+                        status:                'completed',
+                        area_by_class:         byClass,
+                        total_area_ha:         Math.round(totalHa * 100) / 100,
+                        forest_area_ha:        Math.round(forestHa * 100) / 100,
+                        gee_download_url:      url,
+                        gee_download_filename: `${fileBase}.zip`,
+                        gee_generated_at:      new Date(),
+                        duration_ms:           Date.now() - t0,
+                        completed_at:          new Date(),
+                    });
+                    districtExportRows.push({ code, name: d.ADM2_NAME, url, byClass, totalHa, forestHa });
+                    completed += 1;
+                } catch (dErr) {
+                    console.warn(`[FOREST-CLS] district=${code} download fail: ${dErr.message}`);
+                    await repo.updateDistrictExport(row.id, {
+                        status:         'failed',
+                        area_by_class:  byClass,
+                        total_area_ha:  Math.round(totalHa * 100) / 100,
+                        forest_area_ha: Math.round(forestHa * 100) / 100,
+                        error_message:  dErr.message,
+                        duration_ms:    Date.now() - t0,
+                        completed_at:   new Date(),
+                    });
+                    failed += 1;
+                }
+            }
+            log.mark('District downloads',
+                `completed=${completed} failed=${failed} skipped=${skipped} of ${skeletons.length}`);
+            dbg('DOWNLOAD_URL', `per-district done — completed=${completed} failed=${failed}`);
         } catch (err) {
-            console.warn(`[FOREST-CLS] getDownloadURL failed (non-fatal): ${err.message}`);
+            console.warn(`[FOREST-CLS] district-chunked download setup failed (non-fatal): ${err.message}`);
         }
 
         // Piggyback modelMeta vào province_summary._modelMeta (không cần migration).
         const provinceSummaryWithMeta = modelMeta
             ? { ...provinceSummary, _modelMeta: modelMeta }
             : provinceSummary;
+
+        // District export summary aggregate cho FE (province total = Σ district).
+        const aggByClass = {};
+        let aggTotalHa = 0, aggForestHa = 0;
+        for (const r of districtExportRows) {
+            aggTotalHa  += Number(r.totalHa)  || 0;
+            aggForestHa += Number(r.forestHa) || 0;
+            for (const [cid, ha] of Object.entries(r.byClass || {})) {
+                aggByClass[cid] = (aggByClass[cid] || 0) + (Number(ha) || 0);
+            }
+        }
+        const districtExportSummary = {
+            scaleM:    cfg.DOWNLOAD_SCALE_M,
+            total:     districtGeoJson.length,
+            completed: districtExportRows.length,
+            totalHa:   Math.round(aggTotalHa  * 100) / 100,
+            forestHa:  Math.round(aggForestHa * 100) / 100,
+            byClass:   aggByClass,
+        };
 
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
@@ -440,7 +542,10 @@ async function executeAnalysis(year, month, {
                 gee_map_id:       geeMapId,
                 gee_tile_url:     geeTileUrl,
                 gee_tile_generated_at: geeTileUrl ? new Date() : null,
-                gee_download_url: geeDownloadUrl,
+                // gee_download_url NULL — FE lấy per-huyện qua district_exports.
+                gee_download_url: null,
+                district_export_summary: districtExportSummary,
+                download_scale_m: cfg.DOWNLOAD_SCALE_M,
                 gt_zone_count:    gtData.counts.zones,
                 gt_point_count:   gtData.counts.points,
                 gt_window_days:   gtWindowDays,
@@ -459,12 +564,22 @@ async function executeAnalysis(year, month, {
         log.summary();
 
         // ── Auto ingest → MinIO → GeoServer (persistent COG) ──────────────
-        // Cùng cơ chế fire-risk: cron chạy xong tự enqueue raster-ingest job.
-        // Job worker (poll 15s) tự pick up. Snapshot được back-link
-        // `geoserver_layer` khi ingest complete (queue service).
-        // KHÔNG throw nếu enqueue fail — không được chặn pipeline chính.
-        _safe(() => _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month));
-        _safe(() => _notifyForestClassificationCompleted(snapshot, provinceSummary));
+        // Sau migration 040: mỗi huyện có 1 URL riêng thay vì 1 URL tỉnh.
+        // Enqueue N job (1/huyện). Nếu 1 job fail, các huyện khác vẫn ingest được.
+        for (const dRow of districtExportRows) {
+            _safe(() => _autoIngestDistrict(snapshot, dRow, year, month));
+        }
+        // Dedup notification (migration 040): chỉ gửi noti lần đầu completed
+        // của kỳ (year, month). Attempt retry hoặc admin refresh sau khi có
+        // completed sẽ KHÔNG spam noti tới 3 role nữa.
+        _safe(async () => {
+            const prior = await repo.countPriorCompletedAttempts(snapshot.id).catch(() => 0);
+            if (prior > 0) {
+                console.log(`[FOREST-CLS] notification SKIP — đã có ${prior} attempt completed trước (dedup theo year/month)`);
+                return;
+            }
+            await _notifyForestClassificationCompleted(snapshot, provinceSummary);
+        });
 
         return snapshot;
     } catch (err) {
@@ -550,40 +665,29 @@ async function _notifyForestClassificationFailed(year, month, errorMessage) {
     }).catch(() => {});
 }
 
-async function _autoIngestSnapshot(snapshot, geeDownloadUrl, year, month) {
-    if (!geeDownloadUrl) {
-        console.log('[FOREST-CLS] auto-ingest SKIP — no gee_download_url');
-        return;
-    }
-    if (snapshot.geoserver_layer) {
-        console.log(`[FOREST-CLS] auto-ingest SKIP — snapshot=${snapshot.id} already has geoserver_layer=${snapshot.geoserver_layer}`);
-        return;
-    }
-    // Lazy require để tránh circular dependency với raster-ingest.service.
+async function _autoIngestDistrict(snapshot, districtRow, year, month) {
+    if (!districtRow?.url) return;
     const ingestSvc = require('./raster-ingest.service');
-    const tag = `${year}${String(month).padStart(2, '0')}`;
-    const layerCode = `forest_class_${tag}`;
-    const t0 = Date.now();
-    dbg('AUTO_INGEST', `enqueue prep snapshot=${snapshot.id} layer=${layerCode} scale=${cfg.DOWNLOAD_SCALE_M}m urlLen=${geeDownloadUrl.length}`);
-    console.log(`[FOREST-CLS] auto-ingest enqueue snapshot=${snapshot.id} layer=${layerCode}`);
+    const tag       = `${year}${String(month).padStart(2, '0')}`;
+    const code      = districtRow.code || 'unknown';
+    const layerCode = `forest_class_${code}_${tag}`;
+    console.log(`[FOREST-CLS] auto-ingest district=${code} enqueue snapshot=${snapshot.id} layer=${layerCode}`);
     const { job, deduplicated } = await ingestSvc.enqueue({
-        sourceUrl:  geeDownloadUrl,
+        sourceUrl:  districtRow.url,
         layerCode,
-        nameVi:     `Phân loại rừng ${year}-${String(month).padStart(2, '0')}`,
+        nameVi:     `Phân loại rừng ${year}-${String(month).padStart(2, '0')} — ${districtRow.name || code}`,
         isPublic:   true,
-        category:   'forest',
+        category:   'forest_district',
         requestParams: {
-            linkedResource: { type: 'forest', id: snapshot.id },
-            year,
-            month,
-            scale_m:        cfg.DOWNLOAD_SCALE_M,
-            autoIngested:   true,   // trace: enqueue tự động vs admin bấm
+            linkedResource: { type: 'forest_district', id: snapshot.id, districtCode: code },
+            year, month,
+            scale_m:        cfg.DOWNLOAD_SCALE_M || 100,
+            autoIngested:   true,
         },
-        user: null,  // system-triggered
+        user: null,
         lang: 'vi',
     });
-    console.log(`[FOREST-CLS] auto-ingest ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
-    dbgTime('AUTO_INGEST', `done job=${job.id} deduplicated=${Boolean(deduplicated)}`, t0);
+    console.log(`[FOREST-CLS] auto-ingest district=${code} ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
 }
 
 // GCS export path (submitExportTask/pollExports) đã BỎ — flow mới dùng

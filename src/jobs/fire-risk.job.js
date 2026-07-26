@@ -125,6 +125,21 @@ const runDailyAnalysis = async (analysisDate) => {
     // Cron chạy lúc 06:00 VN, khi UTC vẫn có thể là ngày hôm trước. Luôn lấy
     // analysis_date theo timezone của cron thay vì Date#toISOString().
     const today = analysisDate || _getCronLocalTime().date;
+
+    // Guard trước khi bắt đầu (migration 040 fix): nếu today đã có attempt
+    // completed/published/exporting thì SKIP — tránh watchdog trigger run
+    // đè lên kết quả đã có, đồng thời tránh spam GEE quota. Không dùng
+    // getLatest() vì với schema mới có thể tồn tại attempt failed mới hơn
+    // dòng completed cũ (retry sau khi thành công).
+    try {
+        if (await repo.hasCompletedAttempt(today)) {
+            console.log(`[FIRE RISK] Daily analysis SKIP date=${today} — đã có completed attempt (migration 040 guard)`);
+            return;
+        }
+    } catch (guardErr) {
+        console.warn(`[FIRE RISK] Daily analysis guard failed (proceeding): ${guardErr.message}`);
+    }
+
     console.log(`[FIRE RISK] Daily analysis START date=${today} gcs=${cfg.isGcsConfigured() ? 'on' : 'off'}`);
     try {
         const snap = await svc.runAnalysis(today);
@@ -145,23 +160,29 @@ const runDailyAnalysis = async (analysisDate) => {
     } catch (err) {
         console.error(`[FIRE RISK] Daily analysis FAILED date=${today} elapsed=${Date.now() - t0}ms — ${err.code || err.name || 'ERR'}: ${err.message}`);
         try {
-            const failed = await repo.getLatest();
-            const failedDate = _toCronLocalDate(failed?.analysis_date);
-            const retryIndex = Number(failed?.retry_count || 0);
-            if (failedDate === today && retryIndex < RETRY_DELAYS_MS.length) {
-                const scheduled = await repo.scheduleRetry(
-                    failed.id,
-                    RETRY_DELAYS_MS[retryIndex],
-                    err.message,
-                );
-                if (scheduled) {
-                    console.warn(
-                        `[FIRE RISK] retry ${scheduled.retry_count}/3 scheduled at ` +
-                        `${new Date(scheduled.next_retry_at).toISOString()}`,
+            // Đếm tổng attempt failed cho date thay vì đọc retry_count từ 1 dòng
+            // (migration 040: mỗi lần chạy tạo dòng mới, retry_count reset về 0).
+            // failedCount đã bao gồm attempt vừa fail này → RETRY_DELAYS_MS[failedCount-1]
+            // là khoảng chờ TỚI lần thứ (failedCount+1).
+            const failedCount = await repo.countFailedAttempts(today);
+            if (failedCount < RETRY_DELAYS_MS.length) {
+                const failed = await repo.getLatest();
+                const failedDate = _toCronLocalDate(failed?.analysis_date);
+                if (failedDate === today && failed?.id) {
+                    const scheduled = await repo.scheduleRetry(
+                        failed.id,
+                        RETRY_DELAYS_MS[failedCount - 1] || RETRY_DELAYS_MS[0],
+                        err.message,
                     );
+                    if (scheduled) {
+                        console.warn(
+                            `[FIRE RISK] retry ${failedCount}/${RETRY_DELAYS_MS.length} scheduled at ` +
+                            `${new Date(scheduled.next_retry_at).toISOString()}`,
+                        );
+                    }
                 }
-            } else if (failedDate === today) {
-                console.error(`[FIRE RISK] retry limit reached for ${today} (3/3)`);
+            } else {
+                console.error(`[FIRE RISK] retry limit reached for ${today} (${failedCount}/${RETRY_DELAYS_MS.length}) — dừng retry`);
             }
         } catch (retryErr) {
             console.error(`[FIRE RISK] failed to persist retry state: ${retryErr.message}`);
@@ -236,8 +257,31 @@ async function _catchupIfNeeded() {
         return;
     }
 
-    // Đã qua giờ — check mọi trạng thái. Snapshot computing/failed cũng chứng
-    // minh lịch hôm nay đã được gọi; không tự tạo retry loop gây quá tải GEE.
+    // Đã qua giờ — kiểm tra 3 tình huống theo thứ tự ưu tiên (migration 040):
+    //   1. Đã có attempt completed cho localDate → SKIP tuyệt đối (dù có attempt
+    //      failed mới hơn thì kết quả trước vẫn còn giá trị).
+    //   2. Tổng số attempt failed hôm nay >= RETRY_DELAYS_MS.length → SKIP —
+    //      đã hết quota retry, không spam GEE nữa.
+    //   3. Có attempt failed với next_retry_at đã qua → trigger retry.
+    //   4. Chưa có snapshot nào cho localDate → trigger run mới.
+    let hasCompleted = false;
+    try { hasCompleted = await repo.hasCompletedAttempt(localDate); }
+    catch (err) { console.warn(`[FIRE RISK] watchdog hasCompletedAttempt fail: ${err.message}`); }
+
+    if (hasCompleted) {
+        dbg(`recovery watchdog SKIP — có completed attempt cho ${localDate}`);
+        return;
+    }
+
+    let failedCount = 0;
+    try { failedCount = await repo.countFailedAttempts(localDate); }
+    catch (err) { console.warn(`[FIRE RISK] watchdog countFailedAttempts fail: ${err.message}`); }
+
+    if (failedCount >= RETRY_DELAYS_MS.length) {
+        dbg(`recovery watchdog SKIP — retry limit reached (${failedCount}/${RETRY_DELAYS_MS.length}) cho ${localDate}`);
+        return;
+    }
+
     const latest = await repo.getLatest().catch((err) => {
         console.warn(`[FIRE RISK] recovery watchdog: getLatest failed: ${err.message}`);
         return null;
@@ -245,19 +289,23 @@ async function _catchupIfNeeded() {
     const latestDate = _toCronLocalDate(latest?.analysis_date);
 
     if (latestDate === localDate) {
-        const retryCount = Number(latest.retry_count || 0);
+        // Có snapshot hôm nay nhưng chưa completed. Nếu là computing → đợi.
+        // Nếu failed + next_retry_at qua → retry.
+        if (['pending', 'computing', 'exporting'].includes(latest.status)) {
+            dbg(`recovery watchdog SKIP — snapshot ${localDate} đang ${latest.status} (id=${latest.id})`);
+            return;
+        }
         const retryDue = latest.status === 'failed'
-            && retryCount < RETRY_DELAYS_MS.length
             && latest.next_retry_at
             && new Date(latest.next_retry_at).getTime() <= Date.now();
         if (retryDue) {
-            console.warn(`[FIRE RISK] recovery watchdog starting retry ${retryCount}/3 for ${localDate}`);
+            console.warn(`[FIRE RISK] recovery watchdog starting retry ${failedCount + 1}/${RETRY_DELAYS_MS.length} for ${localDate}`);
             runDailyAnalysis(localDate).catch((err) => {
                 console.error(`[FIRE RISK] retry analysis error: ${err.message}`);
             });
             return;
         }
-        dbg(`recovery watchdog SKIP — snapshot ${localDate} exists (id=${latest.id} status=${latest.status})`);
+        dbg(`recovery watchdog SKIP — snapshot ${localDate} status=${latest.status} (chưa tới retry time)`);
         return;
     }
 

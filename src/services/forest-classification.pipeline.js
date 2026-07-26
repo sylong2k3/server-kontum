@@ -946,12 +946,20 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
     }
 
     // Pin display scale = SAMPLE_SCALE để bản đồ đúng với cái đã học.
+    // GIỮ tham chiếu `classifiedNative` (chưa reproject) cho consumer nào cần
+    // materialize ở scale khác (VD getDownloadURL 500m) — reproject 200m ép GEE
+    // compute RF chain ở 240k pixel Kon Tum → burst memory 6× trên endpoint
+    // `/thumbnails/:getPixels` (limit ~10GB/user, error 400 "User memory limit
+    // exceeded"). Dùng bản native cho download vẫn giữ RF quality vì
+    // getDownloadURL sẽ pin lại theo scale param của nó.
+    const classifiedNative = classified;
     if (cfg.PIN_DISPLAY_SCALE && classified) {
         classified = classified.reproject({ crs: 'EPSG:4326', scale: cfg.DISPLAY_SCALE_M });
     }
 
     return {
         classified,
+        classifiedNative,
         oobPct,
         testAccuracyPct,
         testKappa,
