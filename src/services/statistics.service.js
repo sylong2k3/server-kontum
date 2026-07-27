@@ -17,6 +17,7 @@
 const repo = require('../repositories/statistics.repository');
 const fireRiskRepo = require('../repositories/fire-risk.repository');
 const forestClassificationRepo = require('../repositories/forest-classification.repository');
+const fireRiskConfig = require('../configs/fire-risk');
 const forestClassificationConfig = require('../configs/forest-classification');
 const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
@@ -57,10 +58,47 @@ const _buildFireRiskDashboard = async () => {
             }
         }
 
+        // Sau migration 040, snap.geoserver_layer luôn NULL vì pipeline chia
+        // per-huyện. Đếm số huyện đã publish (có geoserver_layer riêng) từ
+        // fire.fire_risk_district_exports; suy ra trạng thái map cho FE.
+        // Đồng thời trả kèm mảng huyện đã publish để dashboard render list link
+        // mở xem trước trên máy chủ bản đồ (FE tự build preview URL từ layer FQN).
+        let districtRasterReady = 0, districtRasterDiscovered = 0;
+        const publishedDistricts = [];
+        try {
+            const districtRows = await fireRiskRepo.listDistrictExports(snap.id);
+            districtRasterDiscovered = new Set(
+                districtRows
+                    .map((row) => String(row.district_code || '').trim())
+                    .filter(Boolean),
+            ).size;
+            const readyCodes = new Set();
+            for (const r of districtRows) {
+                const layer = (r.geoserver_layer && String(r.geoserver_layer).trim())
+                    || (r.ingest_geoserver_layer && String(r.ingest_geoserver_layer).trim())
+                    || null;
+                if (!layer) continue;
+                const code = String(r.district_code || '').trim();
+                if (code) readyCodes.add(code);
+                publishedDistricts.push({
+                    code: r.district_code || null,
+                    name: r.district_name || null,
+                    layer,
+                });
+            }
+            districtRasterReady = readyCodes.size;
+        } catch (dsErr) {
+            console.warn('[STATS] fire-risk districts fetch failed (non-fatal):', dsErr.message);
+        }
+        const districtRasterExpected = fireRiskConfig.EXPECTED_DISTRICT_COUNT;
+        const mapReady = districtRasterDiscovered === districtRasterExpected
+            && districtRasterReady === districtRasterExpected;
+
         return {
             available:    true,
             snapshotId:   snap.id,
             analysisDate: snap.analysis_date,
+            snapshotStatus: snap.status,
             avgLevel:     round(summary.avgRiskLevel),
             minLevel,
             maxLevel,
@@ -68,9 +106,17 @@ const _buildFireRiskDashboard = async () => {
             s2CoverageRatio: round(summary.s2CoverageRatio),
             hotspotDistrictCount: hotspotCount,
             hotspotMinLevel:      HOTSPOT_MIN,
+            // Deprecated legacy field — trước migration 040 dùng cho single-layer.
             geoserverLayer:       snap.geoserver_layer || null,
             geeDownloadUrl:       snap.gee_download_url || null,
             publishedAt:          snap.published_at || null,
+            // Trạng thái per-district mới (post-migration 040):
+            districtRasterReady,
+            districtRasterTotal: districtRasterExpected,
+            districtRasterExpected,
+            districtRasterDiscovered,
+            mapReady,
+            publishedDistricts,
         };
     } catch (err) {
         console.warn('[STATS] fire-risk dashboard build failed:', err.message);
@@ -112,6 +158,40 @@ const _buildForestClassificationDashboard = async () => {
             : null;
         const forestDeltaHa = previousForestHa == null ? null : forestAreaHa - previousForestHa;
 
+        // Cùng logic với fire-risk (migration 040): đếm huyện đã publish
+        // từ forest_district_exports thay vì đọc snap.geoserver_layer (NULL).
+        // Trả kèm mảng publishedDistricts để dashboard render list link.
+        let districtRasterReady = 0, districtRasterDiscovered = 0;
+        const publishedDistricts = [];
+        try {
+            const districtRows = await forestClassificationRepo.listDistrictExports(snap.id);
+            districtRasterDiscovered = new Set(
+                districtRows
+                    .map((row) => String(row.district_code || '').trim())
+                    .filter(Boolean),
+            ).size;
+            const readyCodes = new Set();
+            for (const r of districtRows) {
+                const layer = (r.geoserver_layer && String(r.geoserver_layer).trim())
+                    || (r.ingest_geoserver_layer && String(r.ingest_geoserver_layer).trim())
+                    || null;
+                if (!layer) continue;
+                const code = String(r.district_code || '').trim();
+                if (code) readyCodes.add(code);
+                publishedDistricts.push({
+                    code: r.district_code || null,
+                    name: r.district_name || null,
+                    layer,
+                });
+            }
+            districtRasterReady = readyCodes.size;
+        } catch (dsErr) {
+            console.warn('[STATS] forest districts fetch failed (non-fatal):', dsErr.message);
+        }
+        const districtRasterExpected = forestClassificationConfig.EXPECTED_DISTRICT_COUNT;
+        const mapReady = districtRasterDiscovered === districtRasterExpected
+            && districtRasterReady === districtRasterExpected;
+
         return {
             available:        true,
             snapshotId:       snap.id,
@@ -132,10 +212,18 @@ const _buildForestClassificationDashboard = async () => {
             testKappa:         round(snap.test_kappa, 3),
             s2ImageCount:      snap.s2_image_count ?? null,
             landsatImageCount: snap.ls_image_count ?? null,
+            // Deprecated legacy field — trước migration 040 dùng cho single-layer.
             geoserverLayer:    snap.geoserver_layer || null,
             geeDownloadUrl:    snap.gee_download_url || null,
             computedAt:        snap.computed_at || null,
             publishedAt:       snap.published_at || null,
+            // Trạng thái per-district mới (post-migration 040):
+            districtRasterReady,
+            districtRasterTotal: districtRasterExpected,
+            districtRasterExpected,
+            districtRasterDiscovered,
+            mapReady,
+            publishedDistricts,
             comparison: previous ? {
                 previousSnapshotId: previous.id,
                 previousYear:       previous.year,

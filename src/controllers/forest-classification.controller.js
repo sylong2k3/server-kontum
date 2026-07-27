@@ -255,14 +255,29 @@ const refresh = async (req, res) => {
     const gtBufferM    = req.body?.gtBufferM    != null ? Number(req.body.gtBufferM)    : undefined;
     const minFieldTest = req.body?.minFieldTest != null ? Number(req.body.minFieldTest) : undefined;
 
-    const snapshot = await svc.refresh({
+    svc.refresh({
         year: selectedYear,
         month: selectedMonth,
         groundTruthAssetId,
         gtBufferM,
         minFieldTest,
+    }).catch((error) => {
+        console.error(
+            `[FOREST-CLS] manual refresh ${selectedYear}/${selectedMonth} failed:`,
+            error.message,
+        );
     });
-    CREATED(res, 'Đã kích hoạt phân loại lớp phủ rừng.', { snapshot });
+    res.status(202).json({
+        message: 'Đã tiếp nhận yêu cầu phân loại lớp phủ rừng.',
+        status: 202,
+        data: {
+            run: {
+                year: selectedYear,
+                month: selectedMonth,
+                status: 'queued',
+            },
+        },
+    });
 };
 
 // ── POST /forest-classification/query ────────────────────────────────────────
@@ -317,14 +332,19 @@ const getSnapshot = async (req, res) => {
 
 function formatSnapshot(s) {
     if (!s) return null;
+    const numericOrNull = (value) => {
+        if (value == null || value === '') return null;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    };
     return {
         id:                 s.id,
         year:               s.year,
         month:              s.month,
         status:             s.status,
         provinceSummary:    s.province_summary,
-        oobAccuracy:        s.oob_accuracy,
-        testKappa:          s.test_kappa ?? null,
+        oobAccuracy:        numericOrNull(s.oob_accuracy),
+        testKappa:          numericOrNull(s.test_kappa),
         geoserverLayer:     s.geoserver_layer || null,
         geeTileUrl:         s.gee_tile_url || null,
         geeTileGeneratedAt: s.gee_tile_generated_at || null,
@@ -421,8 +441,11 @@ const getDistrictExports = async (req, res) => {
         attempt:    snap.attempt,
         scaleM:     snap.download_scale_m ?? districts[0]?.scaleM ?? null,
         total:      rows.length,
+        discoveredTotal: districtCodeCount,
         expectedTotal: cfg.EXPECTED_DISTRICT_COUNT,
         districtCodeCount,
+        coverageScope: 'districtMosaic',
+        coverageCount: districtCodeCount,
         fullyPublished,
         completed, failed, skipped, pending,
         sourceCount,

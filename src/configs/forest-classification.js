@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 // =====================================================================
 // Forest classification config — port từ kontum_forest_classification_final.js v5.3

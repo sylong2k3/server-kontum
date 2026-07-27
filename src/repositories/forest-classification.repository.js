@@ -195,6 +195,25 @@ const countPriorCompletedAttempts = async (snapshotId) => {
     return rows[0]?.n ?? 0;
 };
 
+const failStaleActiveRuns = async (maxAgeMs = 45 * 60 * 1000) => {
+    const ageMs = Math.max(60_000, Number(maxAgeMs) || 45 * 60 * 1000);
+    const { rows } = await db.query(
+        `UPDATE forest.forest_snapshots
+         SET status = 'failed',
+             error_message = COALESCE(
+                 NULLIF(error_message, ''),
+                 'Tác vụ bị gián đoạn do runtime dừng hoặc khởi động lại.'
+             ),
+             updated_at = NOW()
+         WHERE status IN ('pending', 'computing')
+           AND COALESCE(updated_at, created_at)
+               < NOW() - ($1 * INTERVAL '1 millisecond')
+         RETURNING id, year, month, attempt`,
+        [ageMs],
+    );
+    return rows;
+};
+
 const getById = async (id) => {
     const { rows } = await db.query(
         'SELECT * FROM forest.forest_snapshots WHERE id = $1',
@@ -233,7 +252,11 @@ const getLatest = async () => {
 
 const getByYearMonth = async (year, month) => {
     const { rows } = await db.query(
-        'SELECT * FROM forest.forest_snapshots WHERE year = $1 AND month = $2',
+        `SELECT *
+         FROM forest.forest_snapshots
+         WHERE year = $1 AND month = $2
+         ORDER BY attempt DESC, id DESC
+         LIMIT 1`,
         [year, month],
     );
     return rows[0] || null;
@@ -264,8 +287,13 @@ const listCompleted = async ({
         s.geoserver_layer IS NOT NULL
         OR ${completeDistrictSetSql}
     )`;
+    // `requireCompleteDistrictSet` = published-history mode. Chấp nhận cả:
+    //   (a) snapshot cũ (pre-migration 040) publish single-layer province-wide
+    //   (b) snapshot mới có đủ per-district set 9/9
+    // Nếu chỉ dùng (b), snapshot cũ (không có district_exports) bị loại → history
+    // hiển thị thiếu kỳ đã publish trước đây.
     if (requireCompleteDistrictSet) {
-        whereClauses.push(completeDistrictSetSql);
+        whereClauses.push(stableRasterSql);
     } else if (hasGeoserverLayer === true) {
         whereClauses.push(stableRasterSql);
     }
@@ -646,6 +674,7 @@ module.exports = {
     countFailedAttempts,
     hasCompletedAttempt,
     countPriorCompletedAttempts,
+    failStaleActiveRuns,
     getById,
     getLatestCompleted,
     getLatest,

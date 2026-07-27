@@ -343,6 +343,21 @@ const start = () => {
     analysisTask = cron.schedule(ANALYSIS_CRON, runDailyAnalysis, cronOpts);
     pollTask     = cron.schedule(POLL_CRON,     runPollExports,   cronOpts);
 
+    const staleRunMaxAgeMs = Number(process.env.FIRE_RISK_ACTIVE_RUN_MAX_AGE_MS)
+        || 45 * 60 * 1000;
+    repo.failStaleActiveRuns(staleRunMaxAgeMs)
+        .then((rows) => {
+            if (rows.length > 0) {
+                console.warn(
+                    `[FIRE RISK] Đã đóng ${rows.length} snapshot bị gián đoạn: `
+                    + rows.map((row) => `#${row.id}`).join(', '),
+                );
+            }
+        })
+        .catch((error) => {
+            console.warn(`[FIRE RISK] Không thể dọn snapshot bị gián đoạn: ${error.message}`);
+        });
+
     console.log(
         `[FIRE RISK] STARTED analysis="${ANALYSIS_CRON}" poll="${POLL_CRON}" ` +
         `timezone=${cronOpts.timezone} catchup=${CATCHUP_ENABLED ? 'on' : 'off'} ` +

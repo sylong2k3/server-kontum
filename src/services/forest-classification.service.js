@@ -816,12 +816,40 @@ const buildSnapshotComparison = async (snapshot, districtAreas) => {
 const getLatest = async () => {
     const t0 = Date.now();
     let snapshot = await repo.getLatestCompleted();
+    const newest = await repo.getLatest();
+    const activeStatuses = new Set(['pending', 'computing', 'exporting']);
+    const newestUpdatedAt = new Date(
+        newest?.updated_at || newest?.created_at || 0,
+    ).getTime();
+    const activeMaxAgeMs = Number(process.env.FC_ACTIVE_RUN_MAX_AGE_MS)
+        || 45 * 60 * 1000;
+    const hasFreshActiveRun = newest
+        && activeStatuses.has(newest.status)
+        && Number.isFinite(newestUpdatedAt)
+        && Date.now() - newestUpdatedAt < activeMaxAgeMs
+        && (!snapshot || Number(newest.id) > Number(snapshot.id));
+    if (hasFreshActiveRun) {
+        dbgTime(
+            'GET_LATEST',
+            `active id=${newest.id} status=${newest.status} y/m=${newest.year}/${newest.month}`,
+            t0,
+        );
+        return {
+            snapshot: newest,
+            districtAreas: [],
+            stale: true,
+            computing: true,
+            comparison: null,
+        };
+    }
     if (!snapshot) {
-        const pending = await repo.getLatest();
-        if (pending) {
-            dbgTime('GET_LATEST', `pending id=${pending.id} status=${pending.status} y/m=${pending.year}/${pending.month}`, t0);
+        if (newest) {
+            dbgTime('GET_LATEST', `pending id=${newest.id} status=${newest.status} y/m=${newest.year}/${newest.month}`, t0);
             return {
-                snapshot: pending, districtAreas: [], stale: true, computing: true,
+                snapshot: newest,
+                districtAreas: [],
+                stale: true,
+                computing: activeStatuses.has(newest.status),
                 comparison: null,
             };
         }

@@ -5,7 +5,7 @@ const { JWT_SECRET, JWT_ALGORITHM } = require('../utils/tokenManager.util');
 const userRepository = require('../repositories/user.repository');
 const tokenRepository = require('../repositories/token.repository');
 const { t } = require('../utils/i18n.util');
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const getLang = (req) => req?.lang || process.env.APP_LANG || process.env.LANG || 'vi';
 

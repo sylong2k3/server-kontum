@@ -184,35 +184,8 @@ const getLatest = async (req, res) => {
     const minRiskLevel = parseInt(req.query.minRiskLevel, 10) || 1;
     const { snapshot, features, stale, computing } =
         await svc.getLatest({ minRiskLevel });
-    // NOTE — strip `geometry` field khỏi districtStats items để response gọn.
-    // Polygon huyện đã có ở endpoint `/map` (fire_risk_features.geom), không
-    // cần lặp trong `/latest`. Giữ centroid + stats.
-    const districtStatsSlim = Array.isArray(snapshot.district_stats)
-        ? snapshot.district_stats.map((district) => ({
-            unitCode: district.unitCode ?? null,
-            name: district.name ?? null,
-            centroid: district.centroid ?? null,
-            riskLevelDist: district.riskLevelDist || {},
-            s2Coverage: district.s2Coverage ?? null,
-        }))
-        : [];
-
     OK(res, t('get_detail_success', req.lang), {
-        snapshot: {
-            id:                  snapshot.id,
-            analysisDate:        snapshot.analysis_date,
-            status:              snapshot.status,
-            provinceSummary:     formatProvinceSummary(snapshot.province_summary),
-            // districtStats — thống kê per-huyện (unitCode, name, riskLevelDist,
-            // pNesterovMean, s2Coverage, centroid). Đã strip geometry (xem trên).
-            districtStats:       districtStatsSlim,
-            geoserverLayer:      snapshot.geoserver_layer || null,
-            geeTileUrl:          snapshot.gee_tile_url || null,
-            geeTileGeneratedAt:  snapshot.gee_tile_generated_at || null,
-            geeDownloadUrl:      snapshot.gee_download_url || null,
-            geoserverDownloadUrl: buildGeoserverDownloadUrl(snapshot.geoserver_layer),
-            downloadFilename:    fireRiskFilename(snapshot.analysis_date),
-        },
+        snapshot: formatSnapshot(snapshot),
         features,
         stale,
         computing,
@@ -275,6 +248,41 @@ const formatProvinceSummary = (summary) => {
     };
 };
 
+const numberOrNull = (value) => {
+    if (value == null || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatSnapshot = (snapshot) => {
+    if (!snapshot) return null;
+    const districtStats = Array.isArray(snapshot.district_stats)
+        ? snapshot.district_stats.map((district) => ({
+            unitCode: district.unitCode ?? null,
+            name: district.name ?? null,
+            centroid: district.centroid ?? null,
+            riskLevelDist: district.riskLevelDist || {},
+            pNesterovMean: numberOrNull(district.pNesterovMean),
+            s2Coverage: numberOrNull(district.s2Coverage),
+        }))
+        : [];
+    return {
+        id: snapshot.id,
+        analysisDate: snapshot.analysis_date,
+        status: snapshot.status,
+        provinceSummary: formatProvinceSummary(snapshot.province_summary),
+        districtStats,
+        geoserverLayer: snapshot.geoserver_layer || null,
+        geeTileUrl: snapshot.gee_tile_url || null,
+        geeTileGeneratedAt: snapshot.gee_tile_generated_at || null,
+        geeDownloadUrl: snapshot.gee_download_url || null,
+        geoserverDownloadUrl: buildGeoserverDownloadUrl(snapshot.geoserver_layer),
+        downloadFilename: fireRiskFilename(snapshot.analysis_date),
+        computedAt: snapshot.computed_at || null,
+        publishedAt: snapshot.published_at || null,
+    };
+};
+
 // ── GET /fire-risk/published-history ─────────────────────────────────────────
 // Public sub-endpoint (optionalAuth) — chỉ trả snapshot ĐÃ publish GeoServer,
 // dùng cho client browse để add WMS overlay lên bản đồ. Force filter
@@ -323,10 +331,25 @@ const refresh = async (req, res) => {
     const computeOob       = req.body?.computeOob !== undefined
         ? Boolean(req.body.computeOob) : undefined;
 
-    const snapshot = await svc.refresh({
+    const requestedDate = analysisDate || new Date().toISOString().slice(0, 10);
+    svc.refresh({
         analysisDate, submitExport, enableRf, inputFireAssetId, computeOob,
+    }).catch((error) => {
+        console.error(
+            `[FIRE-RISK] manual refresh ${requestedDate} failed:`,
+            error.message,
+        );
     });
-    CREATED(res, 'Đã kích hoạt phân tích cháy rừng.', { snapshot });
+    res.status(202).json({
+        message: 'Đã tiếp nhận yêu cầu phân tích cháy rừng.',
+        status: 202,
+        data: {
+            run: {
+                analysisDate: requestedDate,
+                status: 'queued',
+            },
+        },
+    });
 };
 
 // ── GET /fire-risk/snapshots/:id/districts ───────────────────────────────────
@@ -422,8 +445,11 @@ const getDistrictExports = async (req, res) => {
         snapshotStatus: snap.status,
         scaleM:        snap.export_scale_m ?? districts[0]?.scaleM ?? null,
         total:         rows.length,
+        discoveredTotal: districtCodeCount,
         expectedTotal: cfg.EXPECTED_DISTRICT_COUNT,
         districtCodeCount,
+        coverageScope: 'districtMosaic',
+        coverageCount: districtCodeCount,
         fullyPublished,
         completed,
         failed,

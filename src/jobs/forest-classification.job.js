@@ -105,6 +105,7 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
             `[FOREST] stale ${existing.status} snapshot detected: period=${year}/${month} ` +
             `snapshotId=${existing.id} updatedAt=${existing.updated_at || existing.created_at} — retrying`,
         );
+        await repo.failStaleActiveRuns(ACTIVE_STALE_MS);
     }
 
     // Retry-limit guard: nếu đã fail đủ số lần RETRY_DELAYS_MS.length → dừng.

@@ -187,6 +187,25 @@ const countPriorCompletedAttempts = async (snapshotId) => {
     return rows[0]?.n ?? 0;
 };
 
+const failStaleActiveRuns = async (maxAgeMs = 45 * 60 * 1000) => {
+    const ageMs = Math.max(60_000, Number(maxAgeMs) || 45 * 60 * 1000);
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_snapshots
+         SET status = 'failed',
+             error_message = COALESCE(
+                 NULLIF(error_message, ''),
+                 'Tác vụ bị gián đoạn do runtime dừng hoặc khởi động lại.'
+             ),
+             updated_at = NOW()
+         WHERE status IN ('pending', 'computing')
+           AND COALESCE(updated_at, created_at)
+               < NOW() - ($1 * INTERVAL '1 millisecond')
+         RETURNING id, analysis_date, attempt`,
+        [ageMs],
+    );
+    return rows;
+};
+
 /**
  * Snapshot mới nhất trạng thái 'completed' hoặc 'published'.
  */
@@ -251,8 +270,13 @@ const listCompleted = async ({
         s.geoserver_layer IS NOT NULL
         OR ${completeDistrictSetSql}
     )`;
+    // `requireCompleteDistrictSet` = published-history mode. Chấp nhận cả:
+    //   (a) snapshot cũ (pre-migration 040) publish single-layer province-wide
+    //   (b) snapshot mới có đủ per-district set 9/9
+    // Nếu chỉ dùng (b), snapshot cũ (không có district_exports) bị loại → history
+    // hiển thị thiếu kỳ đã publish trước đây.
     if (requireCompleteDistrictSet) {
-        whereClauses.push(completeDistrictSetSql);
+        whereClauses.push(stableRasterSql);
     } else if (hasGeoserverLayer === true) {
         whereClauses.push(stableRasterSql);
     }
@@ -422,14 +446,20 @@ const replaceFeatures = async (snapshotId, features) => {
 /**
  * Lấy features của snapshot (level 4-5 cho map mặc định).
  */
-const getFeatures = async (snapshotId, { minLevel = 1 } = {}) => {
+const getFeatures = async (
+    snapshotId,
+    { minLevel = 1, includeGeometry = true } = {},
+) => {
+    const geometrySelect = includeGeometry
+        ? `CASE WHEN geom IS NOT NULL
+                     THEN ST_AsGeoJSON(geom)::jsonb
+                     ELSE NULL
+                END AS geometry`
+        : 'NULL::jsonb AS geometry';
     const { rows } = await db.query(
         `SELECT id, risk_level, district_code, district_name,
                 area_ha, properties,
-                CASE WHEN geom IS NOT NULL
-                     THEN ST_AsGeoJSON(geom)::jsonb
-                     ELSE NULL
-                END AS geometry
+                ${geometrySelect}
          FROM fire.fire_risk_features
          WHERE snapshot_id = $1 AND risk_level >= $2
          ORDER BY risk_level DESC, area_ha DESC`,
@@ -608,6 +638,7 @@ module.exports = {
     countFailedAttempts,
     hasCompletedAttempt,
     countPriorCompletedAttempts,
+    failStaleActiveRuns,
     getLatestCompleted,
     getLatest,
     getById,

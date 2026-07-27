@@ -31,6 +31,7 @@ const {
     eeEval: eeEvaluate,
     getKonTumRegion,
     getKonTumDistricts,
+    getKonTumDistrictsGeoJson,
     getKonTumDistrictsSource,
     getKonTumBoundarySource,
     getEeMapId,
@@ -151,13 +152,28 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCas
 
     const fcResult = await eeEvaluate(reduced);
 
+    // reduceRegions can evaluate the input geometry as an empty coordinate array.
+    // Keep the local WGS84 file as the canonical geometry because the same file
+    // defines the district clipping/export scope.
+    const localDistricts = new Map(
+        getKonTumDistrictsGeoJson()
+            .filter((district) => Number(district.epsg) === 4326)
+            .map((district) => [String(district.ADM2_CODE), district]),
+    );
+
     // Parse GEE FeatureCollection result into district stats array.
     const stats = (fcResult.features || []).map((feat) => {
         const p = feat.properties || {};
+        const unitCode = p.ADM2_CODE != null ? String(p.ADM2_CODE) : null;
+        const localDistrict = unitCode ? localDistricts.get(unitCode) : null;
+        const evaluatedGeometry = feat.geometry?.coordinates?.length
+            ? feat.geometry
+            : null;
+        const geometry = localDistrict?.geometry || evaluatedGeometry;
         // Centroid tính client-side từ bounding box của polygon — dùng làm điểm
         // đặt fire icon marker. Server không tự gọi ee.Geometry.centroid() vì
         // sẽ thêm 1 evaluate() phụ; bbox mean quá đủ chính xác cho placement.
-        const centroid = computeCentroid(feat.geometry);
+        const centroid = computeCentroid(geometry);
         const hist = p.riskLevel_histogram || {};
         const blendHist = p.blendCase_histogram || {};
         const confHist  = p.confidenceClass_histogram || {};
@@ -170,12 +186,11 @@ async function computeDistrictStats(riskLevel, pNesterov, s2Observed45, blendCas
             levelDist[l] = Math.round(ha * 100) / 100;
         }
         return {
-            unitCode:          p.ADM2_CODE  || null,
-            name:              p.ADM2_NAME  || p.ADM1_NAME || null,
-            // Polygon huyện: reduceRegions giữ nguyên geometry của mỗi feature
-            // đầu vào. Đây là mảnh khoá để client vẽ được feature lên bản đồ
-            // (không còn null → không còn fallback lat/lng = 0,0).
-            geometry:          feat.geometry || null,
+            unitCode,
+            name:              localDistrict?.ADM2_NAME || p.ADM2_NAME || p.ADM1_NAME || null,
+            // Polygon huyện lấy từ cùng file local đang dùng để clip/export.
+            // Điều này tránh geometry rỗng từ reduceRegions và giữ API/map cùng scope.
+            geometry,
             // Điểm centroid từ bbox polygon — client cắm fire-icon marker ở đây.
             // Nếu geometry null (fallback FAO cache cũ), centroid cũng null,
             // client sẽ dùng bảng KONTUM_DISTRICT_CENTROIDS làm dự phòng.
@@ -1023,10 +1038,34 @@ async function pollExports() {
  */
 const getLatest = async ({ minRiskLevel = 1 } = {}) => {
     let snapshot = await repo.getLatestCompleted();
+    const newest = await repo.getLatest();
+    const activeStatuses = new Set(['pending', 'computing', 'exporting']);
+    const newestUpdatedAt = new Date(
+        newest?.updated_at || newest?.created_at || 0,
+    ).getTime();
+    const activeMaxAgeMs = Number(process.env.FIRE_RISK_ACTIVE_RUN_MAX_AGE_MS)
+        || 45 * 60 * 1000;
+    const hasFreshActiveRun = newest
+        && activeStatuses.has(newest.status)
+        && Number.isFinite(newestUpdatedAt)
+        && Date.now() - newestUpdatedAt < activeMaxAgeMs
+        && (!snapshot || Number(newest.id) > Number(snapshot.id));
+    if (hasFreshActiveRun) {
+        return {
+            snapshot: newest,
+            features: [],
+            stale: true,
+            computing: true,
+        };
+    }
     if (!snapshot) {
-        const pending = await repo.getLatest();
-        if (pending) {
-            return { snapshot: pending, features: [], stale: true, computing: true };
+        if (newest) {
+            return {
+                snapshot: newest,
+                features: [],
+                stale: true,
+                computing: activeStatuses.has(newest.status),
+            };
         }
         throw new BusinessLogicError(
             'Chưa có dữ liệu cảnh báo cháy rừng. Vui lòng thử lại sau.',
@@ -1037,7 +1076,10 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
     await repo.reconcileDistrictExportArtifacts(snapshot.id);
     const promoted = await repo.markPublishedIfDistrictsReady(snapshot.id);
     if (promoted) snapshot = promoted;
-    const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
+    const rows = await repo.getFeatures(snapshot.id, {
+        minLevel: minRiskLevel,
+        includeGeometry: false,
+    });
     const features = rows.map(toPublicFeatureRow);
     return {
         snapshot,
@@ -1061,20 +1103,51 @@ const getMap = async ({ minRiskLevel = 4 } = {}) => {
     await repo.reconcileDistrictExportArtifacts(snapshot.id);
     const promoted = await repo.markPublishedIfDistrictsReady(snapshot.id);
     if (promoted) snapshot = promoted;
-    const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
-    const features = rows.map((r) => ({
-        type: 'Feature',
-        geometry: r.geometry || null,
-        properties: {
-            id:            r.id,
-            riskLevel:     r.risk_level,
-            districtCode:  r.district_code,
-            districtName:  r.district_name,
-            areaHa:        r.area_ha,
-            s2Coverage: r.properties?.s2Coverage ?? null,
-            centroid: r.properties?.centroid ?? null,
-        },
-    }));
+    const rows = await repo.getFeatures(snapshot.id, {
+        minLevel: minRiskLevel,
+        includeGeometry: false,
+    });
+    const localDistricts = new Map(
+        getKonTumDistrictsGeoJson()
+            .filter((district) => Number(district.epsg) === 4326)
+            .map((district) => [String(district.ADM2_CODE), district]),
+    );
+    const grouped = new Map();
+    for (const row of rows) {
+        const districtCode = String(row.district_code || '').trim();
+        if (!districtCode) continue;
+        const current = grouped.get(districtCode) || {
+            id: row.id,
+            districtCode,
+            districtName: row.district_name || null,
+            riskLevel: 0,
+            areaHa: 0,
+            riskLevelDist: {},
+            s2Coverage: row.properties?.s2Coverage ?? null,
+            centroid: row.properties?.centroid ?? null,
+        };
+        const level = Number(row.risk_level) || 0;
+        const areaHa = Number(row.area_ha) || 0;
+        current.riskLevel = Math.max(current.riskLevel, level);
+        current.areaHa += areaHa;
+        current.riskLevelDist[level] =
+            (current.riskLevelDist[level] || 0) + areaHa;
+        grouped.set(districtCode, current);
+    }
+    const features = Array.from(grouped.values()).map((item) => {
+        const localDistrict = localDistricts.get(item.districtCode);
+        const geometry = localDistrict?.geometry || null;
+        return {
+            type: 'Feature',
+            geometry,
+            properties: {
+                ...item,
+                districtName: localDistrict?.ADM2_NAME || item.districtName,
+                areaHa: Math.round(item.areaHa * 100) / 100,
+                centroid: computeCentroid(geometry) || item.centroid,
+            },
+        };
+    });
     return {
         type: 'FeatureCollection',
         features,
@@ -1091,7 +1164,6 @@ const toPublicFeatureRow = (row) => ({
         s2Coverage: row.properties?.s2Coverage ?? null,
         centroid: row.properties?.centroid ?? null,
     },
-    geometry: row.geometry,
 });
 
 /**

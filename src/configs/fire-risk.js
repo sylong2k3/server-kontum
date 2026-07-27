@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 // ── GEE pipeline windows (mirrors GEE script v8.1 CONFIG) ────────────────────
 const FEATURE_WINDOW_DAYS      = parseInt(process.env.FIRE_RISK_FEATURE_WINDOW_DAYS, 10) || 30;
@@ -97,7 +97,7 @@ const COMPUTE_OOB                 = process.env.FIRE_RISK_COMPUTE_OOB === 'true'
 // guard; nếu GEE chậm/quota thì pipeline phải fallback threshold-only thay vì
 // làm mất toàn bộ bản tin cảnh báo trong ngày.
 const RF_GUARD_TIMEOUT_MS         =
-    parseInt(process.env.FIRE_RISK_RF_GUARD_TIMEOUT_MS, 10) || 90 * 1000;
+    parseInt(process.env.FIRE_RISK_RF_GUARD_TIMEOUT_MS, 10) || 3 * 60 * 1000;
 
 // Timeout riêng cho OOB getInfo (ms). Mặc định 10 phút giống forest-classification.
 const OOB_TIMEOUT_MS              = parseInt(process.env.FIRE_RISK_OOB_TIMEOUT_MS, 10) || 10 * 60 * 1000;
