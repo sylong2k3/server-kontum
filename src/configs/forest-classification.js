@@ -162,10 +162,12 @@ const GCS_BUCKET    = process.env.GEE_GCS_BUCKET || '';
 const GCS_KEY_FILE  = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
 const MINIO_BUCKET  = process.env.FC_MINIO_BUCKET || 'forest-classification';
 const EXPORT_SCALE_M = parseInt(process.env.FC_EXPORT_SCALE_M, 10) || 30;
-// DOWNLOAD_SCALE_M — mặc định 100m sau migration 040. Pipeline mới gọi
-// getDownloadURL PER district (loop RanhGioiHuyen_Polygon.geojson), không phải
-// 1 URL toàn tỉnh, nên 100m fit ~1e9 maxPixels cho từng huyện nhỏ.
-const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 100;
+// DOWNLOAD_SCALE_M — mặc định 150m (fallback từ 100m sau khi huyện lớn như
+// Đăk Glei/Sa Thầy hit HTTP 400 "User memory limit exceeded" của GEE khi
+// raster-ingest download. 150m giảm pixel count ~2.25× so với 100m để
+// giảm áp lực bộ nhớ. Env FC_DOWNLOAD_SCALE_M override nếu cần tăng thêm
+// chi tiết cho testing.
+const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 150;
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
 const SNAPSHOT_GRACE_MONTHS = parseInt(process.env.FC_SNAPSHOT_GRACE_MONTHS, 10) || 24;

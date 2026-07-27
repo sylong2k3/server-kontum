@@ -368,7 +368,7 @@ async function executeAnalysis(year, month, {
 
         // GEE download URL — chia PER HUYỆN (migration 040). Loop qua
         // RanhGioiHuyen_Polygon.geojson, mỗi huyện gọi getDownloadURL riêng
-        // với scale 100m + clip theo geometry huyện. Nếu 1 huyện fail, các
+        // với scale 150m + clip theo geometry huyện. Nếu 1 huyện fail, các
         // huyện khác vẫn completed. Diện tích toàn tỉnh = Σ area huyện.
         //
         // districtAreas[] đã có { district_code, class_id, area_ha } từ
@@ -464,7 +464,7 @@ async function executeAnalysis(year, month, {
                             .getDownloadURL(
                                 {
                                     name:        fileBase,
-                                    scale:       cfg.DOWNLOAD_SCALE_M || 100,
+                                    scale:       cfg.DOWNLOAD_SCALE_M || 150,
                                     region:      districtGeom,
                                     crs:         'EPSG:4326',
                                     format:      'GEO_TIFF',
@@ -687,7 +687,7 @@ async function _autoIngestDistrict(snapshot, districtRow, year, month) {
         requestParams: {
             linkedResource: { type: 'forest_district', id: snapshot.id, districtCode: code },
             year, month,
-            scale_m:        cfg.DOWNLOAD_SCALE_M || 100,
+            scale_m:        cfg.DOWNLOAD_SCALE_M || 150,
             autoIngested:   true,
         },
         user: null,

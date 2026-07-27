@@ -77,6 +77,7 @@ const getLatest = async (req, res) => {
             districtStats:       districtStatsSlim,
             geoserverLayer:      snapshot.geoserver_layer || null,
             geeTileUrl:          snapshot.gee_tile_url || null,
+            geeTileGeneratedAt:  snapshot.gee_tile_generated_at || null,
             geeDownloadUrl:      snapshot.gee_download_url || null,
             geoserverDownloadUrl: buildGeoserverDownloadUrl(snapshot.geoserver_layer),
             downloadFilename:    fireRiskFilename(snapshot.analysis_date),

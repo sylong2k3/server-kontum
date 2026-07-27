@@ -607,9 +607,9 @@ async function runAnalysis(analysisDate, {
         }
 
         // Download URL — chia PER HUYỆN thay vì 1 URL toàn tỉnh (migration 040).
-        // Lý do: EXPORT_SCALE_M mới = 100m → toàn tỉnh 9.677 km² × 3 band RGB
-        // ≈ 30M pixel → GeoTIFF ~120MB, vượt maxPixels 1e9 và dễ timeout GEE.
-        // Chia theo huyện: mỗi huyện ~50-1500 km² → ~5M pixel/huyện, an toàn.
+        // 150m giảm khoảng 56% số pixel so với 100m, qua đó giảm nguy cơ vượt
+        // giới hạn bộ nhớ khi GEE materialize graph cho huyện lớn. Chia theo
+        // huyện tiếp tục giới hạn geometry và thời gian của từng request.
         // Diện tích toàn tỉnh = Σ area huyện (aggregate ở dashboard/query).
         //
         // Persist state per huyện vào fire.fire_risk_district_exports — mỗi
@@ -687,7 +687,7 @@ async function runAnalysis(analysisDate, {
                             .getDownloadURL(
                                 {
                                     name:        fileBase,
-                                    scale:       cfg.EXPORT_SCALE_M || 100,
+                                    scale:       cfg.EXPORT_SCALE_M || 150,
                                     region:      districtGeom,
                                     crs:         'EPSG:4326',
                                     format:      'GEO_TIFF',
@@ -848,7 +848,7 @@ async function _autoIngestDistrict(snapshot, districtRow, analysisDate) {
         requestParams: {
             linkedResource: { type: 'fire_risk_district', id: snapshot.id, districtCode: code },
             analysis_date:  analysisDate,
-            scale_m:        cfg.EXPORT_SCALE_M || 100,
+            scale_m:        cfg.EXPORT_SCALE_M || 150,
             autoIngested:   true,
         },
         user: null,

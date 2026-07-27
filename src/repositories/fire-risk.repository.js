@@ -193,7 +193,7 @@ const getLatestCompleted = async () => {
     const { rows } = await db.query(
         `SELECT * FROM fire.fire_risk_snapshots
          WHERE status IN ('completed','published')
-         ORDER BY analysis_date DESC
+         ORDER BY analysis_date DESC, created_at DESC, id DESC
          LIMIT 1`,
     );
     return rows[0] || null;
@@ -241,18 +241,25 @@ const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =
     const whereSql = whereClauses.join(' AND ');
     const orderSql = 'analysis_date DESC, created_at DESC, id DESC';
 
-    // Trả đầy đủ field admin cần cho "full snapshot payload" trong panel expand.
+    // DISTINCT ON phải chạy trước COUNT/pagination để mỗi ngày chỉ chiếm một
+    // item và total phản ánh số ngày, không phải số attempt. WHERE nằm trong
+    // subquery để filter GeoServer vẫn chọn attempt mới nhất phù hợp.
     const { rows } = await db.query(
-        `SELECT id, analysis_date, status, s2_coverage_ratio,
-                province_summary,
-                computed_at, published_at,
-                gee_tile_url, gee_download_url,
-                geoserver_layer,
-                error_message,
+        `SELECT deduped.*,
                 COUNT(*) OVER()::int AS total_count
-         FROM fire.fire_risk_snapshots
-         WHERE ${whereSql}
-         ORDER BY ${orderSql}
+         FROM (
+             SELECT DISTINCT ON (analysis_date)
+                    id, analysis_date, status, s2_coverage_ratio,
+                    province_summary,
+                    computed_at, published_at,
+                    gee_tile_url, gee_tile_generated_at, gee_download_url,
+                    geoserver_layer,
+                    error_message
+             FROM fire.fire_risk_snapshots
+             WHERE ${whereSql}
+             ORDER BY ${orderSql}
+         ) AS deduped
+         ORDER BY analysis_date DESC, id DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset],
     );
@@ -261,7 +268,8 @@ const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =
         let total = 0;
         if (offset > 0) {
             const { rows: cnt } = await db.query(
-                `SELECT COUNT(*)::int AS total FROM fire.fire_risk_snapshots
+                `SELECT COUNT(DISTINCT analysis_date)::int AS total
+                 FROM fire.fire_risk_snapshots
                  WHERE ${whereSql}`,
             );
             total = cnt[0].total;
@@ -371,7 +379,7 @@ const getFeatures = async (snapshotId, { minLevel = 1 } = {}) => {
 // SUM(total_area_ha). Mỗi row có state riêng để không kéo theo snapshot fail
 // khi 1 huyện lỗi.
 
-const insertDistrictExports = async (snapshotId, districts, scaleM = 100) => {
+const insertDistrictExports = async (snapshotId, districts, scaleM = 150) => {
     if (!Array.isArray(districts) || districts.length === 0) return [];
     const client = await db.pool.connect();
     try {

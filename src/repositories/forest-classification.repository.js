@@ -207,7 +207,7 @@ const getLatestCompleted = async () => {
     const { rows } = await db.query(
         `SELECT * FROM forest.forest_snapshots
          WHERE status IN ('completed','published')
-         ORDER BY year DESC, month DESC
+         ORDER BY year DESC, month DESC, created_at DESC, id DESC
          LIMIT 1`,
     );
     if (DEBUG) {
@@ -255,15 +255,22 @@ const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) =
     const orderSql = 'year DESC, month DESC, created_at DESC, id DESC';
     dbg('listCompleted', `page=${page} limit=${limit} filter=${hasGeoserverLayer ?? 'all'} WHERE=${whereSql}`);
 
+    // Khử trùng attempt theo kỳ trước khi COUNT/pagination. DISTINCT ON chọn
+    // attempt completed/published mới nhất của từng (year, month).
     const { rows } = await db.query(
-        `SELECT id, year, month, status, oob_accuracy,
-                duration_ms, province_summary, computed_at, published_at,
-                gee_tile_url, gee_download_url,
-                geoserver_layer, error_message,
+        `SELECT deduped.*,
                 COUNT(*) OVER()::int AS total_count
-         FROM forest.forest_snapshots
-         WHERE ${whereSql}
-         ORDER BY ${orderSql}
+         FROM (
+             SELECT DISTINCT ON (year, month)
+                    id, year, month, status, oob_accuracy,
+                    duration_ms, province_summary, computed_at, published_at,
+                    gee_tile_url, gee_tile_generated_at, gee_download_url,
+                    geoserver_layer, error_message
+             FROM forest.forest_snapshots
+             WHERE ${whereSql}
+             ORDER BY ${orderSql}
+         ) AS deduped
+         ORDER BY year DESC, month DESC, id DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset],
     );
@@ -272,7 +279,8 @@ const listCompleted = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) =
         let total = 0;
         if (offset > 0) {
             const { rows: cnt } = await db.query(
-                `SELECT COUNT(*)::int AS total FROM forest.forest_snapshots
+                `SELECT COUNT(DISTINCT (year, month))::int AS total
+                 FROM forest.forest_snapshots
                  WHERE ${whereSql}`,
             );
             total = cnt[0].total;
@@ -408,7 +416,7 @@ const getPreviousCompleted = async (year, month) => {
 // từ tất cả district_export rows completed. Nếu 1 huyện fail, snapshot vẫn
 // completed (partial coverage) — không kéo theo toàn bộ.
 
-const insertDistrictExports = async (snapshotId, districts, scaleM = 100) => {
+const insertDistrictExports = async (snapshotId, districts, scaleM = 150) => {
     if (!Array.isArray(districts) || districts.length === 0) return [];
     const client = await db.pool.connect();
     try {

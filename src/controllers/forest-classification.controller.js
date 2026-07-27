@@ -197,6 +197,7 @@ function formatSnapshot(s) {
         testKappa:          s.test_kappa ?? null,
         geoserverLayer:     s.geoserver_layer || null,
         geeTileUrl:         s.gee_tile_url || null,
+        geeTileGeneratedAt: s.gee_tile_generated_at || null,
         geeDownloadUrl:       s.gee_download_url || null,
         geoserverDownloadUrl: buildGeoserverDownloadUrl(s.geoserver_layer),
         downloadFilename:     forestFilename(s.year, s.month),
