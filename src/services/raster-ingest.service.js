@@ -185,13 +185,28 @@ async function _cleanup(files) {
 async function _fail(job, err) {
     const errMsg = `${err.code || err.name || 'ERROR'}: ${err.message}`;
     const is429 = /HTTP 429|UPSTREAM_4XX.*429|rate.?limit/i.test(errMsg);
-    const isNonRetryable4xx = err.code === 'UPSTREAM_4XX' && !is429;
+    // HTTP 401 = liên kết tải tạm đã hết hạn (session GEE đổi sau restart PM2,
+    // hoặc TTL token qua đi trước khi worker kịp claim). Đặt riêng status
+    // 'url_expired' để job URL-refresh (cron */5) tái sinh liên kết mới thay
+    // vì mark 'failed' vĩnh viễn.
+    const isUrlExpired = err.code === 'UPSTREAM_4XX'
+        && /HTTP 401|UNAUTHENTICATED|Invalid token/i.test(errMsg);
+    const isNonRetryable4xx = err.code === 'UPSTREAM_4XX' && !is429 && !isUrlExpired;
     const canRetry =
         job.retry_count < cfg.MAX_RETRIES
         && !(err instanceof Api400Error)
         && err.code !== 'FILE_TOO_LARGE'
         && err.code !== 'NO_TIF_IN_ZIP'
         && !isNonRetryable4xx;
+
+    if (isUrlExpired) {
+        await rasterRepo.updateStatus(job.id, {
+            status:   'url_expired',
+            errorLog: errMsg,
+        });
+        console.warn(`[RASTER-INGEST] job=${job.id} URL_EXPIRED layer=${job.layer_code} — chờ job refresh sinh liên kết mới`);
+        return;
+    }
 
     if (canRetry) {
         // Detect HTTP 429 (rate limit) từ error message hoặc code. GEE

@@ -17,12 +17,16 @@ const { t } = require('../utils/i18n.util');
 const formatFireRiskDate = (analysisDate) => {
     if (!analysisDate) return null;
     if (!(analysisDate instanceof Date)) return String(analysisDate).slice(0, 10);
-    return new Intl.DateTimeFormat('en-CA', {
+    const parts = new Intl.DateTimeFormat('en-CA', {
         timeZone: process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
-    }).format(analysisDate);
+    }).formatToParts(analysisDate).reduce((result, part) => {
+        if (part.type !== 'literal') result[part.type] = part.value;
+        return result;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
 };
 
 const fireRiskFilename = (analysisDate) => {
@@ -375,6 +379,11 @@ const getDistrictExports = async (req, res) => {
     const fullyPublished = hasCompleteStableDistrictSet(rows, readyCount);
 
     const districts = rows.map((r) => {
+        // Per-district tile URL từ pipeline (mỗi huyện 1 URL, đã clip theo
+        // geometry huyện) — public field vì FE cần render overlay cho anon user.
+        // Chỉ trả URL còn hạn dùng (helper getTemporaryRasterUrlStatus phía FE
+        // đã có logic hết hạn); server không lọc theo TTL để tránh state race.
+        const tileUrl = r.gee_tile_url || null;
         const safe = {
             id:              r.id,
             districtCode:    r.district_code,
@@ -384,11 +393,14 @@ const getDistrictExports = async (req, res) => {
             areaStats:       slimAreaStats(r.area_stats),
             totalAreaHa:     r.total_area_ha != null ? Number(r.total_area_ha) : null,
             geoserverLayer:  districtGeoserverLayer(r),
+            tileUrl,
+            tileGeneratedAt: r.gee_generated_at,
         };
         if (!includeInternals) return safe;
         return {
             ...safe,
-            geeTileUrl:          r.gee_tile_url || null,
+            geeTileUrl:          tileUrl,
+            geeMapId:            r.gee_map_id || null,
             geeDownloadUrl:      getUsableDistrictSourceUrl(r),
             geeDownloadFilename: r.gee_download_filename || null,
             geeGeneratedAt:      r.gee_generated_at,

@@ -671,6 +671,29 @@ async function executeAnalysis(analysisDate, {
                 const fileBase = `fire_risk_${code || 'unknown'}_${dateTag}`;
                 try {
                     const districtGeom = ee.Geometry(d.geometry);
+                    // Ảnh riskLevel đã clip theo geom huyện — dùng chung cho cả
+                    // getEeMapId (tile URL huyện) và getDownloadURL (GeoTIFF huyện).
+                    // Clip trước khi visualize → tile pyramid đóng khung đúng
+                    // ranh giới huyện, không tràn sang huyện khác.
+                    const riskForDistrict = riskLevel
+                        .updateMask(riskLevel.gt(0))
+                        .clip(districtGeom);
+
+                    // Per-district tile URL. Nếu getMapId fail cho huyện này,
+                    // vẫn tiếp tục sang getDownloadURL (overlay huyện đó rơi về
+                    // WMS composite sau khi ingest xong, hoặc tile toàn tỉnh cũ).
+                    let tileUrlPerDistrict = null;
+                    let mapIdPerDistrict   = null;
+                    try {
+                        const mapInfo = await getEeMapId(
+                            riskForDistrict, RISK_LEVEL_VIZ,
+                        );
+                        tileUrlPerDistrict = mapInfo?.tileUrl || null;
+                        mapIdPerDistrict   = mapInfo?.mapId   || null;
+                    } catch (mapErr) {
+                        console.warn(`[FIRE-RISK] getEeMapId district=${code} fail (non-fatal): ${mapErr.message}`);
+                    }
+
                     // Timeout 2 phút/huyện — fire-risk graph nhẹ hơn forest classify
                     // (không có RF 13-class training), 60s vẫn có thể đủ nhưng
                     // GEE trong Restricted Mode hay bị 429/slow → nới lên để
@@ -682,10 +705,8 @@ async function executeAnalysis(analysisDate, {
                             () => reject(new Error(`getDownloadURL timeout huyện=${code} sau ${DL_TIMEOUT_MS}ms`)),
                             DL_TIMEOUT_MS,
                         );
-                        riskLevel
-                            .updateMask(riskLevel.gt(0))
+                        riskForDistrict
                             .visualize(RISK_LEVEL_VIZ)
-                            .clip(districtGeom)
                             .getDownloadURL(
                                 {
                                     name:        fileBase,
@@ -707,6 +728,8 @@ async function executeAnalysis(analysisDate, {
                         status:                'completed',
                         area_stats:            d,
                         total_area_ha:         Math.round(districtHa * 100) / 100,
+                        gee_map_id:            mapIdPerDistrict,
+                        gee_tile_url:          tileUrlPerDistrict,
                         gee_download_url:      url,
                         gee_download_filename: `${fileBase}.tif`,
                         gee_generated_at:      new Date(),
@@ -717,6 +740,7 @@ async function executeAnalysis(analysisDate, {
                         code,
                         name: d.name,
                         url,
+                        tileUrl: tileUrlPerDistrict,
                         districtHa,
                         exportId: row.id,
                     });
@@ -1100,6 +1124,49 @@ const refresh = async ({ analysisDate, submitExport, enableRf, inputFireAssetId,
     });
 };
 
+/**
+ * URL refresh dùng cho job cron 5-phút (fire-risk-url-refresh):
+ * Khi worker raster-ingest phát hiện HTTP 401 → mark job 'url_expired'
+ * → job này phát hiện snapshot chứa ingest job hết hạn → chạy lại phân tích
+ * cho analysis_date đó (activeRuns dedup nếu trùng ngày).
+ *
+ * Trả về mảng { analysisDate, snapshotIdOld, snapshotIdNew?, error? } —
+ * caller (job) log tổng hợp.
+ */
+const refreshExpiredDistrictUrls = async () => {
+    const db = require('../configs/database');
+    // 1. Tìm distinct analysis_date của snapshot có ít nhất 1 ingest job
+    //    'url_expired'. Loại bỏ snapshot đã có attempt hoàn thành mới hơn (đã
+    //    được sinh lại URL rồi).
+    const { rows } = await db.query(`
+        SELECT DISTINCT s.analysis_date
+        FROM fire.fire_risk_snapshots s
+        JOIN fire.fire_risk_district_exports d ON d.snapshot_id = s.id
+        JOIN gis.raster_ingest_jobs j ON j.id = d.raster_ingest_job_id
+        WHERE j.status = 'url_expired'
+          AND s.id = (
+              SELECT MAX(id) FROM fire.fire_risk_snapshots
+              WHERE analysis_date = s.analysis_date
+          )
+        ORDER BY s.analysis_date DESC
+    `);
+    if (!rows.length) return [];
+
+    const results = [];
+    for (const r of rows) {
+        const date = fmtDate(r.analysis_date);
+        try {
+            console.log(`[FIRE-RISK-URL-REFRESH] tái sinh URL cho analysis_date=${date} — chạy lại pipeline`);
+            const snap = await runAnalysis(date);
+            results.push({ analysisDate: date, snapshotId: snap?.id || null });
+        } catch (err) {
+            console.error(`[FIRE-RISK-URL-REFRESH] date=${date} FAILED: ${err.message}`);
+            results.push({ analysisDate: date, error: err.message });
+        }
+    }
+    return results;
+};
+
 module.exports = {
     runAnalysis,
     pollExports,
@@ -1107,6 +1174,7 @@ module.exports = {
     getMap,
     getHistory,
     refresh,
+    refreshExpiredDistrictUrls,
     todayUtc,
     fmtDate,
 };
