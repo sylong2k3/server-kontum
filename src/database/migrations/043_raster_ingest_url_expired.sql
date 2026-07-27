@@ -30,7 +30,6 @@ ALTER TABLE gis.raster_ingest_jobs
     ));
 
 COMMENT ON COLUMN gis.raster_ingest_jobs.status IS
-    'State: pending/downloading/validating/uploading/publishing/completed/failed/cancelled/url_expired. '
-    || 'url_expired = liên kết tải tạm hết hạn (HTTP 401), chờ job refresh sinh liên kết mới.';
+    'State: pending/downloading/validating/uploading/publishing/completed/failed/cancelled/url_expired. url_expired = lien ket tai tam het han (HTTP 401), cho job refresh sinh lien ket moi.';
 
 COMMIT;
