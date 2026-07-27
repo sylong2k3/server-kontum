@@ -236,8 +236,8 @@ async function computePNesterovStats(pNesterov, region) {
  */
 async function submitGeeExportTask(riskLevel, analysisDate) {
     if (!cfg.isGcsConfigured()) {
-        console.warn('[FIRE-RISK] GEE_GCS_BUCKET chưa cấu hình — bỏ qua raster export. ' +
-            'Set biến môi trường GEE_GCS_BUCKET + GOOGLE_APPLICATION_CREDENTIALS để bật.');
+        console.warn('[FIRE-RISK] GEE_GCS_BUCKET chưa cấu hình — chỉ bỏ qua export GCS cấp tỉnh; ' +
+            '9 raster huyện vẫn xuất trực tiếp và ingest MinIO/GeoServer.');
         return null;
     }
     const dateTag   = analysisDate.replace(/-/g, '');
@@ -409,7 +409,7 @@ function buildFeaturesFromDistrictStats(snapshotId, districtStats) {
  * @param {boolean} opts.submitExport — submit raster export task after stats
  * @returns {object} snapshot row
  */
-async function runAnalysis(analysisDate, {
+async function executeAnalysis(analysisDate, {
     submitExport      = cfg.isGcsConfigured(),
     enableRf          = cfg.ENABLE_RF,
     inputFireAssetId  = cfg.INPUT_FIRE_ASSET_ID,
@@ -433,7 +433,7 @@ async function runAnalysis(analysisDate, {
             status: 'computing',
             export_scale_m: cfg.EXPORT_SCALE_M,
             model_params: {
-                version:             'v8.1',
+                version:             'v8.3-resilient',
                 feature_window_days: cfg.FEATURE_WINDOW_DAYS,
                 s2_fallback_days:    cfg.S2_FALLBACK_DAYS,
                 lst_fallback_days:   cfg.LST_FALLBACK_DAYS,
@@ -444,6 +444,7 @@ async function runAnalysis(analysisDate, {
                 rf_compute_oob:      enableRf && computeOob,
                 rf_trees:            cfg.RF_TREES,
                 rf_bag_fraction:     cfg.RF_BAG_FRACTION,
+                rf_guard_timeout_ms: cfg.RF_GUARD_TIMEOUT_MS,
                 train_months:        cfg.TRAIN_MONTHS,
                 train_scale_m:       cfg.TRAIN_SCALE_M,
                 train_samples:       cfg.TRAIN_SAMPLES_PER_CLASS,
@@ -456,6 +457,7 @@ async function runAnalysis(analysisDate, {
                 official_thresholds_verified: false,
             },
         }));
+    log.mark('Snapshot attempt', `id=${snapshot.id} attempt=${snapshot.attempt}`);
 
     try {
         // ─────────────────────────────────────────────────────────────────
@@ -706,12 +708,18 @@ async function runAnalysis(analysisDate, {
                         area_stats:            d,
                         total_area_ha:         Math.round(districtHa * 100) / 100,
                         gee_download_url:      url,
-                        gee_download_filename: `${fileBase}.zip`,
+                        gee_download_filename: `${fileBase}.tif`,
                         gee_generated_at:      new Date(),
                         duration_ms:           Date.now() - t0,
                         completed_at:          new Date(),
                     });
-                    districtExportRows.push({ code, name: d.name, url, districtHa });
+                    districtExportRows.push({
+                        code,
+                        name: d.name,
+                        url,
+                        districtHa,
+                        exportId: row.id,
+                    });
                     completed += 1;
                 } catch (dErr) {
                     console.warn(`[FIRE-RISK] district=${code} download fail: ${dErr.message}`);
@@ -789,7 +797,8 @@ async function runAnalysis(analysisDate, {
                     gee_task_id: taskName,
                 });
             } else {
-                log.mark('Raster export skipped', 'GEE_GCS_BUCKET chưa cấu hình');
+                log.mark('Province GCS export skipped',
+                    'GEE_GCS_BUCKET chưa cấu hình; district direct export vẫn hoạt động');
             }
         }
 
@@ -829,6 +838,26 @@ async function runAnalysis(analysisDate, {
     }
 }
 
+// Chặn manual refresh, retry và cron cùng materialize graph GEE cho một ngày.
+// Request đến sau dùng chung Promise; việc client đóng HTTP không hủy lượt chạy
+// nền và cũng không tạo thêm snapshot/graph nặng.
+const activeRuns = new Map();
+function runAnalysis(analysisDate, options = {}) {
+    const key = String(analysisDate).slice(0, 10);
+    const active = activeRuns.get(key);
+    if (active) {
+        console.warn(`[FIRE-RISK] runAnalysis DEDUPE date=${key} — reuse active run`);
+        return active;
+    }
+
+    const run = executeAnalysis(key, options)
+        .finally(() => {
+            if (activeRuns.get(key) === run) activeRuns.delete(key);
+        });
+    activeRuns.set(key, run);
+    return run;
+}
+
 // ── Notification / auto-ingest helpers ──────────────────────────────────────
 const _safe = (fn) => { try { const r = fn(); if (r?.catch) r.catch((e) => console.warn('[FIRE-RISK] async helper err:', e.message)); } catch (e) { console.warn('[FIRE-RISK] sync helper err:', e.message); } };
 
@@ -837,7 +866,7 @@ async function _autoIngestDistrict(snapshot, districtRow, analysisDate) {
     const ingestSvc = require('./raster-ingest.service');
     const dateTag   = String(analysisDate).slice(0, 10).replace(/-/g, '');
     const code      = districtRow.code || 'unknown';
-    const layerCode = `fire_risk_${code}_${dateTag}`;
+    const layerCode = `fire_risk_${code}_${dateTag}_s${snapshot.id}`;
     console.log(`[FIRE-RISK] auto-ingest district=${code} enqueue snapshot=${snapshot.id} layer=${layerCode}`);
     const { job, deduplicated } = await ingestSvc.enqueue({
         sourceUrl:  districtRow.url,
@@ -854,6 +883,16 @@ async function _autoIngestDistrict(snapshot, districtRow, analysisDate) {
         user: null,
         lang: 'vi',
     });
+    if (job.layer_code !== layerCode) {
+        throw new Error(
+            `Raster ingest job #${job.id} belongs to ${job.layer_code}, expected ${layerCode}.`,
+        );
+    }
+    if (districtRow.exportId) {
+        await repo.updateDistrictExport(districtRow.exportId, {
+            raster_ingest_job_id: job.id,
+        });
+    }
     console.log(`[FIRE-RISK] auto-ingest district=${code} ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
 }
 
@@ -959,7 +998,7 @@ async function pollExports() {
  * Returns { snapshot, features, stale }.
  */
 const getLatest = async ({ minRiskLevel = 1 } = {}) => {
-    const snapshot = await repo.getLatestCompleted();
+    let snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
         const pending = await repo.getLatest();
         if (pending) {
@@ -971,6 +1010,9 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
             StatusCodes.SERVICE_UNAVAILABLE,
         );
     }
+    await repo.reconcileDistrictExportArtifacts(snapshot.id);
+    const promoted = await repo.markPublishedIfDistrictsReady(snapshot.id);
+    if (promoted) snapshot = promoted;
     const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
     const features = rows.map(toPublicFeatureRow);
     return {
@@ -985,13 +1027,16 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
  * Get GeoJSON FeatureCollection of fire risk features for the map.
  */
 const getMap = async ({ minRiskLevel = 4 } = {}) => {
-    const snapshot = await repo.getLatestCompleted();
+    let snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
         return {
             type: 'FeatureCollection',
             features: [],
         };
     }
+    await repo.reconcileDistrictExportArtifacts(snapshot.id);
+    const promoted = await repo.markPublishedIfDistrictsReady(snapshot.id);
+    if (promoted) snapshot = promoted;
     const rows = await repo.getFeatures(snapshot.id, { minLevel: minRiskLevel });
     const features = rows.map((r) => ({
         type: 'Feature',
@@ -1028,8 +1073,18 @@ const toPublicFeatureRow = (row) => ({
 /**
  * List completed snapshots (history).
  */
-const getHistory = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =>
-    repo.listCompleted({ page, limit, hasGeoserverLayer });
+const getHistory = async ({
+    page = 1,
+    limit = 30,
+    hasGeoserverLayer,
+    requireCompleteDistrictSet = false,
+} = {}) =>
+    repo.listCompleted({
+        page,
+        limit,
+        hasGeoserverLayer,
+        requireCompleteDistrictSet,
+    });
 
 /**
  * Trigger manual analysis for today (admin only).

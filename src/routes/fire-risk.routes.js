@@ -14,9 +14,8 @@ const router = Router();
 router.get('/latest',  optionalAuth, asyncHandler(ctrl.getLatest));
 router.get('/map',     optionalAuth, asyncHandler(ctrl.getMap));
 
-// Per-district downloads (migration 040): list 10 URL/huyện + area stats.
-// optionalAuth để cả public + admin đọc được. Không lộ sensitive info — URL
-// GEE tự expire 24h.
+// Per-district products (migration 040): 9 huyện + area stats + public
+// GeoServer layer. Internal GEE/MinIO/job fields chỉ trả cho admin có quyền.
 router.get('/snapshots/:id/districts', optionalAuth, asyncHandler(ctrl.getDistrictExports));
 
 // Public browse các snapshot ĐÃ publish GeoServer — client sidebar dùng để

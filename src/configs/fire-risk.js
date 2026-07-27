@@ -93,6 +93,12 @@ const ENABLE_RF                   = process.env.FIRE_RISK_ENABLE_RF !== 'false';
 // nên default OFF; bật để admin xem chất lượng model qua snapshot metadata.
 const COMPUTE_OOB                 = process.env.FIRE_RISK_COMPUTE_OOB === 'true';
 
+// Timeout riêng cho bước materialize histogram mẫu RF. Đây chỉ là quality
+// guard; nếu GEE chậm/quota thì pipeline phải fallback threshold-only thay vì
+// làm mất toàn bộ bản tin cảnh báo trong ngày.
+const RF_GUARD_TIMEOUT_MS         =
+    parseInt(process.env.FIRE_RISK_RF_GUARD_TIMEOUT_MS, 10) || 90 * 1000;
+
 // Timeout riêng cho OOB getInfo (ms). Mặc định 10 phút giống forest-classification.
 const OOB_TIMEOUT_MS              = parseInt(process.env.FIRE_RISK_OOB_TIMEOUT_MS, 10) || 10 * 60 * 1000;
 
@@ -134,6 +140,15 @@ const GEE_POLL_MAX_ATTEMPTS       = parseInt(process.env.FIRE_RISK_GEE_POLL_MAX,
 
 // MinIO bucket cho raster cháy rừng.
 const MINIO_BUCKET                = process.env.FIRE_RISK_MINIO_BUCKET || 'fire-risk-rasters';
+const EXPECTED_DISTRICT_COUNT     = Math.max(
+    1,
+    parseInt(process.env.FIRE_RISK_EXPECTED_DISTRICT_COUNT, 10) || 9,
+);
+const GEE_TEMPORARY_URL_MAX_AGE_MS = Math.max(
+    60 * 1000,
+    parseInt(process.env.FIRE_RISK_GEE_TEMPORARY_URL_MAX_AGE_MS, 10)
+        || 4 * 60 * 60 * 1000,
+);
 
 // Kon Tum bounding box [minLng, minLat, maxLng, maxLat].
 const KONTUM_BBOX                 = [107.0, 13.8, 108.6, 15.5];
@@ -193,6 +208,7 @@ module.exports = {
     NEGATIVE_ELIGIBLE_MODE,
     ENABLE_RF,
     COMPUTE_OOB,
+    RF_GUARD_TIMEOUT_MS,
     OOB_TIMEOUT_MS,
     EXPORT_SCALE_M,
     EXPORT_FOLDER,
@@ -205,6 +221,8 @@ module.exports = {
     GEE_POLL_INTERVAL_MS,
     GEE_POLL_MAX_ATTEMPTS,
     MINIO_BUCKET,
+    EXPECTED_DISTRICT_COUNT,
+    GEE_TEMPORARY_URL_MAX_AGE_MS,
     KONTUM_BBOX,
     LST_SCALE_FACTOR,
     LST_KELVIN_OFFSET,

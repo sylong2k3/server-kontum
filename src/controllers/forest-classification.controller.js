@@ -134,6 +134,17 @@ const getUsableDistrictSourceUrl = (row) => {
 const hasStableDistrictRaster = (row) =>
     Boolean(districtGeoserverLayer(row) && districtMinioKey(row));
 
+const countDistinctDistrictCodes = (rows) => new Set(
+    rows
+        .map((row) => String(row?.district_code || '').trim())
+        .filter(Boolean),
+).size;
+
+const hasCompleteStableDistrictSet = (rows, readyCount) =>
+    rows.length === cfg.EXPECTED_DISTRICT_COUNT
+    && countDistinctDistrictCodes(rows) === cfg.EXPECTED_DISTRICT_COUNT
+    && readyCount === cfg.EXPECTED_DISTRICT_COUNT;
+
 const resolveDistrictPublishSource = async (row) => {
     const stored = districtMinioLocation(row);
     if (stored) {
@@ -370,6 +381,8 @@ const getDistrictExports = async (req, res) => {
             byClass[cid] = (byClass[cid] || 0) + (Number(ha) || 0);
         }
     }
+    const districtCodeCount = countDistinctDistrictCodes(rows);
+    const fullyPublished = hasCompleteStableDistrictSet(rows, readyCount);
 
     const districts = rows.map((r) => {
         const safe = {
@@ -409,6 +422,8 @@ const getDistrictExports = async (req, res) => {
         scaleM:     snap.download_scale_m ?? districts[0]?.scaleM ?? null,
         total:      rows.length,
         expectedTotal: cfg.EXPECTED_DISTRICT_COUNT,
+        districtCodeCount,
+        fullyPublished,
         completed, failed, skipped, pending,
         sourceCount,
         publishedCount,
@@ -454,29 +469,12 @@ const publishRaster = async (req, res) => {
         );
     }
 
+    await repo.reconcileDistrictExportArtifacts(id);
     const rows = await repo.listDistrictExports(id);
     const tag = `${snap.year}${String(snap.month).padStart(2, '0')}`;
     const jobs = [];
     const enqueueErrors = new Map();
     const availableSourceIds = new Set();
-
-    // Recover a completed worker result if an earlier process stopped between
-    // updating the ingest job and writing the district backlink.
-    for (const row of rows) {
-        if (row.ingest_job_status === 'completed') {
-            const patch = {};
-            if (!nonEmpty(row.geoserver_layer) && nonEmpty(row.ingest_geoserver_layer)) {
-                patch.geoserver_layer = row.ingest_geoserver_layer;
-                patch.geoserver_store = row.ingest_geoserver_store;
-            }
-            if (!nonEmpty(row.minio_key) && districtMinioKey(row)) {
-                patch.minio_key = districtMinioKey(row);
-            }
-            if (Object.keys(patch).length === 0) continue;
-            await repo.updateDistrictExport(row.id, patch);
-            Object.assign(row, patch);
-        }
-    }
 
     for (const row of rows) {
         const stable = hasStableDistrictRaster(row);
@@ -591,14 +589,17 @@ const publishRaster = async (req, res) => {
         cfg.EXPECTED_DISTRICT_COUNT - readyCount - queuedCount - failedCount,
     );
     const enqueuedCount = jobs.filter((job) => !job.deduplicated).length;
-    const alreadyPublished = readyCount === cfg.EXPECTED_DISTRICT_COUNT
-        && jobs.length === 0;
+    const districtCodeCount = countDistinctDistrictCodes(rows);
+    const fullyPublished = hasCompleteStableDistrictSet(rows, readyCount);
+    const alreadyPublished = fullyPublished && jobs.length === 0;
     const firstJob = jobs[0] || null;
     const data = {
         snapshotId: id,
         total: cfg.EXPECTED_DISTRICT_COUNT,
         totalDistricts: cfg.EXPECTED_DISTRICT_COUNT,
         discoveredCount: rows.length,
+        districtCodeCount,
+        fullyPublished,
         sourceCount,
         available: sourceCount,
         publishedCount,
@@ -614,7 +615,8 @@ const publishRaster = async (req, res) => {
         failed: failedCount,
         failedCount,
         alreadyPublished,
-        snapshotStatus: publishedSnapshot?.status || snap.status,
+        snapshotStatus: publishedSnapshot?.status
+            || (fullyPublished ? 'published' : snap.status),
         jobs,
         errors: [...enqueueErrors.entries()].map(([districtExportId, message]) => ({
             districtExportId,

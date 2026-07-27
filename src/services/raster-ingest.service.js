@@ -27,6 +27,7 @@ const crypto = require('crypto');
 
 const db          = require('../configs/database');
 const cfg         = require('../configs/raster-ingest');
+const fireCfg     = require('../configs/fire-risk');
 const forestCfg   = require('../configs/forest-classification');
 const rasterRepo  = require('../repositories/raster-ingest.repository');
 const layerRepo   = require('../repositories/map-layer.repository');
@@ -451,6 +452,44 @@ async function _backLinkResource(
         bindValues = [...target.values, idNum];
     }
     const result = await db.query(sql, bindValues);
+    if (result.rowCount > 0 && linked.type === 'fire_risk_district') {
+        const { rows } = await db.query(
+            `UPDATE fire.fire_risk_snapshots s
+             SET status = 'published',
+                 published_at = COALESCE(s.published_at, NOW()),
+                 updated_at = NOW()
+             WHERE s.id = $1
+               AND s.status = 'completed'
+               AND (
+                   SELECT COUNT(*)::int
+                   FROM fire.fire_risk_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND (
+                   SELECT COUNT(DISTINCT NULLIF(BTRIM(d.district_code), ''))::int
+                   FROM fire.fire_risk_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM fire.fire_risk_district_exports d
+                   WHERE d.snapshot_id = s.id
+                     AND (
+                         NULLIF(BTRIM(d.geoserver_layer), '') IS NULL
+                         OR NULLIF(BTRIM(d.minio_key), '') IS NULL
+                     )
+               )
+             RETURNING s.id`,
+            [idNum, fireCfg.EXPECTED_DISTRICT_COUNT],
+        );
+        if (rows[0]) {
+            console.log(
+                `[RASTER-INGEST] fire snapshot#${idNum} PUBLISHED ` +
+                `after ${fireCfg.EXPECTED_DISTRICT_COUNT}/` +
+                `${fireCfg.EXPECTED_DISTRICT_COUNT} district layers became stable`,
+            );
+        }
+    }
     if (result.rowCount > 0 && linked.type === 'forest_district') {
         const { rows } = await db.query(
             `UPDATE forest.forest_snapshots s

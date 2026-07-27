@@ -346,7 +346,7 @@ const start = () => {
     console.log(
         `[FIRE RISK] STARTED analysis="${ANALYSIS_CRON}" poll="${POLL_CRON}" ` +
         `timezone=${cronOpts.timezone} catchup=${CATCHUP_ENABLED ? 'on' : 'off'} ` +
-        `gcsConfigured=${cfg.isGcsConfigured() ? 'yes' : 'NO — raster export skipped'} ` +
+        `gcsConfigured=${cfg.isGcsConfigured() ? 'yes' : 'NO — province GCS export skipped; district direct export enabled'} ` +
         `debug=${DEBUG} snapshot_retention=UNLIMITED (cleanup disabled)`,
     );
     console.log(`  ✓ Fire risk analysis job scheduled (${ANALYSIS_CRON} @ ${cronOpts.timezone})`);

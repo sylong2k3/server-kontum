@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../configs/database');
+const cfg = require('../configs/fire-risk');
 
 // ── Snapshots ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ const createSnapshot = async ({
         const { rows } = await client.query(
             `INSERT INTO fire.fire_risk_snapshots
                 (analysis_date, attempt, status, model_params, export_scale_m)
-             VALUES ($1, $2, $3, $4, COALESCE($5, 100))
+             VALUES ($1, $2, $3, $4, COALESCE($5, 150))
              RETURNING *`,
             [
                 analysis_date, attempt, status,
@@ -205,7 +206,7 @@ const getLatestCompleted = async () => {
 const getLatest = async () => {
     const { rows } = await db.query(
         `SELECT * FROM fire.fire_risk_snapshots
-         ORDER BY analysis_date DESC, created_at DESC
+         ORDER BY analysis_date DESC, created_at DESC, id DESC
          LIMIT 1`,
     );
     return rows[0] || null;
@@ -226,20 +227,71 @@ const getById = async (id) => {
  * Lấy danh sách snapshots đã hoàn thành (phân trang, mới nhất trước).
  *
  * `hasGeoserverLayer` — filter optional:
- *   true  → chỉ item đã publish GeoServer (geoserver_layer IS NOT NULL)
- *   false → chỉ item chưa publish (geoserver_layer IS NULL)
+ *   true  → item có layer tỉnh legacy hoặc đủ bộ raster huyện ổn định
+ *   false → item chưa có layer tỉnh và chưa đủ bộ raster huyện ổn định
  *   undefined → tất cả (backward-compat với client cũ)
  * Client browse history to add overlay dùng ?hasGeoserverLayer=true để bỏ item
  * chỉ có GEE URL (TTL 24h) — add rồi vài giờ sau tile 404.
  */
-const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) => {
+const listCompleted = async ({
+    page = 1,
+    limit = 30,
+    hasGeoserverLayer,
+    requireCompleteDistrictSet = false,
+} = {}) => {
     const offset = (page - 1) * limit;
     // Build WHERE + params động — pg driver bind theo thứ tự $1, $2, ...
-    const whereClauses = [`status IN ('completed','published')`];
-    if (hasGeoserverLayer === true)  whereClauses.push('geoserver_layer IS NOT NULL');
-    if (hasGeoserverLayer === false) whereClauses.push('geoserver_layer IS NULL');
+    const whereClauses = [`s.status IN ('completed','published')`];
+    const completeDistrictSetSql = `(
+        COALESCE(dp.district_total, 0) = ${cfg.EXPECTED_DISTRICT_COUNT}
+        AND COALESCE(dp.district_code_count, 0) = ${cfg.EXPECTED_DISTRICT_COUNT}
+        AND COALESCE(dp.district_ready_count, 0) = ${cfg.EXPECTED_DISTRICT_COUNT}
+    )`;
+    const stableRasterSql = `(
+        s.geoserver_layer IS NOT NULL
+        OR ${completeDistrictSetSql}
+    )`;
+    if (requireCompleteDistrictSet) {
+        whereClauses.push(completeDistrictSetSql);
+    } else if (hasGeoserverLayer === true) {
+        whereClauses.push(stableRasterSql);
+    }
+    if (hasGeoserverLayer === false) whereClauses.push(`NOT ${stableRasterSql}`);
     const whereSql = whereClauses.join(' AND ');
-    const orderSql = 'analysis_date DESC, created_at DESC, id DESC';
+    const orderSql = 's.analysis_date DESC, s.created_at DESC, s.id DESC';
+
+    const districtPublishJoin = `
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*)::int AS district_total,
+                COUNT(DISTINCT NULLIF(BTRIM(d.district_code), ''))::int
+                    AS district_code_count,
+                (COUNT(*) FILTER (
+                    WHERE NULLIF(BTRIM(d.minio_key), '') IS NOT NULL
+                       OR (
+                           d.gee_download_url ~* '^https?://[^[:space:]]+$'
+                           AND COALESCE(d.gee_generated_at, d.completed_at, d.updated_at)
+                               >= NOW() - (
+                                   ${cfg.GEE_TEMPORARY_URL_MAX_AGE_MS}
+                                   * INTERVAL '1 millisecond'
+                               )
+                       )
+                ))::int AS district_source_count,
+                (COUNT(*) FILTER (
+                    WHERE NULLIF(BTRIM(d.geoserver_layer), '') IS NOT NULL
+                ))::int AS district_geoserver_count,
+                (COUNT(*) FILTER (
+                    WHERE NULLIF(BTRIM(d.geoserver_layer), '') IS NOT NULL
+                      AND NULLIF(BTRIM(d.minio_key), '') IS NOT NULL
+                ))::int AS district_ready_count,
+                COALESCE(
+                    ARRAY_AGG(d.geoserver_layer ORDER BY d.district_name, d.id)
+                        FILTER (WHERE NULLIF(BTRIM(d.geoserver_layer), '') IS NOT NULL),
+                    ARRAY[]::text[]
+                ) AS geoserver_layers
+            FROM fire.fire_risk_district_exports d
+            WHERE d.snapshot_id = s.id
+        ) dp ON TRUE`;
 
     // DISTINCT ON phải chạy trước COUNT/pagination để mỗi ngày chỉ chiếm một
     // item và total phản ánh số ngày, không phải số attempt. WHERE nằm trong
@@ -248,14 +300,21 @@ const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =
         `SELECT deduped.*,
                 COUNT(*) OVER()::int AS total_count
          FROM (
-             SELECT DISTINCT ON (analysis_date)
-                    id, analysis_date, status, s2_coverage_ratio,
-                    province_summary,
-                    computed_at, published_at,
-                    gee_tile_url, gee_tile_generated_at, gee_download_url,
-                    geoserver_layer,
-                    error_message
-             FROM fire.fire_risk_snapshots
+             SELECT DISTINCT ON (s.analysis_date)
+                    s.id, s.analysis_date, s.status, s.s2_coverage_ratio,
+                    s.province_summary,
+                    s.computed_at, s.published_at,
+                    s.gee_tile_url, s.gee_tile_generated_at, s.gee_download_url,
+                    s.geoserver_layer,
+                    s.error_message,
+                    COALESCE(dp.district_total, 0) AS district_total,
+                    COALESCE(dp.district_code_count, 0) AS district_code_count,
+                    COALESCE(dp.district_source_count, 0) AS district_source_count,
+                    COALESCE(dp.district_geoserver_count, 0) AS district_geoserver_count,
+                    COALESCE(dp.district_ready_count, 0) AS district_ready_count,
+                    COALESCE(dp.geoserver_layers, ARRAY[]::text[]) AS geoserver_layers
+             FROM fire.fire_risk_snapshots s
+             ${districtPublishJoin}
              WHERE ${whereSql}
              ORDER BY ${orderSql}
          ) AS deduped
@@ -268,9 +327,14 @@ const listCompleted = async ({ page = 1, limit = 30, hasGeoserverLayer } = {}) =
         let total = 0;
         if (offset > 0) {
             const { rows: cnt } = await db.query(
-                `SELECT COUNT(DISTINCT analysis_date)::int AS total
-                 FROM fire.fire_risk_snapshots
-                 WHERE ${whereSql}`,
+                `SELECT COUNT(*)::int AS total
+                 FROM (
+                     SELECT DISTINCT ON (s.analysis_date) s.id
+                     FROM fire.fire_risk_snapshots s
+                     ${districtPublishJoin}
+                     WHERE ${whereSql}
+                     ORDER BY ${orderSql}
+                 ) counted`,
             );
             total = cnt[0].total;
         }
@@ -445,12 +509,95 @@ const updateDistrictExport = async (id, patch) => {
 
 const listDistrictExports = async (snapshotId) => {
     const { rows } = await db.query(
-        `SELECT * FROM fire.fire_risk_district_exports
-         WHERE snapshot_id = $1
-         ORDER BY district_name, id`,
+        `SELECT d.*,
+                j.status          AS ingest_job_status,
+                j.error_log       AS ingest_job_error,
+                j.request_params  AS ingest_request_params,
+                j.geoserver_layer AS ingest_geoserver_layer,
+                j.geoserver_store AS ingest_geoserver_store,
+                j.minio_bucket    AS ingest_minio_bucket,
+                j.minio_key       AS ingest_minio_key
+         FROM fire.fire_risk_district_exports d
+         LEFT JOIN gis.raster_ingest_jobs j ON j.id = d.raster_ingest_job_id
+         WHERE d.snapshot_id = $1
+         ORDER BY d.district_name, d.id`,
         [snapshotId],
     );
     return rows;
+};
+
+const reconcileDistrictExportArtifacts = async (snapshotId) => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_district_exports d
+         SET geoserver_layer = COALESCE(
+                 NULLIF(BTRIM(d.geoserver_layer), ''),
+                 NULLIF(BTRIM(j.geoserver_layer), '')
+             ),
+             geoserver_store = COALESCE(
+                 NULLIF(BTRIM(d.geoserver_store), ''),
+                 NULLIF(BTRIM(j.geoserver_store), '')
+             ),
+             minio_key = COALESCE(
+                 NULLIF(BTRIM(d.minio_key), ''),
+                 CASE
+                     WHEN NULLIF(BTRIM(j.minio_bucket), '') IS NOT NULL
+                      AND NULLIF(BTRIM(j.minio_key), '') IS NOT NULL
+                     THEN BTRIM(j.minio_bucket) || '/' || BTRIM(j.minio_key)
+                     ELSE NULL
+                 END
+             ),
+             updated_at = NOW()
+         FROM gis.raster_ingest_jobs j
+         WHERE d.snapshot_id = $1
+           AND j.id = d.raster_ingest_job_id
+           AND j.status = 'completed'
+           AND j.request_params #>> '{linkedResource,type}' = 'fire_risk_district'
+           AND j.request_params #>> '{linkedResource,id}' = d.snapshot_id::text
+           AND j.request_params #>> '{linkedResource,districtCode}' = d.district_code
+           AND (
+               NULLIF(BTRIM(d.geoserver_layer), '') IS NULL
+               OR NULLIF(BTRIM(d.minio_key), '') IS NULL
+           )
+         RETURNING d.id`,
+        [snapshotId],
+    );
+    return rows.length;
+};
+
+const markPublishedIfDistrictsReady = async (
+    snapshotId,
+    expectedCount = cfg.EXPECTED_DISTRICT_COUNT,
+) => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_snapshots s
+         SET status = 'published',
+             published_at = COALESCE(s.published_at, NOW()),
+             updated_at = NOW()
+         WHERE s.id = $1
+           AND s.status = 'completed'
+           AND (
+               SELECT COUNT(*)::int
+               FROM fire.fire_risk_district_exports d
+               WHERE d.snapshot_id = s.id
+           ) = $2
+           AND (
+               SELECT COUNT(DISTINCT NULLIF(BTRIM(d.district_code), ''))::int
+               FROM fire.fire_risk_district_exports d
+               WHERE d.snapshot_id = s.id
+           ) = $2
+           AND NOT EXISTS (
+               SELECT 1
+               FROM fire.fire_risk_district_exports d
+               WHERE d.snapshot_id = s.id
+                 AND (
+                     NULLIF(BTRIM(d.geoserver_layer), '') IS NULL
+                     OR NULLIF(BTRIM(d.minio_key), '') IS NULL
+                 )
+           )
+         RETURNING s.*`,
+        [snapshotId, expectedCount],
+    );
+    return rows[0] || null;
 };
 
 module.exports = {
@@ -473,4 +620,6 @@ module.exports = {
     insertDistrictExports,
     updateDistrictExport,
     listDistrictExports,
+    reconcileDistrictExportArtifacts,
+    markPublishedIfDistrictsReady,
 };

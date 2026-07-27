@@ -469,7 +469,7 @@ function buildTrainingCollection(region, forestMask) {
  */
 async function validateTrainingCounts(trainingFC) {
     const hist = await eeGetInfo(trainingFC.aggregate_histogram('label'),
-        cfg.GEE_TIMEOUT_MS);
+        cfg.RF_GUARD_TIMEOUT_MS);
     const counts = hist || {};
     const min = cfg.MIN_SAMPLES_PER_CLASS;
     const missing = [];
@@ -796,56 +796,87 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
             // Pre-train guard: bắt buộc có tối thiểu MIN_SAMPLES_PER_CLASS mẫu
             // cho MỖI lớp (0=no-fire, 1=fire). Nếu thiếu, fallback về threshold-only
             // để tránh RF learn trên tập lệch/mất một lớp (arrayFlatten 2 prob sai).
-            const validation = await log.run(
-                'GETINFO training-sample histogram (guard MIN_SAMPLES_PER_CLASS)',
-                () => validateTrainingCounts(trainingFC),
-                { note: `min=${cfg.MIN_SAMPLES_PER_CLASS}/class` },
+            const validationAttempt = await log.run(
+                'TRY GETINFO training-sample histogram (degrades on timeout/quota)',
+                async () => {
+                    try {
+                        return {
+                            validation: await validateTrainingCounts(trainingFC),
+                            error: null,
+                        };
+                    } catch (error) {
+                        return { validation: null, error };
+                    }
+                },
+                {
+                    note: `min=${cfg.MIN_SAMPLES_PER_CLASS}/class timeout=${cfg.RF_GUARD_TIMEOUT_MS}ms`,
+                },
             );
-            trainingCounts = validation.counts;
-            log.mark('Training sample counts',
-                `no_fire=${validation.counts['0'] || 0} fire=${validation.counts['1'] || 0}`);
-
-            if (!validation.ok) {
-                rfSkipReason = `Insufficient samples: ${validation.missing.map((m) => `class=${m.class} n=${m.count}`).join('; ')} < ${cfg.MIN_SAMPLES_PER_CLASS}`;
-                log.mark('⚠ RF skipped', rfSkipReason);
+            const validation = validationAttempt.validation;
+            if (validationAttempt.error) {
+                // Histogram chỉ là quality guard. GEE quota/timeout không được
+                // làm mất toàn bộ bản tin trong ngày; degraded mode vẫn dùng
+                // đầy đủ P Nesterov + vegetation + terrain + weather.
+                const validationErr = validationAttempt.error;
+                rfSkipReason = `Training validation unavailable: ${validationErr.message}`;
+                log.mark('⚠ RF skipped', `${rfSkipReason}; continue threshold-only`);
                 datasetModelScore = await log.run(
-                    'FALLBACK — DatasetModelScore = 0.85 × ThresholdScore (RF skipped) [LAZY]',
+                    'DEGRADED FALLBACK — DatasetModelScore = 0.85 × ThresholdScore [LAZY]',
                     () => Promise.resolve(fixedThresholdScore.multiply(0.85).rename('DatasetModelScore')),
                 );
-                // Không train, không explain OOB.
-            } else {
-            // Split train + apply để giữ tham chiếu classifier cho OOB (tránh
-            // train 2 lần). Vẫn LAZY: `trainRf` chỉ build graph.
-            rfClassifier = await log.run(
-                'Assemble RF classifier graph (train deferred) [LAZY]',
-                () => Promise.resolve(trainRf(trainingFC)),
-                { note: `${cfg.RF_TREES} trees, bag=${cfg.RF_BAG_FRACTION}` },
-            );
-            datasetModelScore = await log.run(
-                'Classify RF probability (apply pre-trained classifier) [LAZY — deferred until evaluate()]',
-                () => Promise.resolve(applyRfClassifier(currentPredictors, rfClassifier)),
-            );
-            // OOB accuracy: `.explain()` trả outOfBagErrorEstimate. getInfo()
-            // force RF training materialize trên EE server, thường 30-90s. Chạy
-            // trước khi evaluate() các reduceRegion để leverage cache RF.
-            if (computeOob) {
-                oobPct = await log.run(
-                    'GETINFO OOB accuracy (forces sampling + RF training on EE)',
-                    async () => {
-                        const diagnostics = ee.Dictionary(rfClassifier.explain())
-                            .select(['outOfBagErrorEstimate']);
-                        const info = await eeGetInfo(diagnostics, cfg.OOB_TIMEOUT_MS);
-                        const oobError = Number(info?.outOfBagErrorEstimate);
-                        if (!Number.isFinite(oobError)) {
-                            throw new Error('GEE classifier diagnostics did not return outOfBagErrorEstimate');
-                        }
-                        return Math.max(0, Math.min(100, (1 - oobError) * 100));
-                    },
-                    { note: `async getInfo(callback), timeout=${cfg.OOB_TIMEOUT_MS}ms` },
-                );
-                log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
             }
-            }   // end else (validation.ok)
+
+            if (validation) {
+                trainingCounts = validation.counts;
+                log.mark('Training sample counts',
+                    `no_fire=${validation.counts['0'] || 0} fire=${validation.counts['1'] || 0}`);
+
+                if (!validation.ok) {
+                    rfSkipReason = `Insufficient samples: ${validation.missing.map((m) => `class=${m.class} n=${m.count}`).join('; ')} < ${cfg.MIN_SAMPLES_PER_CLASS}`;
+                    log.mark('⚠ RF skipped', rfSkipReason);
+                    datasetModelScore = await log.run(
+                        'FALLBACK — DatasetModelScore = 0.85 × ThresholdScore (RF skipped) [LAZY]',
+                        () => Promise.resolve(fixedThresholdScore.multiply(0.85).rename('DatasetModelScore')),
+                    );
+                    // Không train, không explain OOB.
+                } else {
+                    // Split train + apply để giữ tham chiếu classifier cho OOB
+                    // (tránh train 2 lần). Vẫn LAZY: trainRf chỉ build graph.
+                    rfClassifier = await log.run(
+                        'Assemble RF classifier graph (train deferred) [LAZY]',
+                        () => Promise.resolve(trainRf(trainingFC)),
+                        { note: `${cfg.RF_TREES} trees, bag=${cfg.RF_BAG_FRACTION}` },
+                    );
+                    datasetModelScore = await log.run(
+                        'Classify RF probability (apply pre-trained classifier) [LAZY — deferred until evaluate()]',
+                        () => Promise.resolve(applyRfClassifier(currentPredictors, rfClassifier)),
+                    );
+                    // OOB là diagnostic tùy chọn; nếu getInfo lỗi thì giữ kết
+                    // quả RF và chỉ bỏ metric accuracy.
+                    if (computeOob) {
+                        try {
+                            oobPct = await log.run(
+                                'GETINFO OOB accuracy (forces sampling + RF training on EE)',
+                                async () => {
+                                    const diagnostics = ee.Dictionary(rfClassifier.explain())
+                                        .select(['outOfBagErrorEstimate']);
+                                    const info = await eeGetInfo(diagnostics, cfg.OOB_TIMEOUT_MS);
+                                    const oobError = Number(info?.outOfBagErrorEstimate);
+                                    if (!Number.isFinite(oobError)) {
+                                        throw new Error('GEE classifier diagnostics did not return outOfBagErrorEstimate');
+                                    }
+                                    return Math.max(0, Math.min(100, (1 - oobError) * 100));
+                                },
+                                { note: `async getInfo(callback), timeout=${cfg.OOB_TIMEOUT_MS}ms` },
+                            );
+                            log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
+                        } catch (oobErr) {
+                            oobPct = null;
+                            log.mark('⚠ OOB skipped', oobErr.message);
+                        }
+                    }
+                }
+            }
         } else {
             datasetModelScore = await log.run(
                 'RF disabled — DatasetModelScore = 0.85 × ThresholdScore [LAZY]',
@@ -885,7 +916,7 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
                 datasetModelScore,
                 inputImages,
                 firmsInfluence,
-                rfEnabled: enableRf,
+                rfEnabled: enableRf && !rfSkipReason,
                 region,
             })),
         );
@@ -906,7 +937,7 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
             // Final products
             ...risk,
             // Metadata for callers
-            rfEnabled:        enableRf,
+            rfEnabled:        enableRf && !rfSkipReason,
             rfClassifier,             // ee.Classifier (null nếu enableRf=false hoặc rfSkipReason)
             oobPct,                   // number 0-100 (null nếu !computeOob hoặc !enableRf)
             rfSkipReason,             // string|null — lý do RF không train (thiếu mẫu, v.v.)
@@ -915,7 +946,10 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
             fuelSource:       fuelVal.source,
             // Metadata mô tả model — dùng cho snapshot / API disclaimer.
             modelMeta: {
-                pipelineVersion:      'v8.2-audit-2026-07-24',
+                pipelineVersion:      'v8.3-resilient-2026-07-27',
+                rfRequested:           enableRf,
+                rfEffective:           enableRf && !rfSkipReason,
+                degradedMode:          Boolean(rfSkipReason),
                 predictionHorizonDays: 30,
                 featureWindowDays:    cfg.FEATURE_WINDOW_DAYS,
                 trainMonths:          cfg.TRAIN_MONTHS.length,
