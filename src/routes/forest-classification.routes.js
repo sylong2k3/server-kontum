@@ -40,9 +40,9 @@ router.get('/history', verifyToken, requirePermission('forest_classification', '
 router.post('/refresh', verifyToken, requirePermission('forest_classification', 'manage'),
     asyncHandler(ctrl.refresh));
 
-// Publish snapshot GeoTIFF → MinIO → GeoServer, back-link `geoserver_layer` vào
-// snapshot khi job xong. Cùng permission `map_layers.ingest_raster` với
-// fire-risk (đã có ở system_admin + so_nnmt từ migration 031).
+// Publish the snapshot's district raster batch → MinIO → GeoServer. Each job
+// back-links its forest_district_exports row; the snapshot becomes published
+// only after the complete stable district set is ready.
 router.post('/snapshots/:id/publish-raster',
     verifyToken, requirePermission('map_layers', 'ingest_raster'),
     asyncHandler(ctrl.publishRaster));

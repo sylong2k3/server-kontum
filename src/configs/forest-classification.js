@@ -161,13 +161,27 @@ const ALERT_FOREST_CHANGE_PCT = parseFloat(process.env.FC_ALERT_CHANGE_PCT) || 2
 const GCS_BUCKET    = process.env.GEE_GCS_BUCKET || '';
 const GCS_KEY_FILE  = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
 const MINIO_BUCKET  = process.env.FC_MINIO_BUCKET || 'forest-classification';
-const EXPORT_SCALE_M = parseInt(process.env.FC_EXPORT_SCALE_M, 10) || 30;
+const EXPORT_SCALE_M = parseInt(process.env.FC_EXPORT_SCALE_M, 10) || 150;
 // DOWNLOAD_SCALE_M — mặc định 150m (fallback từ 100m sau khi huyện lớn như
 // Đăk Glei/Sa Thầy hit HTTP 400 "User memory limit exceeded" của GEE khi
 // raster-ingest download. 150m giảm pixel count ~2.25× so với 100m để
 // giảm áp lực bộ nhớ. Env FC_DOWNLOAD_SCALE_M override nếu cần tăng thêm
 // chi tiết cho testing.
 const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 150;
+// Kon Tum currently has 9 district-level raster chunks. A snapshot is exposed
+// as a stable published period only after every expected chunk has both its
+// MinIO archive and GeoServer layer.
+const EXPECTED_DISTRICT_COUNT = Math.max(
+    1,
+    parseInt(process.env.FC_EXPECTED_DISTRICT_COUNT, 10) || 9,
+);
+// Earth Engine getDownloadURL is intentionally treated as short lived. This
+// mirrors the admin UI's conservative four-hour window so a manual publish
+// request does not enqueue a URL that is already likely to return 403/404.
+const GEE_TEMPORARY_URL_MAX_AGE_MS = Math.max(
+    60_000,
+    parseInt(process.env.FC_GEE_TEMPORARY_URL_MAX_AGE_MS, 10) || 4 * 60 * 60 * 1000,
+);
 
 // ── Cleanup ──────────────────────────────────────────────────────────────────
 const SNAPSHOT_GRACE_MONTHS = parseInt(process.env.FC_SNAPSHOT_GRACE_MONTHS, 10) || 24;
@@ -270,6 +284,8 @@ module.exports = {
     MINIO_BUCKET,
     EXPORT_SCALE_M,
     DOWNLOAD_SCALE_M,
+    EXPECTED_DISTRICT_COUNT,
+    GEE_TEMPORARY_URL_MAX_AGE_MS,
     SNAPSHOT_GRACE_MONTHS,
     GEE_TIMEOUT_MS,
     OOB_TIMEOUT_MS,

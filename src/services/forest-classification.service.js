@@ -489,7 +489,15 @@ async function executeAnalysis(year, month, {
                         duration_ms:           Date.now() - t0,
                         completed_at:          new Date(),
                     });
-                    districtExportRows.push({ code, name: d.ADM2_NAME, url, byClass, totalHa, forestHa });
+                    districtExportRows.push({
+                        exportId: row.id,
+                        code,
+                        name: d.ADM2_NAME,
+                        url,
+                        byClass,
+                        totalHa,
+                        forestHa,
+                    });
                     completed += 1;
                 } catch (dErr) {
                     console.warn(`[FOREST-CLS] district=${code} download fail: ${dErr.message}`);
@@ -676,7 +684,7 @@ async function _autoIngestDistrict(snapshot, districtRow, year, month) {
     const ingestSvc = require('./raster-ingest.service');
     const tag       = `${year}${String(month).padStart(2, '0')}`;
     const code      = districtRow.code || 'unknown';
-    const layerCode = `forest_class_${code}_${tag}`;
+    const layerCode = `forest_class_${code}_${tag}_s${snapshot.id}`;
     console.log(`[FOREST-CLS] auto-ingest district=${code} enqueue snapshot=${snapshot.id} layer=${layerCode}`);
     const { job, deduplicated } = await ingestSvc.enqueue({
         sourceUrl:  districtRow.url,
@@ -693,6 +701,16 @@ async function _autoIngestDistrict(snapshot, districtRow, year, month) {
         user: null,
         lang: 'vi',
     });
+    if (job.layer_code !== layerCode) {
+        throw new Error(
+            `Raster ingest job #${job.id} belongs to ${job.layer_code}, expected ${layerCode}.`,
+        );
+    }
+    if (districtRow.exportId) {
+        await repo.updateDistrictExport(districtRow.exportId, {
+            raster_ingest_job_id: job.id,
+        });
+    }
     console.log(`[FOREST-CLS] auto-ingest district=${code} ${deduplicated ? 'DEDUPE' : 'ENQUEUED'} → job=${job.id} status=${job.status}`);
 }
 
@@ -797,7 +815,7 @@ const buildSnapshotComparison = async (snapshot, districtAreas) => {
 
 const getLatest = async () => {
     const t0 = Date.now();
-    const snapshot = await repo.getLatestCompleted();
+    let snapshot = await repo.getLatestCompleted();
     if (!snapshot) {
         const pending = await repo.getLatest();
         if (pending) {
@@ -814,6 +832,11 @@ const getLatest = async () => {
             StatusCodes.SERVICE_UNAVAILABLE,
         );
     }
+    if (snapshot.status === 'completed') {
+        await repo.reconcileDistrictExportArtifacts(snapshot.id);
+        const promoted = await repo.markPublishedIfDistrictsReady(snapshot.id);
+        if (promoted) snapshot = promoted;
+    }
     const districtAreas = await repo.getDistrictAreas(snapshot.id);
     const comparison = await buildSnapshotComparison(snapshot, districtAreas);
     dbgTime('GET_LATEST',
@@ -825,9 +848,19 @@ const getLatest = async () => {
     };
 };
 
-const getHistory = async ({ page = 1, limit = 24, hasGeoserverLayer } = {}) => {
+const getHistory = async ({
+    page = 1,
+    limit = 24,
+    hasGeoserverLayer,
+    requireCompleteDistrictSet = false,
+} = {}) => {
     const t0 = Date.now();
-    const result = await repo.listCompleted({ page, limit, hasGeoserverLayer });
+    const result = await repo.listCompleted({
+        page,
+        limit,
+        hasGeoserverLayer,
+        requireCompleteDistrictSet,
+    });
     dbgTime('GET_HISTORY',
         `page=${page} limit=${limit} hasGeoserverLayer=${hasGeoserverLayer ?? 'all'} ` +
         `→ items=${result.items.length} total=${result.total}`, t0);

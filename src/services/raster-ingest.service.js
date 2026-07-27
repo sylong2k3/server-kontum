@@ -27,6 +27,7 @@ const crypto = require('crypto');
 
 const db          = require('../configs/database');
 const cfg         = require('../configs/raster-ingest');
+const forestCfg   = require('../configs/forest-classification');
 const rasterRepo  = require('../repositories/raster-ingest.repository');
 const layerRepo   = require('../repositories/map-layer.repository');
 const minio       = require('./minio.service');
@@ -343,6 +344,7 @@ async function runJob(job) {
             await _backLinkResource(params.linkedResource, {
                 geoserverLayer, geoserverStore: storeName,
                 minioBucket: cfg.MINIO_BUCKET, minioKey: objectKey,
+                rasterIngestJobId: job.id,
             });
         } catch (err) {
             console.warn(`[RASTER-INGEST] backlink FAILED job=${job.id}: ${err.message}`);
@@ -381,7 +383,10 @@ function _sha256File(filePath) {
 // Back-link: cập nhật `geoserver_layer` + `minio_key` cho snapshot của module
 // gốc (fire_risk / forest / satellite). Support qua allow-list để tránh SQL
 // injection và giới hạn scope.
-async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minioBucket, minioKey }) {
+async function _backLinkResource(
+    linked,
+    { geoserverLayer, geoserverStore, minioBucket, minioKey, rasterIngestJobId },
+) {
     if (!linked?.type || !linked?.id) return;
     const idNum = Number(linked.id);
     if (!Number.isFinite(idNum)) return;
@@ -408,13 +413,19 @@ async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minio
         // cho từng huyện.
         fire_risk_district: {
             table:  'fire.fire_risk_district_exports',
-            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key'],
-            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`],
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'raster_ingest_job_id'],
+            values: [
+                geoserverLayer, geoserverStore,
+                `${minioBucket}/${minioKey}`, rasterIngestJobId,
+            ],
         },
         forest_district: {
             table:  'forest.forest_district_exports',
-            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key'],
-            values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`],
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'raster_ingest_job_id'],
+            values: [
+                geoserverLayer, geoserverStore,
+                `${minioBucket}/${minioKey}`, rasterIngestJobId,
+            ],
         },
     };
     const target = targets[linked.type];
@@ -440,6 +451,44 @@ async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minio
         bindValues = [...target.values, idNum];
     }
     const result = await db.query(sql, bindValues);
+    if (result.rowCount > 0 && linked.type === 'forest_district') {
+        const { rows } = await db.query(
+            `UPDATE forest.forest_snapshots s
+             SET status = 'published',
+                 published_at = COALESCE(s.published_at, NOW()),
+                 updated_at = NOW()
+             WHERE s.id = $1
+               AND s.status = 'completed'
+               AND (
+                   SELECT COUNT(*)::int
+                   FROM forest.forest_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND (
+                   SELECT COUNT(DISTINCT NULLIF(BTRIM(d.district_code), ''))::int
+                   FROM forest.forest_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM forest.forest_district_exports d
+                   WHERE d.snapshot_id = s.id
+                     AND (
+                         NULLIF(BTRIM(d.geoserver_layer), '') IS NULL
+                         OR NULLIF(BTRIM(d.minio_key), '') IS NULL
+                     )
+               )
+             RETURNING s.id`,
+            [idNum, forestCfg.EXPECTED_DISTRICT_COUNT],
+        );
+        if (rows[0]) {
+            console.log(
+                `[RASTER-INGEST] forest snapshot#${idNum} PUBLISHED ` +
+                `after ${forestCfg.EXPECTED_DISTRICT_COUNT}/` +
+                `${forestCfg.EXPECTED_DISTRICT_COUNT} district layers became stable`,
+            );
+        }
+    }
     if (result.rowCount === 0) {
         console.warn(`[RASTER-INGEST] backlink ${linked.type}#${idNum}${linked.districtCode ? '/' + linked.districtCode : ''} → 0 rows updated`);
     } else {

@@ -206,6 +206,10 @@ const truncateGwcLayer = async (geoserverLayerName, format = 'image/png', zoomSt
                     zoomStart,
                     zoomStop,
                     format,
+                    // GeoWebCache 1.29+ unboxes this field without a null guard.
+                    // Omitting it makes truncate return HTTP 500 even though the
+                    // coverage itself was published successfully.
+                    threadCount: 1,
                 },
             }),
         }
