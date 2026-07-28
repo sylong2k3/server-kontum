@@ -1,22 +1,12 @@
 'use strict';
 
 const { geoserverConfig } = require('../configs/geoserver');
-const { Api404Error } = require('../core/error.response');
+const { Api404Error, Api409Error } = require('../core/error.response');
 const repo = require('../repositories/layer-series.repository');
 const { t } = require('../utils/i18n.util');
 
 const ADMIN_ROLES = new Set(['system_admin', 'so_nnmt']);
 const isAdmin = (user) => Boolean(user && ADMIN_ROLES.has(user.role));
-
-const GROUPS = {
-    lop_phu: { name_vi: 'Lớp phủ', name_en: 'Land cover', sourceGroups: ['lop_phu'] },
-    nhiet_do_be_mat: { name_vi: 'Nhiệt độ bề mặt', name_en: 'Land surface temperature', sourceGroups: ['nhiet_do_be_mat'] },
-    bien_dong_lop_phu: { name_vi: 'Biến động lớp phủ', name_en: 'Land-cover change', sourceGroups: ['bien_dong_lop_phu'] },
-    dien_bien_nhiet_do: {
-        name_vi: 'Diễn biến nhiệt độ', name_en: 'Temperature change',
-        sourceGroups: ['dien_bien_nhiet_do', 'bien_dong_nhiet_do'],
-    },
-};
 
 const publicGeoserverRoot = () => {
     const configured = process.env.GEOSERVER_PUBLIC_URL || geoserverConfig.url || '';
@@ -64,30 +54,41 @@ const toStep = (layer) => {
     };
 };
 
+const sourceGroupsFor = (code) => code === 'dien_bien_nhiet_do'
+    ? ['dien_bien_nhiet_do', 'bien_dong_nhiet_do']
+    : [code];
+
 const layersFor = (group, user) => repo.listSourceLayers({
-    sourceGroups: group.sourceGroups,
+    sourceGroups: sourceGroupsFor(group.code),
     includePrivate: isAdmin(user),
 });
 
-const listGroups = async (user) => Promise.all(Object.entries(GROUPS).map(async ([code, group]) => {
+const listGroups = async (user) => {
+    const groups = await repo.listGroups({ includePrivate: isAdmin(user) });
+    return Promise.all(groups.map(async (group) => {
     const steps = (await layersFor(group, user)).map(toStep).filter((step) => step.year_from && step.year_to);
     return {
-        code, name_vi: group.name_vi, name_en: group.name_en,
+        ...group,
         step_count: steps.length,
         min_year: steps.length ? Math.min(...steps.map((step) => step.year_from)) : null,
         max_year: steps.length ? Math.max(...steps.map((step) => step.year_to)) : null,
     };
-}));
+    }));
+};
 
 const getTimeline = async (code, user, lang) => {
-    const group = GROUPS[code];
-    if (!group) {
+    const group = await repo.findGroupByCode(code);
+    if (!group || (!isAdmin(user) && (!group.is_active || !group.is_public))) {
         throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
     }
     const steps = (await layersFor(group, user)).map(toStep).filter((step) => step.year_from && step.year_to);
     steps.sort((a, b) => a.year_to - b.year_to || a.year_from - b.year_from || a.layer_code.localeCompare(b.layer_code));
     return {
-        group: { code, name_vi: group.name_vi, name_en: group.name_en },
+        group: {
+            code, name_vi: group.name_vi, name_en: group.name_en,
+            geoserver_layer: group.geoserver_layer,
+            default_style: group.geoserver_style,
+        },
         mode: 'discrete', snap: 'nearest',
         default_index: steps.length ? steps.length - 1 : null,
         min_year: steps.length ? Math.min(...steps.map((step) => step.year_from)) : null,
@@ -96,4 +97,37 @@ const getTimeline = async (code, user, lang) => {
     };
 };
 
-module.exports = { buildTileUrl, getTimeline, listGroups, periodOf };
+const createGroup = async (payload, lang) => {
+    if (await repo.findGroupByCode(payload.code)) {
+        throw new Api409Error(
+            lang === 'en' ? 'Layer group code already exists' : 'Mã nhóm lớp đã tồn tại',
+            ['LAYER_GROUP_CODE_EXISTS']
+        );
+    }
+    return repo.createGroup(payload);
+};
+
+const updateGroup = async (code, payload, lang) => {
+    if (!await repo.findGroupByCode(code)) {
+        throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
+    }
+    return repo.updateGroup(code, payload);
+};
+
+const deleteGroup = async (code, lang) => {
+    const deleted = await repo.deleteGroup(code);
+    if (!deleted) {
+        throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
+    }
+    return deleted;
+};
+
+module.exports = {
+    buildTileUrl,
+    createGroup,
+    deleteGroup,
+    getTimeline,
+    listGroups,
+    periodOf,
+    updateGroup,
+};

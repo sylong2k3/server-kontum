@@ -128,11 +128,11 @@ let _cachedDistrictsSource = null;
  *
  * Output ee.Feature properties (consumer-facing, KHÔNG đổi tên để tương
  * thích fire-risk.service.js + forest-classification.service.js):
- *   - ADM2_CODE  → mã huyện (string), unique
- *   - ADM2_NAME  → tên tiếng Việt có dấu (VD "Đăk Glei"), hoặc placeholder
- *   - NAME_EN    → tên English (VD "Dak Glei"), có thể null
+ *   - ADM2_CODE  → map từ `ma_huyen` (string), unique — VD "608", "610"
+ *   - ADM2_NAME  → map từ `ten_huyen` (fallback `ten`) — VD "Thành phố Kon Tum"
+ *   - NAME_EN    → luôn null (file không có tên English)
  *   - NAME_VN    → alias của ADM2_NAME
- *   - TYPE_2     → "Huyện" / "Thi xa" / "Thành phố" (từ TYPE_2 của GADM)
+ *   - TYPE_2     → map từ `loai` — VD "Huyện" / "Thành phố"
  *   - source     → nhãn debug (LOCAL_WGS84 hoặc LOCAL_EPSG:XXXX)
  */
 function getKonTumDistricts() {
@@ -200,25 +200,34 @@ function _tryLoadDistrictsFile(filePath) {
             continue;
         }
         const p = f.properties || {};
-        const rawName = p.ten_huyen || p.NAME_VN || p.ADM2_NAME || p.NAME_2
-            || p.VARNAME_2 || p.NAME_EN || p.ten || null;
-        const name    = rawName || `Huyện ${addedIdx + 1}`;
-        const rawCode = p.ma_huyen ?? p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
-        const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${addedIdx + 1}`;
-        const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
-        if (seenCodes.has(dedupeKey)) { skippedDup += 1; continue; }
-        seenCodes.add(dedupeKey);
+        // File data/RanhGioiHuyen_Polygon.geojson dùng schema tiếng Việt:
+        //   ma_huyen / ten_huyen / ten / loai / ma_tinh / ten_tinh.
+        // Không đọc key GADM cũ (ADM2_*, NAME_*, CODE_2002, ...).
+        const rawName = p.ten_huyen || p.ten || null;
+        const rawCode = p.ma_huyen ?? null;
+        if (!rawName || rawCode == null || rawCode === '') {
+            console.warn(`[GEE-SAT] Districts skip feature #${addedIdx + 1}: thiếu ma_huyen/ten_huyen (properties=${JSON.stringify(p)})`);
+            skippedDup += 1;
+            continue;
+        }
+        const name = String(rawName);
+        const code = String(rawCode);
+        if (seenCodes.has(code)) { skippedDup += 1; continue; }
+        seenCodes.add(code);
 
         const clean = { type: g.type, coordinates: _stripZ(g.coordinates) };
         const eeGeom = nonWgs84
             ? ee.Geometry(clean, projLbl, false)
             : ee.Geometry(clean);
+        // Output vẫn giữ tên property GADM (ADM2_CODE/ADM2_NAME/...) để
+        // fire-risk.service.js + forest-classification.service.js không phải
+        // đổi consumer code — chỉ INPUT (đọc file) là đổi sang key tiếng Việt.
         eeFeats.push(ee.Feature(eeGeom, {
             ADM2_CODE: code,
             ADM2_NAME: name,
-            NAME_EN:   p.NAME_EN || p.VARNAME_2 || null,
+            NAME_EN:   null,
             NAME_VN:   name,
-            TYPE_2:    p.loai || p.TYPE_2 || p.ENGTYPE_2 || null,
+            TYPE_2:    p.loai || null,
             source:    projLbl ? `LOCAL_${projLbl}` : 'LOCAL_WGS84',
         }));
         addedIdx += 1;
@@ -291,19 +300,23 @@ function getKonTumDistrictsGeoJson() {
         const g = f?.geometry;
         if (!g || !Array.isArray(g.coordinates) || g.coordinates.length === 0) continue;
         const p = f.properties || {};
-        const rawName = p.ten_huyen || p.NAME_VN || p.ADM2_NAME || p.NAME_2
-            || p.VARNAME_2 || p.NAME_EN || p.ten || null;
-        const name    = rawName || `Huyện ${idx + 1}`;
-        const rawCode = p.ma_huyen ?? p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
-        const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${idx + 1}`;
-        const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
+        // Xem chú thích ở getKonTumDistricts(): chỉ đọc key tiếng Việt của file
+        // (ma_huyen/ten_huyen/ten/loai). Bỏ hết fallback GADM.
+        const rawName = p.ten_huyen || p.ten || null;
+        const rawCode = p.ma_huyen ?? null;
+        if (!rawName || rawCode == null || rawCode === '') {
+            console.warn(`[GEE-SAT] DistrictsGeoJson skip feature #${idx + 1}: thiếu ma_huyen/ten_huyen`);
+            continue;
+        }
+        const name = String(rawName);
+        const code = String(rawCode);
+        if (seen.has(code)) continue;
+        seen.add(code);
         out.push({
             ADM2_CODE: code,
             ADM2_NAME: name,
-            NAME_EN:   p.NAME_EN || p.VARNAME_2 || null,
-            TYPE_2:    p.loai || p.TYPE_2 || p.ENGTYPE_2 || null,
+            NAME_EN:   null,
+            TYPE_2:    p.loai || null,
             geometry:  { type: g.type, coordinates: _stripZ(g.coordinates) },
             epsg:      epsg ? Number(epsg) : 4326,
         });
