@@ -6,7 +6,7 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const passport = require("passport");
 const cookieParser = require("cookie-parser");
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
 
 const routes = require("./routes");
 const {
@@ -45,6 +45,10 @@ if (trustProxy === "true") {
       .map((value) => value.trim())
       .filter(Boolean),
   );
+} else if (process.env.NODE_ENV === "development") {
+  // The local/dev deployment is commonly reached through one reverse proxy.
+  // Setting one trusted hop also keeps rate-limit IP validation deterministic.
+  app.set("trust proxy", 1);
 }
 
 const corsOrigins = process.env.CORS_ORIGINS || "*";

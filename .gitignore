@@ -4,6 +4,7 @@
 .env.*
 
 ggeServiceKey.json
+anotherGgeServiceKey.json
 
 # Firebase service account (chứa private key — KHÔNG commit)
 firbase.json

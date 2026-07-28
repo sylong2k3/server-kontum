@@ -4,6 +4,8 @@
 // analysisDate/computed_at hiển thị theo VN. TIMESTAMPTZ trong DB vẫn store
 // UTC (không đổi), chỉ affect cách Node.js FORMAT thôi.
 process.env.TZ = process.env.TZ || 'Asia/Ho_Chi_Minh';
+process.env.DOTENV_CONFIG_QUIET = process.env.DOTENV_CONFIG_QUIET || 'true';
+require("dotenv").config({ quiet: true });
 
 const app = require("./src/app");
 const db = require("./src/configs/database");
@@ -17,6 +19,7 @@ const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
 const weatherJob = require("./src/jobs/weather.job");
 const fireRiskJob            = require("./src/jobs/fire-risk.job");
+const fireRiskUrlRefreshJob  = require("./src/jobs/fire-risk-url-refresh.job");
 const forestClassificationJob = require("./src/jobs/forest-classification.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const geoImportWorker       = require("./src/workers/geoImport.worker");
@@ -25,7 +28,6 @@ const {
   initWebSocketServer,
   closeWebSocketServer,
 } = require("./src/realtime/websocket.server");
-require("dotenv").config();
 
 const PORT = process.env.PORT || 8881;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -36,6 +38,68 @@ const IS_SINGLETON_WORKER =
 
 let server;
 let isShuttingDown = false;
+let backgroundWorkerLockClient = null;
+
+const startBackgroundWorkers = async () => {
+  if (!IS_SINGLETON_WORKER) return;
+
+  try {
+    const client = await db.pool.connect();
+    const { rows } = await client.query(
+      "SELECT pg_try_advisory_lock($1::integer, $2::integer) AS acquired",
+      [20260727, 1],
+    );
+    if (!rows[0]?.acquired) {
+      client.release();
+      console.warn(
+        "[WORKERS] Một runtime khác đang giữ quyền chạy tác vụ nền; runtime này chỉ phục vụ HTTP.",
+      );
+      return;
+    }
+    backgroundWorkerLockClient = client;
+  } catch (error) {
+    console.warn(
+      `[WORKERS] Không lấy được khóa tác vụ nền; bỏ qua scheduler/worker: ${error.message}`,
+    );
+    return;
+  }
+
+  tokenCleanupJob.start();
+  notificationCleanupJob.start();
+  weatherJob.start();
+  fireRiskJob.start();
+  fireRiskUrlRefreshJob.start();
+  forestClassificationJob.start();
+  imageProcessingWorker.startWorker();
+  geoImportWorker.startWorker();
+  rasterIngestWorker.startWorker();
+};
+
+const stopBackgroundWorkers = async () => {
+  tokenCleanupJob.stop();
+  notificationCleanupJob.stop();
+  weatherJob.stop();
+  fireRiskJob.stop();
+  fireRiskUrlRefreshJob.stop();
+  forestClassificationJob.stop();
+  imageProcessingWorker.stopWorker();
+  geoImportWorker.stopWorker();
+  rasterIngestWorker.stopWorker();
+
+  if (!backgroundWorkerLockClient) return;
+  const client = backgroundWorkerLockClient;
+  backgroundWorkerLockClient = null;
+  try {
+    await client.query(
+      "SELECT pg_advisory_unlock($1::integer, $2::integer)",
+      [20260727, 1],
+    );
+  } catch (error) {
+    console.warn(`[WORKERS] Không thể nhả khóa tác vụ nền: ${error.message}`);
+  } finally {
+    client.release();
+  }
+};
 
 function formatField(label, value) {
   return `${label.padEnd(14)}: ${value}`;
@@ -91,14 +155,7 @@ async function gracefulShutdown(signal) {
     `\nReceived ${signal} signal. Shutting down server gracefully...`,
   );
 
-  tokenCleanupJob.stop();
-  notificationCleanupJob.stop();
-  weatherJob.stop();
-  fireRiskJob.stop();
-  forestClassificationJob.stop();
-  imageProcessingWorker.stopWorker();
-  geoImportWorker.stopWorker();
-  rasterIngestWorker.stopWorker();
+  await stopBackgroundWorkers();
   closeWebSocketServer();
 
   if (server) {
@@ -165,16 +222,7 @@ const initializeAndStartServer = async () => {
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
 
-    if (IS_SINGLETON_WORKER) {
-      tokenCleanupJob.start();
-      notificationCleanupJob.start();
-      weatherJob.start();
-      fireRiskJob.start();
-      forestClassificationJob.start();
-      imageProcessingWorker.startWorker();
-      geoImportWorker.startWorker();
-      rasterIngestWorker.startWorker();
-    }
+    await startBackgroundWorkers();
 
     process.on("unhandledRejection", (error) => {
       console.error("UNHANDLED PROMISE REJECTION! Shutting down server...");
@@ -219,16 +267,7 @@ const initializeAndStartServer = async () => {
     });
     initWebSocketServer(server, { path: WS_PATH });
 
-    if (IS_SINGLETON_WORKER) {
-      tokenCleanupJob.start();
-      notificationCleanupJob.start();
-      weatherJob.start();
-      fireRiskJob.start();
-      forestClassificationJob.start();
-      imageProcessingWorker.startWorker();
-      geoImportWorker.startWorker();
-      rasterIngestWorker.startWorker();
-    }
+    await startBackgroundWorkers();
 
     process.on("unhandledRejection", (error) => {
       console.error("UNHANDLED PROMISE REJECTION! Shutting down server...");

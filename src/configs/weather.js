@@ -10,7 +10,7 @@
  * Tham chiếu thiết kế: docs/modules/08-weather-satellite-design.md §A.
  */
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const OPENWEATHER_API_KEY  = process.env.OPENWEATHER_API_KEY || '';
 const OPENWEATHER_BASE_URL = process.env.OPENWEATHER_BASE_URL || 'https://api.openweathermap.org/data/2.5';

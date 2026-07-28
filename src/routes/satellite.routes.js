@@ -21,4 +21,11 @@ router.post('/fire-risk',  optionalAuth, asyncHandler(ctrl.getFireRisk));
 router.post('/publish', verifyToken, requirePermission('satellite', 'manage'),
     asyncHandler(ctrl.publishToGeoServer));
 
+// Publish qua raster-ingest queue (không cần GCS bucket) — cùng cơ chế với
+// fire-risk + forest-classification. Dùng metadata.downloadUrl đã cache khi
+// user chạy on-demand. Idempotent + hỗ trợ ?force=1 để re-publish.
+router.post('/results/:id/publish-raster',
+    verifyToken, requirePermission('map_layers', 'ingest_raster'),
+    asyncHandler(ctrl.publishToRaster));
+
 module.exports = router;

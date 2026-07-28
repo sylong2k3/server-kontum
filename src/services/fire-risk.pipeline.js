@@ -70,16 +70,27 @@ function getTerrain(region) {
 
 function getFuelInfo(region) {
     if (cfg.LOCAL_FUEL_TYPE_ASSET_ID) {
+        // Schema forest-classification v5.3:
+        // 0 no-data | 1-11 lớp phủ | 12 không xác định.
         const localClass = ee.Image(cfg.LOCAL_FUEL_TYPE_ASSET_ID)
             .rename('FuelClass').clip(region).unmask(0).toInt16();
         const fuelK = localClass.remap(
-            [1,2,3,4,5,6,7,8,9,10,11],
-            [0.55,0.70,0.75,1.10,1.00,1.35,1.28,1.30,1.18,0.00,1.15],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            [0.00, 0.10, 1.20, 0.30, 1.10, 1.00, 1.35, 1.28, 1.30, 1.18, 0.00, 1.05, 0.60],
             0.60,
         ).rename('FuelK');
-        const forestMask = localClass.remap([4,5,6,7,8,9,11], [1,1,1,1,1,1,1], 0)
-            .eq(1).rename('ForestMask');
-        return { fuelClass: localClass, fuelK, forestMask, source: 'LOCAL_FOREST_FUEL_MAP' };
+        // Burnable = mọi thảm thực vật có nguy cơ cháy (không chỉ rừng theo QĐ 99).
+        // Bao gồm cây công nghiệp (cao su rất dễ cháy trong mùa khô),
+        // rừng 3-8, và trảng cỏ/cây bụi 10. Loại nước 9, đất trồng 2, đất khác 0.
+        const burnableMask = localClass.remap(
+            [2, 4, 5, 6, 7, 8, 9, 11],
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            0,
+        ).eq(1).rename('BurnableVegetationMask');
+        // Alias `forestMask` for backwards compatibility with rest of pipeline;
+        // downstream code gates all fire modeling by this mask.
+        const forestMask = burnableMask.rename('ForestMask');
+        return { fuelClass: localClass, fuelK, forestMask, burnableMask, source: 'LOCAL_FOREST_FUEL_MAP' };
     }
 
     const igbp = ee.ImageCollection('MODIS/061/MCD12Q1')
@@ -91,8 +102,11 @@ function getFuelInfo(region) {
         [1.35,1.00,1.20,1.28,1.10,1.05,1.10,1.12,1.15,1.12],
         0.55,
     ).rename('FuelK');
-    const forestMask = igbp.gte(1).and(igbp.lte(10)).rename('ForestMask');
-    return { fuelClass: igbp, fuelK, forestMask, source: 'MODIS_IGBP_FALLBACK' };
+    // Fallback: mọi lớp vegetation IGBP 1-10 (rừng + shrub + savanna + grassland).
+    // Không phải "rừng" theo QĐ 99, mà là "thảm thực vật có thể cháy".
+    const burnableMask = igbp.gte(1).and(igbp.lte(10)).rename('BurnableVegetationMask');
+    const forestMask = burnableMask.rename('ForestMask');
+    return { fuelClass: igbp, fuelK, forestMask, burnableMask, source: 'MODIS_IGBP_FALLBACK' };
 }
 
 // ── Sentinel-2 (30-day primary + 180-day fallback) ───────────────────────────
@@ -117,8 +131,8 @@ function s2Collection(region, startDate, endDate) {
 /**
  * S2 reflectance with primary (feature window) + optional fallback (180-day
  * history). Emits observation flags:
- *   S2_Observed45  = 1 when primary window has valid pixels here.
- *   S2_Fallback180 = 1 when only the history window contributes.
+ *   S2_ObservedWindow  = 1 when primary window has valid pixels here.
+ *   S2_FallbackWindow = 1 when only the history window contributes.
  *   S2_DataSource  = 0 none | 1 primary | 2 fallback only.
  */
 function getSafeS2Reflectance(region, startDate, endDate, useFallback) {
@@ -132,8 +146,8 @@ function getSafeS2Reflectance(region, startDate, endDate, useFallback) {
             S2_BANDS)
         : emptyImage(S2_BANDS);
 
-    const primaryValid = primary.mask().reduce(ee.Reducer.min()).unmask(0).rename('S2_Observed45');
-    const fallbackValid = fallback.mask().reduce(ee.Reducer.min()).unmask(0).rename('S2_Fallback180');
+    const primaryValid = primary.mask().reduce(ee.Reducer.min()).unmask(0).rename('S2_ObservedWindow');
+    const fallbackValid = fallback.mask().reduce(ee.Reducer.min()).unmask(0).rename('S2_FallbackWindow');
 
     const merged   = primary.unmask(fallback);
     const neutral  = ee.Image.constant([0.12, 0.10, 0.08, 0.40, 0.20, 0.12]).rename(S2_BANDS);
@@ -153,7 +167,7 @@ function getS2Indices(region, startDate, endDate, useFallback) {
     const ndmi = s2.normalizedDifference(['B8','B11']).rename('NDMI');
     const nbr  = s2.normalizedDifference(['B8','B12']).rename('NBR');
     return ndvi.addBands(ndmi).addBands(nbr)
-        .addBands(s2.select(['S2_Observed45', 'S2_Fallback180', 'S2_DataSource']))
+        .addBands(s2.select(['S2_ObservedWindow', 'S2_FallbackWindow', 'S2_DataSource']))
         .clip(region);
 }
 
@@ -213,8 +227,8 @@ function getSafeLstFeatures(region, startDate, endDate, airTempImage, useFallbac
         : emptyImage(['LST_C']);
 
     const merged        = primary.unmask(fallback).rename('LST_C');
-    const primaryValid  = primary.mask().unmask(0).rename('LST_Observed45');
-    const fallbackValid = fallback.mask().unmask(0).rename('LST_Fallback180');
+    const primaryValid  = primary.mask().unmask(0).rename('LST_ObservedWindow');
+    const fallbackValid = fallback.mask().unmask(0).rename('LST_FallbackWindow');
 
     const lstDataSource = ee.Image.constant(0)
         .where(primaryValid.eq(1), 1)
@@ -260,33 +274,40 @@ function buildNesterovP(region, endDate) {
 }
 
 function nesterovPToScore(pImage) {
+    // Ngưỡng lấy từ cfg.NESTEROV_P_BREAKS (env-configurable) — không hard-code.
+    const [b0, b1, b2, b3] = cfg.NESTEROV_P_BREAKS;
     return ee.Image(pImage).expression(
-        '(x <= 5000) ? 0.10' +
-        ': (x <= 10000) ? 0.30' +
-        ': (x <= 15000) ? 0.55' +
-        ': (x <= 20000) ? 0.78' +
-        ': 1.00',
+        `(x <= ${b0}) ? 0.10`
+        + `: (x <= ${b1}) ? 0.30`
+        + `: (x <= ${b2}) ? 0.55`
+        + `: (x <= ${b3}) ? 0.78`
+        + ': 1.00',
         { x: pImage },
     ).rename('NesterovScore');
 }
 
-function nesterovPToOfficialLevel(pImage) {
+// Cấp proxy theo P: 1-5. KHÔNG phải cấp cảnh báo cháy chính thức theo
+// QĐ 25/2022 — đây là proxy tính từ ERA5-Land daily aggregate. Tên band
+// đã đổi từ "NesterovOfficialLevel" (v8.1) → "NesterovProxyLevel" để tránh
+// hiểu nhầm là con số chính thức của cơ quan quản lý.
+function nesterovPToProxyLevel(pImage) {
+    const [b0, b1, b2, b3] = cfg.NESTEROV_P_BREAKS;
     return ee.Image(pImage).expression(
-        '(x <= 5000) ? 1' +
-        ': (x <= 10000) ? 2' +
-        ': (x <= 15000) ? 3' +
-        ': (x <= 20000) ? 4' +
-        ': 5',
+        `(x <= ${b0}) ? 1`
+        + `: (x <= ${b1}) ? 2`
+        + `: (x <= ${b2}) ? 3`
+        + `: (x <= ${b3}) ? 4`
+        + ': 5',
         { x: pImage },
-    ).toByte().rename('NesterovOfficialLevel');
+    ).toByte().rename('NesterovProxyLevel');
 }
 
 // ── Predictor image bundling ─────────────────────────────────────────────────
 
 const PREDICTOR_BANDS = [
     'NDVI','NDMI','NBR',
-    'S2_Observed45','S2_Fallback180','S2_DataSource',
-    'LST_C','LST_Observed45','LST_Fallback180','LST_DataSource',
+    'S2_ObservedWindow','S2_FallbackWindow','S2_DataSource',
+    'LST_C','LST_ObservedWindow','LST_FallbackWindow','LST_DataSource',
     'AirTemp_C','Rainfall_mm','Wind_kmh','VPD_hPa',
     'Slope','AspectExposure',
     'FuelK','NesterovP',
@@ -328,10 +349,16 @@ function getMcdLabel(region, monthStart) {
         ['BurnDate','Uncertainty','QA']);
     const qa = image.select('QA').toUint8();
 
-    const observed = qa.eq(2).and(image.select('BurnDate').mask()).unmask(0).rename('MCD_Observed');
-    // v6c fix: landMask relies on QA only — BurnDate is masked outside QA=2
-    // so ANDing with its mask silently reintroduces the strict condition.
-    const landMask = qa.neq(0).unmask(0).rename('MCD_Land');
+    // MCD64A1 v6.1 QA là BITMASK, không phải giá trị categorical:
+    //   bit 0 (=1): Land/water flag — 1 = land, 0 = water/coast
+    //   bit 1 (=2): Valid data flag  — 1 = valid observation, 0 = fill
+    // Trước đây code dùng qa.eq(2) sẽ bắt được pixel water-with-valid-data
+    // và bỏ sót pixel land-with-valid-data (QA=3).
+    const isLand       = qa.bitwiseAnd(1).neq(0);
+    const hasValidData = qa.bitwiseAnd(2).neq(0);
+    const observed = isLand.and(hasValidData).and(image.select('BurnDate').mask())
+        .unmask(0).rename('MCD_Observed');
+    const landMask = isLand.unmask(0).rename('MCD_Land');
     const burned   = image.select('BurnDate').gt(0)
         .and(observed)
         .and(image.select('Uncertainty').lte(cfg.MCD_MAX_UNCERTAINTY_DAY))
@@ -359,19 +386,19 @@ function getFireCciLabel(region, monthStart) {
 
 function getFirmsHotspot(region, startDate, endDate) {
     const collection = ee.ImageCollection('FIRMS').filterBounds(region).filterDate(startDate, endDate);
-    const t21 = ee.Image(ee.Algorithms.If(
+    // Filter TỪNG ảnh: T21 và confidence phải cùng thoả trên cùng detection.
+    // Trước đây max(T21) và max(confidence) lấy độc lập → 1 pixel có thể "đạt"
+    // ngưỡng từ 2 detection khác nhau (T21 cao ngày A, confidence cao ngày B).
+    const perImageHotspot = collection.map((img) =>
+        img.select('T21').gte(cfg.FIRMS_MIN_T21_K)
+            .and(img.select('confidence').gte(cfg.FIRMS_MIN_CONFIDENCE))
+            .rename('hotspot'),
+    );
+    return ee.Image(ee.Algorithms.If(
         collection.size().gt(0),
-        collection.select('T21').max(),
-        ee.Image.constant(0).rename('T21'),
-    ));
-    const confidence = ee.Image(ee.Algorithms.If(
-        collection.size().gt(0),
-        collection.select('confidence').max(),
-        ee.Image.constant(0).rename('confidence'),
-    ));
-    return t21.gte(cfg.FIRMS_MIN_T21_K)
-        .and(confidence.gte(cfg.FIRMS_MIN_CONFIDENCE))
-        .unmask(0).rename('FIRMS_Hotspot');
+        perImageHotspot.max(),
+        ee.Image.constant(0).rename('hotspot'),
+    )).unmask(0).rename('FIRMS_Hotspot');
 }
 
 function getTrainingLabels(region, monthStart) {
@@ -398,17 +425,20 @@ function makeTrainingSamples(region, forestMask, monthText, monthIndex) {
     const positiveMask = labelInfo.label.eq(1).and(forestMask);
     const negativeMask = labelInfo.negativeEligible.eq(1).and(labelInfo.label.eq(0)).and(forestMask);
 
-    // -1 = drop | 0 = no-fire | 1 = fire. Positive after negative so overlaps
-    // (rare, but possible near buffer edges) stay tagged as fire.
-    const classBand = ee.Image.constant(-1)
-        .where(negativeMask, 0).where(positiveMask, 1)
+    // Chỉ giữ pixel eligible (positive HOẶC negative); tất cả pixel ngoài
+    // eligibleMask bị loại qua updateMask nên không dính vào stratifiedSample.
+    // Không dùng "-1 → toByte()" nữa vì toByte(-1) = 255 (unsigned wrap),
+    // gate `classBand.gte(0)` không loại được → sample nhận nhãn 255.
+    const eligibleMask = positiveMask.or(negativeMask);
+    const classBand = ee.Image.constant(0)
+        .where(positiveMask, 1)
         .rename('classLabel').toByte();
 
-    const trainingObservedMask = predictors.select('S2_Observed45').eq(1)
-        .or(predictors.select('LST_Observed45').eq(1));
+    const trainingObservedMask = predictors.select('S2_ObservedWindow').eq(1)
+        .or(predictors.select('LST_ObservedWindow').eq(1));
 
     const image = predictors.select(RF_PREDICTOR_BANDS).addBands(classBand)
-        .updateMask(classBand.gte(0).and(trainingObservedMask));
+        .updateMask(eligibleMask.and(trainingObservedMask));
 
     return image.stratifiedSample({
         numPoints:  cfg.TRAIN_SAMPLES_PER_CLASS,
@@ -427,6 +457,27 @@ function buildTrainingCollection(region, forestMask) {
         makeTrainingSamples(region, forestMask, month, idx));
     return ee.FeatureCollection(perMonth).flatten()
         .filter(ee.Filter.notNull(RF_PREDICTOR_BANDS.concat(['label'])));
+}
+
+/**
+ * Validate training FC has enough samples per class before RF training.
+ * Returns { ok, counts, missing } where:
+ *   - counts:  { '0': N0, '1': N1 } histogram
+ *   - missing: array of class labels below cfg.MIN_SAMPLES_PER_CLASS
+ * Cost: 1 aggregate_histogram getInfo() call, typically 5-15s.
+ * Async — must be awaited before deciding to train.
+ */
+async function validateTrainingCounts(trainingFC) {
+    const hist = await eeGetInfo(trainingFC.aggregate_histogram('label'),
+        cfg.RF_GUARD_TIMEOUT_MS);
+    const counts = hist || {};
+    const min = cfg.MIN_SAMPLES_PER_CLASS;
+    const missing = [];
+    for (const cls of ['0', '1']) {
+        const n = Number(counts[cls] || 0);
+        if (n < min) missing.push({ class: cls, count: n });
+    }
+    return { ok: missing.length === 0, counts, missing };
 }
 
 // ── Random Forest classifier ─────────────────────────────────────────────────
@@ -604,22 +655,27 @@ function buildRiskProducts({
         .updateMask(forestMask).rename('BlendCase');
 
     // Data-quality gating.
-    const s2Obs      = currentPredictors.select('S2_Observed45').eq(1);
-    const lstObs     = currentPredictors.select('LST_Observed45').eq(1);
-    const s2Fb       = currentPredictors.select('S2_Fallback180').eq(1);
-    const lstFb      = currentPredictors.select('LST_Fallback180').eq(1);
-    const validData  = s2Obs.or(lstObs).rename('DataObserved45Mask');
+    // `validData` = S2 HOẶC LST có dữ liệu trong window (giữ tương thích cũ).
+    // `fullyCurrent` = cả S2 VÀ LST đều có dữ liệu; là điều kiện chặt hơn
+    // dùng để đánh dấu pixel mà cả vegetation lẫn thermal đều tươi mới.
+    const s2Obs      = currentPredictors.select('S2_ObservedWindow').eq(1);
+    const lstObs     = currentPredictors.select('LST_ObservedWindow').eq(1);
+    const s2Fb       = currentPredictors.select('S2_FallbackWindow').eq(1);
+    const lstFb      = currentPredictors.select('LST_FallbackWindow').eq(1);
+    const validData  = s2Obs.or(lstObs).rename('DataObservedWindowMask');
+    const fullyCurrent = s2Obs.and(lstObs).rename('DataFullyCurrentMask');
     const fallbackOnly = validData.not().and(s2Fb.or(lstFb)).rename('DataFallbackOnlyMask');
     const dataSourceClass = ee.Image.constant(0)
         .where(fallbackOnly.eq(1), 1)
         .where(validData.eq(1), 2)
+        .where(fullyCurrent.eq(1), 3)
         .toByte().updateMask(forestMask).rename('DataSourceClass');
 
     // Model confidence 0-3.
-    const observation45Fraction = s2Obs.add(lstObs).divide(2).rename('Observation45Fraction');
+    const observationWindowFraction = s2Obs.add(lstObs).divide(2).rename('ObservationWindowFraction');
     const baseConfidence   = ee.Image.constant(rfEnabled ? 0.65 : 0.40);
     const validityMult     = ee.Image.constant(0.6)
-        .add(observation45Fraction.multiply(0.4)).rename('Observation45Multiplier');
+        .add(observationWindowFraction.multiply(0.4)).rename('ObservationWindowMultiplier');
     const modelConfidence  = baseConfidence.multiply(validityMult)
         .where(validData.eq(0), 0)
         .where(inputCoverage.eq(1).and(validData.eq(1)), 0.9)
@@ -659,6 +715,7 @@ function buildRiskProducts({
         modelConfidenceClass: modelConfidenceClass.clip(region),
         priorityFireWarning:  priorityFireWarning.clip(region),
         validData,
+        fullyCurrent,
     };
 }
 
@@ -724,8 +781,10 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
         );
 
         let datasetModelScore;
-        let rfClassifier = null;
-        let oobPct       = null;
+        let rfClassifier   = null;
+        let oobPct         = null;
+        let rfSkipReason   = null;   // populated khi RF bị skip do thiếu mẫu
+        let trainingCounts = null;   // histogram nhãn thực tế (0/1)
         if (enableRf) {
             const trainingFC = await log.run(
                 `Build RF training collection over ${cfg.TRAIN_MONTHS.length} months [LAZY]`,
@@ -734,36 +793,89 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
                     note: `MCD64A1 + FireCCI51 + FIRMS; ${cfg.TRAIN_SAMPLES_PER_CLASS}/class/month, scale=${cfg.TRAIN_SCALE_M}m tileScale=${cfg.TRAIN_HEAVY_TILE_SCALE}`,
                 },
             );
-            // Split train + apply để giữ tham chiếu classifier cho OOB (tránh
-            // train 2 lần). Vẫn LAZY: `trainRf` chỉ build graph.
-            rfClassifier = await log.run(
-                'Assemble RF classifier graph (train deferred) [LAZY]',
-                () => Promise.resolve(trainRf(trainingFC)),
-                { note: `${cfg.RF_TREES} trees, bag=${cfg.RF_BAG_FRACTION}` },
+            // Pre-train guard: bắt buộc có tối thiểu MIN_SAMPLES_PER_CLASS mẫu
+            // cho MỖI lớp (0=no-fire, 1=fire). Nếu thiếu, fallback về threshold-only
+            // để tránh RF learn trên tập lệch/mất một lớp (arrayFlatten 2 prob sai).
+            const validationAttempt = await log.run(
+                'TRY GETINFO training-sample histogram (degrades on timeout/quota)',
+                async () => {
+                    try {
+                        return {
+                            validation: await validateTrainingCounts(trainingFC),
+                            error: null,
+                        };
+                    } catch (error) {
+                        return { validation: null, error };
+                    }
+                },
+                {
+                    note: `min=${cfg.MIN_SAMPLES_PER_CLASS}/class timeout=${cfg.RF_GUARD_TIMEOUT_MS}ms`,
+                },
             );
-            datasetModelScore = await log.run(
-                'Classify RF probability (apply pre-trained classifier) [LAZY — deferred until evaluate()]',
-                () => Promise.resolve(applyRfClassifier(currentPredictors, rfClassifier)),
-            );
-            // OOB accuracy: `.explain()` trả outOfBagErrorEstimate. getInfo()
-            // force RF training materialize trên EE server, thường 30-90s. Chạy
-            // trước khi evaluate() các reduceRegion để leverage cache RF.
-            if (computeOob) {
-                oobPct = await log.run(
-                    'GETINFO OOB accuracy (forces sampling + RF training on EE)',
-                    async () => {
-                        const diagnostics = ee.Dictionary(rfClassifier.explain())
-                            .select(['outOfBagErrorEstimate']);
-                        const info = await eeGetInfo(diagnostics, cfg.OOB_TIMEOUT_MS);
-                        const oobError = Number(info?.outOfBagErrorEstimate);
-                        if (!Number.isFinite(oobError)) {
-                            throw new Error('GEE classifier diagnostics did not return outOfBagErrorEstimate');
-                        }
-                        return Math.max(0, Math.min(100, (1 - oobError) * 100));
-                    },
-                    { note: `async getInfo(callback), timeout=${cfg.OOB_TIMEOUT_MS}ms` },
+            const validation = validationAttempt.validation;
+            if (validationAttempt.error) {
+                // Histogram chỉ là quality guard. GEE quota/timeout không được
+                // làm mất toàn bộ bản tin trong ngày; degraded mode vẫn dùng
+                // đầy đủ P Nesterov + vegetation + terrain + weather.
+                const validationErr = validationAttempt.error;
+                rfSkipReason = `Training validation unavailable: ${validationErr.message}`;
+                log.mark('⚠ RF skipped', `${rfSkipReason}; continue threshold-only`);
+                datasetModelScore = await log.run(
+                    'DEGRADED FALLBACK — DatasetModelScore = 0.85 × ThresholdScore [LAZY]',
+                    () => Promise.resolve(fixedThresholdScore.multiply(0.85).rename('DatasetModelScore')),
                 );
-                log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
+            }
+
+            if (validation) {
+                trainingCounts = validation.counts;
+                log.mark('Training sample counts',
+                    `no_fire=${validation.counts['0'] || 0} fire=${validation.counts['1'] || 0}`);
+
+                if (!validation.ok) {
+                    rfSkipReason = `Insufficient samples: ${validation.missing.map((m) => `class=${m.class} n=${m.count}`).join('; ')} < ${cfg.MIN_SAMPLES_PER_CLASS}`;
+                    log.mark('⚠ RF skipped', rfSkipReason);
+                    datasetModelScore = await log.run(
+                        'FALLBACK — DatasetModelScore = 0.85 × ThresholdScore (RF skipped) [LAZY]',
+                        () => Promise.resolve(fixedThresholdScore.multiply(0.85).rename('DatasetModelScore')),
+                    );
+                    // Không train, không explain OOB.
+                } else {
+                    // Split train + apply để giữ tham chiếu classifier cho OOB
+                    // (tránh train 2 lần). Vẫn LAZY: trainRf chỉ build graph.
+                    rfClassifier = await log.run(
+                        'Assemble RF classifier graph (train deferred) [LAZY]',
+                        () => Promise.resolve(trainRf(trainingFC)),
+                        { note: `${cfg.RF_TREES} trees, bag=${cfg.RF_BAG_FRACTION}` },
+                    );
+                    datasetModelScore = await log.run(
+                        'Classify RF probability (apply pre-trained classifier) [LAZY — deferred until evaluate()]',
+                        () => Promise.resolve(applyRfClassifier(currentPredictors, rfClassifier)),
+                    );
+                    // OOB là diagnostic tùy chọn; nếu getInfo lỗi thì giữ kết
+                    // quả RF và chỉ bỏ metric accuracy.
+                    if (computeOob) {
+                        try {
+                            oobPct = await log.run(
+                                'GETINFO OOB accuracy (forces sampling + RF training on EE)',
+                                async () => {
+                                    const diagnostics = ee.Dictionary(rfClassifier.explain())
+                                        .select(['outOfBagErrorEstimate']);
+                                    const info = await eeGetInfo(diagnostics, cfg.OOB_TIMEOUT_MS);
+                                    const oobError = Number(info?.outOfBagErrorEstimate);
+                                    if (!Number.isFinite(oobError)) {
+                                        throw new Error('GEE classifier diagnostics did not return outOfBagErrorEstimate');
+                                    }
+                                    return Math.max(0, Math.min(100, (1 - oobError) * 100));
+                                },
+                                { note: `async getInfo(callback), timeout=${cfg.OOB_TIMEOUT_MS}ms` },
+                            );
+                            log.mark('OOB accuracy', `${oobPct != null ? oobPct.toFixed(2) : 'null'}%`);
+                        } catch (oobErr) {
+                            oobPct = null;
+                            log.mark('⚠ OOB skipped', oobErr.message);
+                        }
+                    }
+                }
             }
         } else {
             datasetModelScore = await log.run(
@@ -804,7 +916,7 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
                 datasetModelScore,
                 inputImages,
                 firmsInfluence,
-                rfEnabled: enableRf,
+                rfEnabled: enableRf && !rfSkipReason,
                 region,
             })),
         );
@@ -825,11 +937,39 @@ function runFireRiskAnalysis(region, analysisDate, opts = {}) {
             // Final products
             ...risk,
             // Metadata for callers
-            rfEnabled:        enableRf,
-            rfClassifier,             // ee.Classifier (null nếu enableRf=false)
+            rfEnabled:        enableRf && !rfSkipReason,
+            rfClassifier,             // ee.Classifier (null nếu enableRf=false hoặc rfSkipReason)
             oobPct,                   // number 0-100 (null nếu !computeOob hoặc !enableRf)
+            rfSkipReason,             // string|null — lý do RF không train (thiếu mẫu, v.v.)
+            trainingCounts,           // { '0': N, '1': N } | null — histogram nhãn training
             inputFireAssetId: inputFireAssetId || null,
             fuelSource:       fuelVal.source,
+            // Metadata mô tả model — dùng cho snapshot / API disclaimer.
+            modelMeta: {
+                pipelineVersion:      'v8.3-resilient-2026-07-27',
+                rfRequested:           enableRf,
+                rfEffective:           enableRf && !rfSkipReason,
+                degradedMode:          Boolean(rfSkipReason),
+                predictionHorizonDays: 30,
+                featureWindowDays:    cfg.FEATURE_WINDOW_DAYS,
+                trainMonths:          cfg.TRAIN_MONTHS.length,
+                nesterovPBreaks:      cfg.NESTEROV_P_BREAKS,
+                riskScoreBreaks:      cfg.RISK_SCORE_BREAKS,
+                minSamplesPerClass:   cfg.MIN_SAMPLES_PER_CLASS,
+                effectiveResolution: {
+                    outputScaleM:          cfg.EXPORT_SCALE_M,
+                    trainScaleM:           cfg.TRAIN_SCALE_M,
+                    vegetationNativeM:     20,     // Sentinel-2 B8/B11 native
+                    thermalNativeM:        1000,   // MODIS LST_Day_1km
+                    weatherNativeKm:       9,      // ERA5-Land ~0.1°
+                    fuelNativeM:           500,    // MODIS MCD12Q1 / local asset
+                },
+                semantics: {
+                    riskLevel:        'Cấp nguy cơ mô hình 1-5. KHÔNG phải cấp cảnh báo cháy chính thức theo QĐ 25/2022/QĐ-UBND.',
+                    modelConfidence:  'Heuristic độ tin cậy 0-1 dựa vào độ tươi dữ liệu S2/LST và input coverage. KHÔNG phải khoảng tin cậy thống kê.',
+                    nesterovProxyLevel: 'Cấp proxy tính từ P Nesterov với ERA5-Land Daily. KHÔNG phải cấp P chính thức từ số liệu khí tượng thủy văn.',
+                },
+            },
         };
     })();
 }
@@ -844,7 +984,7 @@ module.exports = {
     getSafeLstFeatures,
     buildNesterovP,
     nesterovPToScore,
-    nesterovPToOfficialLevel,
+    nesterovPToProxyLevel,
     getPredictorImage,
     getTrainingLabels,
     getFirmsHotspot,

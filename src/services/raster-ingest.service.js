@@ -27,6 +27,8 @@ const crypto = require('crypto');
 
 const db          = require('../configs/database');
 const cfg         = require('../configs/raster-ingest');
+const fireCfg     = require('../configs/fire-risk');
+const forestCfg   = require('../configs/forest-classification');
 const rasterRepo  = require('../repositories/raster-ingest.repository');
 const layerRepo   = require('../repositories/map-layer.repository');
 const minio       = require('./minio.service');
@@ -183,13 +185,28 @@ async function _cleanup(files) {
 async function _fail(job, err) {
     const errMsg = `${err.code || err.name || 'ERROR'}: ${err.message}`;
     const is429 = /HTTP 429|UPSTREAM_4XX.*429|rate.?limit/i.test(errMsg);
-    const isNonRetryable4xx = err.code === 'UPSTREAM_4XX' && !is429;
+    // HTTP 401 = liên kết tải tạm đã hết hạn (session GEE đổi sau restart PM2,
+    // hoặc TTL token qua đi trước khi worker kịp claim). Đặt riêng status
+    // 'url_expired' để job URL-refresh (cron */5) tái sinh liên kết mới thay
+    // vì mark 'failed' vĩnh viễn.
+    const isUrlExpired = err.code === 'UPSTREAM_4XX'
+        && /HTTP 401|UNAUTHENTICATED|Invalid token/i.test(errMsg);
+    const isNonRetryable4xx = err.code === 'UPSTREAM_4XX' && !is429 && !isUrlExpired;
     const canRetry =
         job.retry_count < cfg.MAX_RETRIES
         && !(err instanceof Api400Error)
         && err.code !== 'FILE_TOO_LARGE'
         && err.code !== 'NO_TIF_IN_ZIP'
         && !isNonRetryable4xx;
+
+    if (isUrlExpired) {
+        await rasterRepo.updateStatus(job.id, {
+            status:   'url_expired',
+            errorLog: errMsg,
+        });
+        console.warn(`[RASTER-INGEST] job=${job.id} URL_EXPIRED layer=${job.layer_code} — chờ job refresh sinh liên kết mới`);
+        return;
+    }
 
     if (canRetry) {
         // Detect HTTP 429 (rate limit) từ error message hoặc code. GEE
@@ -343,6 +360,7 @@ async function runJob(job) {
             await _backLinkResource(params.linkedResource, {
                 geoserverLayer, geoserverStore: storeName,
                 minioBucket: cfg.MINIO_BUCKET, minioKey: objectKey,
+                rasterIngestJobId: job.id,
             });
         } catch (err) {
             console.warn(`[RASTER-INGEST] backlink FAILED job=${job.id}: ${err.message}`);
@@ -381,7 +399,10 @@ function _sha256File(filePath) {
 // Back-link: cập nhật `geoserver_layer` + `minio_key` cho snapshot của module
 // gốc (fire_risk / forest / satellite). Support qua allow-list để tránh SQL
 // injection và giới hạn scope.
-async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minioBucket, minioKey }) {
+async function _backLinkResource(
+    linked,
+    { geoserverLayer, geoserverStore, minioBucket, minioKey, rasterIngestJobId },
+) {
     if (!linked?.type || !linked?.id) return;
     const idNum = Number(linked.id);
     if (!Number.isFinite(idNum)) return;
@@ -402,21 +423,137 @@ async function _backLinkResource(linked, { geoserverLayer, geoserverStore, minio
             cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'status'],
             values: [geoserverLayer, geoserverStore, `${minioBucket}/${minioKey}`, 'published'],
         },
+        // Migration 040: per-district export tables. `id` trong linkedResource
+        // là ID của row district_exports (không phải snapshot). FE dựa vào
+        // geoserver_layer/minio_key ở dòng này để hiển thị nút "Đã có bản đồ"
+        // cho từng huyện.
+        fire_risk_district: {
+            table:  'fire.fire_risk_district_exports',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'raster_ingest_job_id'],
+            values: [
+                geoserverLayer, geoserverStore,
+                `${minioBucket}/${minioKey}`, rasterIngestJobId,
+            ],
+        },
+        forest_district: {
+            table:  'forest.forest_district_exports',
+            cols:   ['geoserver_layer', 'geoserver_store', 'minio_key', 'raster_ingest_job_id'],
+            values: [
+                geoserverLayer, geoserverStore,
+                `${minioBucket}/${minioKey}`, rasterIngestJobId,
+            ],
+        },
     };
     const target = targets[linked.type];
     if (!target) {
         console.warn(`[RASTER-INGEST] unknown linkedResource.type=${linked.type} — skip back-link`);
         return;
     }
-    const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
-    await db.query(
-        `UPDATE ${target.table} SET ${setClauses} WHERE id = $${target.cols.length + 1}`,
-        [...target.values, idNum],
-    );
-    console.log(`[RASTER-INGEST] backlink ok ${linked.type}#${idNum} → ${geoserverLayer}`);
+    // District exports linkedResource dùng {type,id:snapshot_id,districtCode}.
+    // Query row theo (snapshot_id, district_code) thay vì id — vì id trong
+    // linkedResource của service pipeline là snapshot_id.
+    let sql, bindValues;
+    if (linked.type === 'fire_risk_district' || linked.type === 'forest_district') {
+        const dcode = String(linked.districtCode || '');
+        const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+        sql = `UPDATE ${target.table} SET ${setClauses}
+               WHERE snapshot_id = $${target.cols.length + 1}
+                 AND district_code = $${target.cols.length + 2}`;
+        bindValues = [...target.values, idNum, dcode];
+    } else {
+        const setClauses = target.cols.map((c, i) => `${c} = $${i + 1}`).join(', ');
+        sql = `UPDATE ${target.table} SET ${setClauses}
+               WHERE id = $${target.cols.length + 1}`;
+        bindValues = [...target.values, idNum];
+    }
+    const result = await db.query(sql, bindValues);
+    if (result.rowCount > 0 && linked.type === 'fire_risk_district') {
+        const { rows } = await db.query(
+            `UPDATE fire.fire_risk_snapshots s
+             SET status = 'published',
+                 published_at = COALESCE(s.published_at, NOW()),
+                 updated_at = NOW()
+             WHERE s.id = $1
+               AND s.status = 'completed'
+               AND (
+                   SELECT COUNT(*)::int
+                   FROM fire.fire_risk_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND (
+                   SELECT COUNT(DISTINCT NULLIF(BTRIM(d.district_code), ''))::int
+                   FROM fire.fire_risk_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM fire.fire_risk_district_exports d
+                   WHERE d.snapshot_id = s.id
+                     AND (
+                         NULLIF(BTRIM(d.geoserver_layer), '') IS NULL
+                         OR NULLIF(BTRIM(d.minio_key), '') IS NULL
+                     )
+               )
+             RETURNING s.id`,
+            [idNum, fireCfg.EXPECTED_DISTRICT_COUNT],
+        );
+        if (rows[0]) {
+            console.log(
+                `[RASTER-INGEST] fire snapshot#${idNum} PUBLISHED ` +
+                `after ${fireCfg.EXPECTED_DISTRICT_COUNT}/` +
+                `${fireCfg.EXPECTED_DISTRICT_COUNT} district layers became stable`,
+            );
+        }
+    }
+    if (result.rowCount > 0 && linked.type === 'forest_district') {
+        const { rows } = await db.query(
+            `UPDATE forest.forest_snapshots s
+             SET status = 'published',
+                 published_at = COALESCE(s.published_at, NOW()),
+                 updated_at = NOW()
+             WHERE s.id = $1
+               AND s.status = 'completed'
+               AND (
+                   SELECT COUNT(*)::int
+                   FROM forest.forest_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND (
+                   SELECT COUNT(DISTINCT NULLIF(BTRIM(d.district_code), ''))::int
+                   FROM forest.forest_district_exports d
+                   WHERE d.snapshot_id = s.id
+               ) = $2
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM forest.forest_district_exports d
+                   WHERE d.snapshot_id = s.id
+                     AND (
+                         NULLIF(BTRIM(d.geoserver_layer), '') IS NULL
+                         OR NULLIF(BTRIM(d.minio_key), '') IS NULL
+                     )
+               )
+             RETURNING s.id`,
+            [idNum, forestCfg.EXPECTED_DISTRICT_COUNT],
+        );
+        if (rows[0]) {
+            console.log(
+                `[RASTER-INGEST] forest snapshot#${idNum} PUBLISHED ` +
+                `after ${forestCfg.EXPECTED_DISTRICT_COUNT}/` +
+                `${forestCfg.EXPECTED_DISTRICT_COUNT} district layers became stable`,
+            );
+        }
+    }
+    if (result.rowCount === 0) {
+        console.warn(`[RASTER-INGEST] backlink ${linked.type}#${idNum}${linked.districtCode ? '/' + linked.districtCode : ''} → 0 rows updated`);
+    } else {
+        console.log(`[RASTER-INGEST] backlink ok ${linked.type}#${idNum}${linked.districtCode ? '/' + linked.districtCode : ''} → ${geoserverLayer}`);
+    }
 }
 
 async function _upsertRasterLayer({ job, params, storeName, geoserverLayer, objectKey, sha }) {
+    // PostgreSQL identifiers cannot contain the hyphens allowed in GeoServer
+    // store names. Keep the GeoServer name, but normalize the registry field.
+    const registryTableName = storeName.replace(/[^a-zA-Z0-9_]/g, '_');
     const client = await db.pool.connect();
     try {
         await client.query('BEGIN');
@@ -425,7 +562,7 @@ async function _upsertRasterLayer({ job, params, storeName, geoserverLayer, obje
             name_vi:         params.nameVi || job.layer_code,
             name_en:         params.nameEn || null,
             schema_name:     'gis',
-            table_name:      storeName,             // NOT NULL — dùng lại storeName
+            table_name:      registryTableName,
             // geometry_column NOT NULL + CHECK regex trong migration 010; raster
             // không dùng nhưng vẫn phải hợp lệ → 'geom' placeholder.
             geometry_column: 'geom',

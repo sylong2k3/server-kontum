@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 // ── GEE pipeline windows (mirrors GEE script v8.1 CONFIG) ────────────────────
 const FEATURE_WINDOW_DAYS      = parseInt(process.env.FIRE_RISK_FEATURE_WINDOW_DAYS, 10) || 30;
@@ -54,6 +54,11 @@ const TRAIN_USE_FALLBACK          = process.env.FIRE_RISK_TRAIN_USE_FALLBACK ===
 // Nesterov P daily-reset rain threshold (mm). Days above this reset P to 0.
 const RAIN_RESET_MM               = parseFloat(process.env.FIRE_RISK_RAIN_RESET_MM) || 5;
 
+// Minimum stratified samples per class required before RF training proceeds.
+// Guards against degenerate one-class training when a month yields few
+// positive or negative samples. Checked in service.js after evaluate().
+const MIN_SAMPLES_PER_CLASS       = parseInt(process.env.FIRE_RISK_MIN_SAMPLES_PER_CLASS, 10) || 20;
+
 // MCD64A1 max acceptable Uncertainty (days) for burned-label training samples.
 const MCD_MAX_UNCERTAINTY_DAY     = parseInt(process.env.FIRE_RISK_MCD_MAX_UNCERTAINTY, 10) || 30;
 const FIRECCI_MIN_CONFIDENCE      = parseInt(process.env.FIRE_RISK_FIRECCI_MIN_CONFIDENCE, 10) || 50;
@@ -88,11 +93,21 @@ const ENABLE_RF                   = process.env.FIRE_RISK_ENABLE_RF !== 'false';
 // nên default OFF; bật để admin xem chất lượng model qua snapshot metadata.
 const COMPUTE_OOB                 = process.env.FIRE_RISK_COMPUTE_OOB === 'true';
 
+// Timeout riêng cho bước materialize histogram mẫu RF. Đây chỉ là quality
+// guard; nếu GEE chậm/quota thì pipeline phải fallback threshold-only thay vì
+// làm mất toàn bộ bản tin cảnh báo trong ngày.
+const RF_GUARD_TIMEOUT_MS         =
+    parseInt(process.env.FIRE_RISK_RF_GUARD_TIMEOUT_MS, 10) || 3 * 60 * 1000;
+
 // Timeout riêng cho OOB getInfo (ms). Mặc định 10 phút giống forest-classification.
 const OOB_TIMEOUT_MS              = parseInt(process.env.FIRE_RISK_OOB_TIMEOUT_MS, 10) || 10 * 60 * 1000;
 
 // GEE export settings.
-const EXPORT_SCALE_M              = parseInt(process.env.FIRE_RISK_EXPORT_SCALE_M, 10) || 250;
+// EXPORT_SCALE_M — mặc định 150m (fallback từ 100m sau khi huyện lớn hit
+// GEE HTTP 400 "User memory limit exceeded" khi raster-ingest download).
+// 150m giảm số pixel khoảng 2,25 lần so với 100m để giảm áp lực bộ nhớ.
+// Đồng bộ với forest classify FC_DOWNLOAD_SCALE_M.
+const EXPORT_SCALE_M              = parseInt(process.env.FIRE_RISK_EXPORT_SCALE_M, 10) || 150;
 const EXPORT_FOLDER               = process.env.FIRE_RISK_EXPORT_FOLDER || 'GEE_FireWarning';
 
 // ── GCS (Google Cloud Storage) for raster export ─────────────────────────────
@@ -125,6 +140,15 @@ const GEE_POLL_MAX_ATTEMPTS       = parseInt(process.env.FIRE_RISK_GEE_POLL_MAX,
 
 // MinIO bucket cho raster cháy rừng.
 const MINIO_BUCKET                = process.env.FIRE_RISK_MINIO_BUCKET || 'fire-risk-rasters';
+const EXPECTED_DISTRICT_COUNT     = Math.max(
+    1,
+    parseInt(process.env.FIRE_RISK_EXPECTED_DISTRICT_COUNT, 10) || 9,
+);
+const GEE_TEMPORARY_URL_MAX_AGE_MS = Math.max(
+    60 * 1000,
+    parseInt(process.env.FIRE_RISK_GEE_TEMPORARY_URL_MAX_AGE_MS, 10)
+        || 4 * 60 * 60 * 1000,
+);
 
 // Kon Tum bounding box [minLng, minLat, maxLng, maxLat].
 const KONTUM_BBOX                 = [107.0, 13.8, 108.6, 15.5];
@@ -172,6 +196,7 @@ module.exports = {
     TRAIN_USE_FALLBACK,
     RAIN_RESET_MM,
     MCD_MAX_UNCERTAINTY_DAY,
+    MIN_SAMPLES_PER_CLASS,
     FIRECCI_MIN_CONFIDENCE,
     FIRMS_MIN_CONFIDENCE,
     FIRMS_MIN_T21_K,
@@ -183,6 +208,7 @@ module.exports = {
     NEGATIVE_ELIGIBLE_MODE,
     ENABLE_RF,
     COMPUTE_OOB,
+    RF_GUARD_TIMEOUT_MS,
     OOB_TIMEOUT_MS,
     EXPORT_SCALE_M,
     EXPORT_FOLDER,
@@ -195,6 +221,8 @@ module.exports = {
     GEE_POLL_INTERVAL_MS,
     GEE_POLL_MAX_ATTEMPTS,
     MINIO_BUCKET,
+    EXPECTED_DISTRICT_COUNT,
+    GEE_TEMPORARY_URL_MAX_AGE_MS,
     KONTUM_BBOX,
     LST_SCALE_FACTOR,
     LST_KELVIN_OFFSET,

@@ -25,10 +25,12 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: 3005,
+        TRUST_PROXY: 1,
       },
       env_production: {
         NODE_ENV: 'production',
         PORT: 3005,
+        TRUST_PROXY: 1,
       },
     },
   ],
