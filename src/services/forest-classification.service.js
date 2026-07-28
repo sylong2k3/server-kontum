@@ -448,7 +448,7 @@ async function executeAnalysis(year, month, {
                     // + JRC water override + threshold + visualize + clip). Lần
                     // gọi getDownloadURL đầu tiên phải chờ EE materialize toàn bộ
                     // pipeline; các lần sau nhanh hơn vì classifier đã cache.
-                    // 60s cũ không đủ ngay cả cho huyện nhỏ nhất — cả 9 huyện
+                    // 60s cũ không đủ ngay cả cho huyện nhỏ nhất — cả 10 huyện
                     // timeout đồng loạt (xem log 2026-07-27 01:12+). Env override
                     // FC_DOWNLOAD_TIMEOUT_MS nếu cần tinh chỉnh sau.
                     const DL_TIMEOUT_MS = Number(process.env.FC_DOWNLOAD_TIMEOUT_MS) || 5 * 60_000;

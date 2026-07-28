@@ -168,12 +168,13 @@ const EXPORT_SCALE_M = parseInt(process.env.FC_EXPORT_SCALE_M, 10) || 150;
 // giảm áp lực bộ nhớ. Env FC_DOWNLOAD_SCALE_M override nếu cần tăng thêm
 // chi tiết cho testing.
 const DOWNLOAD_SCALE_M = parseInt(process.env.FC_DOWNLOAD_SCALE_M, 10) || 150;
-// Kon Tum currently has 9 district-level raster chunks. A snapshot is exposed
+// RanhGioiHuyen_Polygon.geojson contains 10 district-level raster chunks.
+// A snapshot is exposed
 // as a stable published period only after every expected chunk has both its
 // MinIO archive and GeoServer layer.
 const EXPECTED_DISTRICT_COUNT = Math.max(
     1,
-    parseInt(process.env.FC_EXPECTED_DISTRICT_COUNT, 10) || 9,
+    parseInt(process.env.FC_EXPECTED_DISTRICT_COUNT, 10) || 10,
 );
 // Earth Engine getDownloadURL is intentionally treated as short lived. This
 // mirrors the admin UI's conservative four-hour window so a manual publish
