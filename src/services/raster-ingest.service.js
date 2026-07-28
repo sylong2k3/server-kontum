@@ -551,6 +551,9 @@ async function _backLinkResource(
 }
 
 async function _upsertRasterLayer({ job, params, storeName, geoserverLayer, objectKey, sha }) {
+    // PostgreSQL identifiers cannot contain the hyphens allowed in GeoServer
+    // store names. Keep the GeoServer name, but normalize the registry field.
+    const registryTableName = storeName.replace(/[^a-zA-Z0-9_]/g, '_');
     const client = await db.pool.connect();
     try {
         await client.query('BEGIN');
@@ -559,7 +562,7 @@ async function _upsertRasterLayer({ job, params, storeName, geoserverLayer, obje
             name_vi:         params.nameVi || job.layer_code,
             name_en:         params.nameEn || null,
             schema_name:     'gis',
-            table_name:      storeName,             // NOT NULL — dùng lại storeName
+            table_name:      registryTableName,
             // geometry_column NOT NULL + CHECK regex trong migration 010; raster
             // không dùng nhưng vẫn phải hợp lệ → 'geom' placeholder.
             geometry_column: 'geom',

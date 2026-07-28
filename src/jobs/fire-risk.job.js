@@ -340,7 +340,9 @@ const start = () => {
     // region cần tz khác.
     const cronOpts = { timezone: process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh' };
 
-    analysisTask = cron.schedule(ANALYSIS_CRON, runDailyAnalysis, cronOpts);
+    // node-cron v4 passes TaskContext to callbacks. Wrapping prevents that
+    // object from being mistaken for an analysis date ("[object Object]").
+    analysisTask = cron.schedule(ANALYSIS_CRON, () => runDailyAnalysis(), cronOpts);
     pollTask     = cron.schedule(POLL_CRON,     runPollExports,   cronOpts);
 
     const staleRunMaxAgeMs = Number(process.env.FIRE_RISK_ACTIVE_RUN_MAX_AGE_MS)
