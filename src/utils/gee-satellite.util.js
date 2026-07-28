@@ -200,9 +200,15 @@ function _tryLoadDistrictsFile(filePath) {
             continue;
         }
         const p = f.properties || {};
-        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2 || p.NAME_EN || null;
+        // File data/RanhGioiHuyen_Polygon.geojson (nguồn dùng cho Kon Tum) dùng
+        // key tiếng Việt `ten_huyen`/`ma_huyen`; GADM chuẩn quốc tế dùng
+        // `ADM2_NAME`/`ADM2_CODE`. Chấp nhận cả hai để loader không rơi vào
+        // fallback "Huyện <n>" khi file thay format.
+        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2
+            || p.NAME_EN || p.ten_huyen || p.ten || null;
         const name    = rawName || `Huyện ${addedIdx + 1}`;
-        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
+        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID
+            ?? p.ma_huyen ?? null;
         const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${addedIdx + 1}`;
         const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
         if (seenCodes.has(dedupeKey)) { skippedDup += 1; continue; }
@@ -290,9 +296,13 @@ function getKonTumDistrictsGeoJson() {
         const g = f?.geometry;
         if (!g || !Array.isArray(g.coordinates) || g.coordinates.length === 0) continue;
         const p = f.properties || {};
-        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2 || p.NAME_EN || null;
+        // Xem chú thích ở getKonTumDistricts() — cần chấp nhận cả key GADM
+        // (ADM2_NAME/CODE) lẫn key tiếng Việt (ten_huyen/ma_huyen).
+        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2
+            || p.NAME_EN || p.ten_huyen || p.ten || null;
         const name    = rawName || `Huyện ${idx + 1}`;
-        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
+        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID
+            ?? p.ma_huyen ?? null;
         const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${idx + 1}`;
         const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
         if (seen.has(dedupeKey)) continue;
