@@ -143,10 +143,7 @@ const runDailyAnalysis = async (analysisDate) => {
     console.log(`[FIRE RISK] Daily analysis START date=${today} gcs=${cfg.isGcsConfigured() ? 'on' : 'off'}`);
     try {
         const snap = await svc.runAnalysis(today);
-        await repo.updateStatus(snap.id, snap.status, {
-            next_retry_at: null,
-            last_retry_error: null,
-        });
+        await repo.clearRetryState(snap.id);
         const riskDist = snap.province_summary?.riskLevelDist || {};
         console.log(
             `[FIRE RISK] Daily analysis DONE date=${today} status=${snap.status} ` +

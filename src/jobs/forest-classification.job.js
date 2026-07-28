@@ -132,10 +132,7 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
     );
     try {
         const snap = await svc.runAnalysis(year, month);
-        await repo.updateStatus(snap.id, snap.status, {
-            next_retry_at: null,
-            last_retry_error: null,
-        });
+        await repo.clearRetryState(snap.id);
         const summary = snap.province_summary || {};
         let forestHa = 0;
         for (const id of cfg.FOREST_CLASS_IDS) {

@@ -214,6 +214,49 @@ const failStaleActiveRuns = async (maxAgeMs = 45 * 60 * 1000) => {
     return rows;
 };
 
+/**
+ * Chỉ được gọi sau khi runtime lấy được singleton advisory lock. Khi đó không
+ * còn worker sống nào có thể sở hữu các snapshot pending/computing này.
+ */
+const failInterruptedActiveRuns = async () => {
+    const { rows } = await db.query(
+        `UPDATE forest.forest_snapshots
+         SET status = 'failed',
+             error_message = COALESCE(
+                 NULLIF(error_message, ''),
+                 'Tác vụ bị gián đoạn do runtime dừng hoặc khởi động lại.'
+             ),
+             next_retry_at = NOW(),
+             last_retry_error = 'runtime_interrupted',
+             updated_at = NOW()
+         WHERE status IN ('pending', 'computing')
+         RETURNING *`,
+    );
+    return rows;
+};
+
+const failActiveRunsForPeriod = async (year, month, errorMessage) => {
+    const { rows } = await db.query(
+        `UPDATE forest.forest_snapshots
+         SET status = 'failed',
+             error_message = $3,
+             next_retry_at = NOW(),
+             last_retry_error = $3,
+             updated_at = NOW()
+         WHERE year = $1
+           AND month = $2
+           AND status IN ('pending', 'computing')
+         RETURNING *`,
+        [
+            year,
+            month,
+            String(errorMessage || 'GEE worker process terminated unexpectedly.')
+                .slice(0, 4000),
+        ],
+    );
+    return rows;
+};
+
 const getById = async (id) => {
     const { rows } = await db.query(
         'SELECT * FROM forest.forest_snapshots WHERE id = $1',
@@ -573,6 +616,44 @@ const updateDistrictExport = async (id, patch) => {
     return rows[0] || null;
 };
 
+const clearRetryState = async (id) => {
+    const { rows } = await db.query(
+        `UPDATE forest.forest_snapshots
+         SET next_retry_at = NULL,
+             last_retry_error = NULL,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id],
+    );
+    return rows[0] || null;
+};
+
+const updateDistrictExportSummary = async (snapshotId, summary) => {
+    const { rows } = await db.query(
+        `UPDATE forest.forest_snapshots
+         SET district_export_summary = $2,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [snapshotId, summary ? JSON.stringify(summary) : null],
+    );
+    return rows[0] || null;
+};
+
+const failInterruptedDistrictExports = async () => {
+    const { rows } = await db.query(
+        `UPDATE forest.forest_district_exports
+         SET status = 'failed',
+             error_message = 'District raster worker bị gián đoạn do runtime khởi động lại.',
+             completed_at = NOW(),
+             updated_at = NOW()
+         WHERE status IN ('pending', 'computing')
+         RETURNING snapshot_id`,
+    );
+    return [...new Set(rows.map((row) => Number(row.snapshot_id)).filter(Boolean))];
+};
+
 const listDistrictExports = async (snapshotId) => {
     const { rows } = await db.query(
         `SELECT d.*,
@@ -671,10 +752,13 @@ module.exports = {
     upsertSnapshot,
     updateStatus,
     scheduleRetry,
+    clearRetryState,
     countFailedAttempts,
     hasCompletedAttempt,
     countPriorCompletedAttempts,
     failStaleActiveRuns,
+    failInterruptedActiveRuns,
+    failActiveRunsForPeriod,
     getById,
     getLatestCompleted,
     getLatest,
@@ -688,6 +772,8 @@ module.exports = {
     // District exports (migration 040)
     insertDistrictExports,
     updateDistrictExport,
+    updateDistrictExportSummary,
+    failInterruptedDistrictExports,
     listDistrictExports,
     reconcileDistrictExportArtifacts,
     markPublishedIfDistrictsReady,

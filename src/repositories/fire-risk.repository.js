@@ -207,6 +207,48 @@ const failStaleActiveRuns = async (maxAgeMs = 45 * 60 * 1000) => {
 };
 
 /**
+ * Runtime đang giữ PostgreSQL advisory lock vừa khởi động, vì vậy mọi snapshot
+ * còn pending/computing đều thuộc process cũ đã dừng và không thể tự hoàn tất.
+ * Đóng ngay để recovery tạo attempt mới, không chờ stale timeout 45 phút.
+ */
+const failInterruptedActiveRuns = async () => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_snapshots
+         SET status = 'failed',
+             error_message = COALESCE(
+                 NULLIF(error_message, ''),
+                 'Tác vụ bị gián đoạn do runtime dừng hoặc khởi động lại.'
+             ),
+             next_retry_at = NOW(),
+             last_retry_error = 'runtime_interrupted',
+             updated_at = NOW()
+         WHERE status IN ('pending', 'computing')
+         RETURNING *`,
+    );
+    return rows;
+};
+
+const failActiveRunsForDate = async (analysisDate, errorMessage) => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_snapshots
+         SET status = 'failed',
+             error_message = $2,
+             next_retry_at = NOW(),
+             last_retry_error = $2,
+             updated_at = NOW()
+         WHERE analysis_date = $1
+           AND status IN ('pending', 'computing')
+         RETURNING *`,
+        [
+            analysisDate,
+            String(errorMessage || 'GEE worker process terminated unexpectedly.')
+                .slice(0, 4000),
+        ],
+    );
+    return rows;
+};
+
+/**
  * Snapshot mới nhất trạng thái 'completed' hoặc 'published'.
  */
 const getLatestCompleted = async () => {
@@ -537,6 +579,44 @@ const updateDistrictExport = async (id, patch) => {
     return rows[0] || null;
 };
 
+const clearRetryState = async (id) => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_snapshots
+         SET next_retry_at = NULL,
+             last_retry_error = NULL,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id],
+    );
+    return rows[0] || null;
+};
+
+const updateDistrictExportSummary = async (snapshotId, summary) => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_snapshots
+         SET district_export_summary = $2,
+             updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [snapshotId, summary ? JSON.stringify(summary) : null],
+    );
+    return rows[0] || null;
+};
+
+const failInterruptedDistrictExports = async () => {
+    const { rows } = await db.query(
+        `UPDATE fire.fire_risk_district_exports
+         SET status = 'failed',
+             error_message = 'District raster worker bị gián đoạn do runtime khởi động lại.',
+             completed_at = NOW(),
+             updated_at = NOW()
+         WHERE status IN ('pending', 'computing')
+         RETURNING snapshot_id`,
+    );
+    return [...new Set(rows.map((row) => Number(row.snapshot_id)).filter(Boolean))];
+};
+
 const listDistrictExports = async (snapshotId) => {
     const { rows } = await db.query(
         `SELECT d.*,
@@ -635,10 +715,13 @@ module.exports = {
     upsertSnapshot,
     updateStatus,
     scheduleRetry,
+    clearRetryState,
     countFailedAttempts,
     hasCompletedAttempt,
     countPriorCompletedAttempts,
     failStaleActiveRuns,
+    failInterruptedActiveRuns,
+    failActiveRunsForDate,
     getLatestCompleted,
     getLatest,
     getById,
@@ -650,6 +733,8 @@ module.exports = {
     // District exports (migration 040)
     insertDistrictExports,
     updateDistrictExport,
+    updateDistrictExportSummary,
+    failInterruptedDistrictExports,
     listDistrictExports,
     reconcileDistrictExportArtifacts,
     markPublishedIfDistrictsReady,

@@ -27,6 +27,9 @@ const path   = require('path');
 const cfg    = require('../configs/fire-risk');
 const { ee, initializeEarthEngine } = require('../configs/gge');
 const repo   = require('../repositories/fire-risk.repository');
+const geeQueue = require('../queues/gee-task.queue');
+const districtRasterWorker = require('../workers/districtRasterExport.worker');
+const geeAnalysisProcess = require('../workers/geeAnalysisProcess.worker');
 const {
     eeEval: eeEvaluate,
     getKonTumRegion,
@@ -440,8 +443,6 @@ async function executeAnalysis(analysisDate, {
     // để khi time-out xảy ra, ta biết chính xác bước nào bị nghẽn.
     const log = makeStageLogger('FIRE-RISK', { correlationId: analysisDate });
 
-    await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
-
     let snapshot = await log.run('Create snapshot (new attempt) → status=computing', () =>
         repo.createSnapshot({
             analysis_date: analysisDate,
@@ -475,6 +476,8 @@ async function executeAnalysis(analysisDate, {
     log.mark('Snapshot attempt', `id=${snapshot.id} attempt=${snapshot.attempt}`);
 
     try {
+        await log.run('Initialize Earth Engine session', () => initializeEarthEngine());
+
         // ─────────────────────────────────────────────────────────────────
         // Region tính toán = polygon tỉnh Kon Tum (RanhGioiTinh_Polygon.geojson,
         // WGS84 MultiPolygon 2 mảnh). Đọc + strip Z trong `getKonTumBoundaryGeometry()`.
@@ -623,161 +626,20 @@ async function executeAnalysis(analysisDate, {
             console.warn(`[FIRE-RISK] getEeMapId failed (non-fatal): ${err.message}`);
         }
 
-        // Download URL — chia PER HUYỆN thay vì 1 URL toàn tỉnh (migration 040).
-        // 150m giảm khoảng 56% số pixel so với 100m, qua đó giảm nguy cơ vượt
-        // giới hạn bộ nhớ khi GEE materialize graph cho huyện lớn. Chia theo
-        // huyện tiếp tục giới hạn geometry và thời gian của từng request.
-        // Diện tích toàn tỉnh = Σ area huyện (aggregate ở dashboard/query).
-        //
-        // Persist state per huyện vào fire.fire_risk_district_exports — mỗi
-        // row có riêng gee_download_url + area_stats. Nếu 1 huyện fail, các
-        // huyện khác vẫn completed, snapshot vẫn có thể publish.
-        let geeDownloadUrl      = null;      // Giữ NULL — không còn URL toàn tỉnh
-        let geeDownloadFilename = null;
-        const districtExportRows = [];
-        try {
-            const dateTag = analysisDate.replace(/-/g, '');
-            // Reuse geometry từ districtStats đã có (đã evaluate xong, chứa
-            // ADM2_CODE/ADM2_NAME + geometry). Không cần evaluate() lại.
-            const skeletons = districtStats.map((d) => ({
-                district_code: d.unitCode ? String(d.unitCode) : null,
-                district_name: d.name || null,
-                geometry:      d.geometry || null,
-            }));
-
-            // Chèn skeleton rows status=pending vào bảng district_exports.
-            const seeded = await log.run(
-                `Seed ${skeletons.length} district_exports (status=pending)`,
-                () => repo.insertDistrictExports(snapshot.id, skeletons, cfg.EXPORT_SCALE_M),
-            );
-
-            // Map district_code → row id để update patch sau.
-            const rowByCode = new Map();
-            for (const r of seeded) rowByCode.set(r.district_code, r);
-
-            let completed = 0, failed = 0, skipped = 0;
-            for (const d of districtStats) {
-                const code = d.unitCode ? String(d.unitCode) : null;
-                const row  = rowByCode.get(code);
-                if (!row) continue;
-                const t0 = Date.now();
-                await repo.updateDistrictExport(row.id, {
-                    status: 'computing', started_at: new Date(),
-                });
-
-                // Tính tổng area level 1-5 của huyện (dùng để aggregate lên tỉnh).
-                const levelDist  = d.riskLevelDist || {};
-                let districtHa = 0;
-                for (let l = 1; l <= 5; l++) districtHa += Number(levelDist[l]) || 0;
-
-                if (districtHa === 0 || !d.geometry) {
-                    await repo.updateDistrictExport(row.id, {
-                        status:        'skipped',
-                        area_stats:    d,
-                        total_area_ha: 0,
-                        duration_ms:   Date.now() - t0,
-                        completed_at:  new Date(),
-                        error_message: !d.geometry ? 'district geometry missing' : 'no pixels ≥ level 1',
-                    });
-                    skipped += 1;
-                    continue;
-                }
-
-                const fileBase = `fire_risk_${code || 'unknown'}_${dateTag}`;
-                try {
-                    const districtGeom = ee.Geometry(d.geometry);
-                    // Ảnh riskLevel đã clip theo geom huyện — dùng chung cho cả
-                    // getEeMapId (tile URL huyện) và getDownloadURL (GeoTIFF huyện).
-                    // Clip trước khi visualize → tile pyramid đóng khung đúng
-                    // ranh giới huyện, không tràn sang huyện khác.
-                    const riskForDistrict = riskLevel
-                        .updateMask(riskLevel.gt(0))
-                        .clip(districtGeom);
-
-                    // Per-district tile URL. Nếu getMapId fail cho huyện này,
-                    // vẫn tiếp tục sang getDownloadURL (overlay huyện đó rơi về
-                    // WMS composite sau khi ingest xong, hoặc tile toàn tỉnh cũ).
-                    let tileUrlPerDistrict = null;
-                    let mapIdPerDistrict   = null;
-                    try {
-                        const mapInfo = await getEeMapId(
-                            riskForDistrict, RISK_LEVEL_VIZ,
-                        );
-                        tileUrlPerDistrict = mapInfo?.tileUrl || null;
-                        mapIdPerDistrict   = mapInfo?.mapId   || null;
-                    } catch (mapErr) {
-                        console.warn(`[FIRE-RISK] getEeMapId district=${code} fail (non-fatal): ${mapErr.message}`);
-                    }
-
-                    // Timeout 2 phút/huyện — fire-risk graph nhẹ hơn forest classify
-                    // (không có RF 13-class training), 60s vẫn có thể đủ nhưng
-                    // GEE trong Restricted Mode hay bị 429/slow → nới lên để
-                    // tránh timeout khi quota bị siết. Env FIRE_RISK_DOWNLOAD_TIMEOUT_MS
-                    // override nếu cần.
-                    const DL_TIMEOUT_MS = Number(process.env.FIRE_RISK_DOWNLOAD_TIMEOUT_MS) || 120_000;
-                    const url = await new Promise((resolve, reject) => {
-                        const timer = setTimeout(
-                            () => reject(new Error(`getDownloadURL timeout huyện=${code} sau ${DL_TIMEOUT_MS}ms`)),
-                            DL_TIMEOUT_MS,
-                        );
-                        riskForDistrict
-                            .visualize(RISK_LEVEL_VIZ)
-                            .getDownloadURL(
-                                {
-                                    name:        fileBase,
-                                    scale:       cfg.EXPORT_SCALE_M || 150,
-                                    region:      districtGeom,
-                                    crs:         'EPSG:4326',
-                                    format:      'GEO_TIFF',
-                                    filePerBand: false,
-                                    maxPixels:   1e9,
-                                },
-                                (u, err) => {
-                                    clearTimeout(timer);
-                                    if (err) reject(new Error(String(err.message || err)));
-                                    else resolve(u);
-                                },
-                            );
-                    });
-                    await repo.updateDistrictExport(row.id, {
-                        status:                'completed',
-                        area_stats:            d,
-                        total_area_ha:         Math.round(districtHa * 100) / 100,
-                        gee_map_id:            mapIdPerDistrict,
-                        gee_tile_url:          tileUrlPerDistrict,
-                        gee_download_url:      url,
-                        gee_download_filename: `${fileBase}.tif`,
-                        gee_generated_at:      new Date(),
-                        duration_ms:           Date.now() - t0,
-                        completed_at:          new Date(),
-                    });
-                    districtExportRows.push({
-                        code,
-                        name: d.name,
-                        url,
-                        tileUrl: tileUrlPerDistrict,
-                        districtHa,
-                        exportId: row.id,
-                    });
-                    completed += 1;
-                } catch (dErr) {
-                    console.warn(`[FIRE-RISK] district=${code} download fail: ${dErr.message}`);
-                    await repo.updateDistrictExport(row.id, {
-                        status:        'failed',
-                        area_stats:    d,
-                        total_area_ha: Math.round(districtHa * 100) / 100,
-                        error_message: dErr.message,
-                        duration_ms:   Date.now() - t0,
-                        completed_at:  new Date(),
-                    });
-                    failed += 1;
-                }
-            }
-            log.mark('District downloads',
-                `completed=${completed} failed=${failed} skipped=${skipped} of ${skeletons.length}`);
-        } catch (err) {
-            console.warn(`[FIRE-RISK] district-chunked download setup failed (non-fatal): ${err.message}`);
-        }
+        // Chỉ seed trạng thái export tại đây. Việc materialize 10 raster huyện
+        // chạy nền qua districtRasterWorker sau khi snapshot đã completed.
+        const districtSkeletons = districtStats.map((d) => ({
+            district_code: d.unitCode ? String(d.unitCode) : null,
+            district_name: d.name || null,
+        }));
+        const seededDistrictExports = await log.run(
+            `Seed ${districtSkeletons.length} district_exports (status=pending)`,
+            () => repo.insertDistrictExports(
+                snapshot.id,
+                districtSkeletons,
+                cfg.EXPORT_SCALE_M,
+            ),
+        );
 
         // Nhét model_meta vào JSONB `province_summary` (piggyback) để không
         // cần thêm migration. Consumer đọc `provinceSummary._modelMeta`.
@@ -790,14 +652,23 @@ async function executeAnalysis(analysisDate, {
             },
         };
 
-        // Aggregate district_exports → 1 object summary lưu ở snapshot cho FE.
+        // Summary ban đầu phản ánh stats đã sẵn sàng nhưng raster huyện còn
+        // pending. Worker cập nhật completed/failed/skipped sau mỗi batch.
         const districtExportSummary = {
             scaleM:  cfg.EXPORT_SCALE_M,
-            total:   districtExportRows.length,
+            total:   districtSkeletons.length,
+            completed: 0,
+            failed:    0,
+            skipped:   0,
+            pending:   districtSkeletons.length,
             byLevel: provinceSummary.riskLevelDist,
             totalHa: Object.values(provinceSummary.riskLevelDist || {})
                 .reduce((s, v) => s + (Number(v) || 0), 0),
         };
+
+        const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);
+        await log.run(`Persist ${featureRows.length} district-level feature rows`,
+            () => repo.replaceFeatures(snapshot.id, featureRows));
 
         snapshot = await log.run('Update snapshot → status=completed', () =>
             repo.updateStatus(snapshot.id, 'completed', {
@@ -820,9 +691,26 @@ async function executeAnalysis(analysisDate, {
                 export_scale_m:    cfg.EXPORT_SCALE_M,
             }));
 
-        const featureRows = buildFeaturesFromDistrictStats(snapshot.id, districtStats);
-        await log.run(`Persist ${featureRows.length} district-level feature rows`,
-            () => repo.replaceFeatures(snapshot.id, featureRows));
+        // Không await: snapshot/API đã usable ngay khi stats + tile sẵn sàng.
+        // Worker vẫn dùng queue GEE chung nên không chạy đồng thời với analysis
+        // fire/forest khác.
+        districtRasterWorker.enqueue({
+            kind:       'fire-risk',
+            snapshotId: snapshot.id,
+            label:      `Fire risk district rasters ${analysisDate} snapshot=${snapshot.id}`,
+            run: () => runFireDistrictRasterExport({
+                snapshot,
+                analysisDate,
+                districtStats,
+                riskLevel,
+                seededDistrictExports,
+                provinceSummary,
+            }),
+        }).catch((error) => {
+            console.error(
+                `[FIRE-RISK] district raster worker snapshot=${snapshot.id} failed: ${error.message}`,
+            );
+        });
 
         if (submitExport) {
             const taskName = await log.run(
@@ -842,14 +730,6 @@ async function executeAnalysis(analysisDate, {
         }
 
         log.summary();
-
-        // ── Auto ingest → MinIO → GeoServer (persistent COG) ──────────────
-        // Sau migration 040: mỗi huyện có 1 URL riêng thay vì 1 URL tỉnh.
-        // Enqueue N ingest job (1/huyện) — thay vì 1 job như trước. Nếu job
-        // nào fail vẫn không kéo theo snapshot fail.
-        for (const dRow of districtExportRows) {
-            _safe(() => _autoIngestDistrict(snapshot, dRow, analysisDate));
-        }
 
         // ── Notification khi phân tích thành công ─────────────────────────
         // Gửi broadcast tới role admin + sở NN&MT + UBND tỉnh — CHỈ 1 LẦN
@@ -877,6 +757,197 @@ async function executeAnalysis(analysisDate, {
     }
 }
 
+async function runFireDistrictRasterExport({
+    snapshot,
+    analysisDate,
+    districtStats,
+    riskLevel,
+    seededDistrictExports,
+    provinceSummary,
+}) {
+    const dateTag = analysisDate.replace(/-/g, '');
+    const rowByCode = new Map();
+    for (const row of seededDistrictExports) {
+        rowByCode.set(String(row.district_code || ''), row);
+    }
+
+    const counters = {
+        completed: 0,
+        failed:    0,
+        skipped:   0,
+    };
+    const total = seededDistrictExports.length;
+    const persistSummary = () => repo.updateDistrictExportSummary(snapshot.id, {
+        scaleM: cfg.EXPORT_SCALE_M,
+        total,
+        ...counters,
+        pending: Math.max(
+            0,
+            total - counters.completed - counters.failed - counters.skipped,
+        ),
+        byLevel: provinceSummary.riskLevelDist,
+        totalHa: Object.values(provinceSummary.riskLevelDist || {})
+            .reduce((sum, value) => sum + (Number(value) || 0), 0),
+    });
+
+    console.info(
+        `[FIRE-RISK-EXPORT] START snapshot=${snapshot.id} `
+        + `date=${analysisDate} districts=${total}`,
+    );
+
+    for (const district of districtStats) {
+        const code = district.unitCode ? String(district.unitCode) : '';
+        const row = rowByCode.get(code);
+        if (!row) {
+            console.warn(
+                `[FIRE-RISK-EXPORT] snapshot=${snapshot.id} district=${code || 'null'} `
+                + 'không có district_export row',
+            );
+            continue;
+        }
+
+        const startedAt = Date.now();
+        await repo.updateDistrictExport(row.id, {
+            status:        'computing',
+            started_at:    new Date(),
+            error_message: null,
+        });
+
+        const levelDist = district.riskLevelDist || {};
+        let districtHa = 0;
+        for (let level = 1; level <= 5; level++) {
+            districtHa += Number(levelDist[level]) || 0;
+        }
+
+        if (districtHa === 0 || !district.geometry) {
+            await repo.updateDistrictExport(row.id, {
+                status:        'skipped',
+                area_stats:    district,
+                total_area_ha: 0,
+                duration_ms:   Date.now() - startedAt,
+                completed_at:  new Date(),
+                error_message: !district.geometry
+                    ? 'district geometry missing'
+                    : 'no pixels ≥ level 1',
+            });
+            counters.skipped += 1;
+            await persistSummary();
+            continue;
+        }
+
+        const fileBase = `fire_risk_${code || 'unknown'}_${dateTag}`;
+        try {
+            const districtGeom = ee.Geometry(district.geometry);
+            const riskForDistrict = riskLevel
+                .updateMask(riskLevel.gt(0))
+                .clip(districtGeom);
+
+            let tileUrlPerDistrict = null;
+            let mapIdPerDistrict = null;
+            try {
+                const mapInfo = await getEeMapId(riskForDistrict, RISK_LEVEL_VIZ);
+                tileUrlPerDistrict = mapInfo?.tileUrl || null;
+                mapIdPerDistrict = mapInfo?.mapId || null;
+            } catch (mapError) {
+                console.warn(
+                    `[FIRE-RISK-EXPORT] getEeMapId district=${code} `
+                    + `failed (non-fatal): ${mapError.message}`,
+                );
+            }
+
+            const timeoutMs = Number(process.env.FIRE_RISK_DOWNLOAD_TIMEOUT_MS)
+                || 120_000;
+            const url = await new Promise((resolve, reject) => {
+                const timer = setTimeout(
+                    () => reject(new Error(
+                        `getDownloadURL timeout huyện=${code} sau ${timeoutMs}ms`,
+                    )),
+                    timeoutMs,
+                );
+                riskForDistrict
+                    .visualize(RISK_LEVEL_VIZ)
+                    .getDownloadURL(
+                        {
+                            name:        fileBase,
+                            scale:       cfg.EXPORT_SCALE_M || 150,
+                            region:      districtGeom,
+                            crs:         'EPSG:4326',
+                            format:      'GEO_TIFF',
+                            filePerBand: false,
+                            maxPixels:   1e9,
+                        },
+                        (downloadUrl, error) => {
+                            clearTimeout(timer);
+                            if (error) {
+                                reject(new Error(String(error.message || error)));
+                            } else {
+                                resolve(downloadUrl);
+                            }
+                        },
+                    );
+            });
+
+            await repo.updateDistrictExport(row.id, {
+                status:                'completed',
+                area_stats:            district,
+                total_area_ha:         Math.round(districtHa * 100) / 100,
+                gee_map_id:            mapIdPerDistrict,
+                gee_tile_url:          tileUrlPerDistrict,
+                gee_download_url:      url,
+                gee_download_filename: `${fileBase}.tif`,
+                gee_generated_at:      new Date(),
+                duration_ms:           Date.now() - startedAt,
+                completed_at:          new Date(),
+                error_message:         null,
+            });
+            counters.completed += 1;
+
+            await _autoIngestDistrict(snapshot, {
+                code,
+                name:       district.name,
+                url,
+                tileUrl:    tileUrlPerDistrict,
+                districtHa,
+                exportId:   row.id,
+            }, analysisDate).catch((error) => {
+                console.warn(
+                    `[FIRE-RISK-EXPORT] auto-ingest district=${code} `
+                    + `failed (export vẫn completed): ${error.message}`,
+                );
+            });
+        } catch (error) {
+            console.warn(
+                `[FIRE-RISK-EXPORT] snapshot=${snapshot.id} district=${code} `
+                + `failed: ${error.message}`,
+            );
+            await repo.updateDistrictExport(row.id, {
+                status:        'failed',
+                area_stats:    district,
+                total_area_ha: Math.round(districtHa * 100) / 100,
+                error_message: error.message,
+                duration_ms:   Date.now() - startedAt,
+                completed_at:  new Date(),
+            });
+            counters.failed += 1;
+        }
+
+        await persistSummary();
+        console.info(
+            `[FIRE-RISK-EXPORT] PROGRESS snapshot=${snapshot.id} `
+            + `completed=${counters.completed} failed=${counters.failed} `
+            + `skipped=${counters.skipped}/${total}`,
+        );
+    }
+
+    const summary = await persistSummary();
+    console.info(
+        `[FIRE-RISK-EXPORT] DONE snapshot=${snapshot.id} `
+        + `completed=${counters.completed} failed=${counters.failed} `
+        + `skipped=${counters.skipped}/${total}`,
+    );
+    return summary;
+}
+
 // Chặn manual refresh, retry và cron cùng materialize graph GEE cho một ngày.
 // Request đến sau dùng chung Promise; việc client đóng HTTP không hủy lượt chạy
 // nền và cũng không tạo thêm snapshot/graph nặng.
@@ -889,7 +960,30 @@ function runAnalysis(analysisDate, options = {}) {
         return active;
     }
 
-    const run = executeAnalysis(key, options)
+    const run = geeQueue.enqueue({
+        key:      `analysis:fire-risk:${key}`,
+        label:    `Fire risk analysis ${key}`,
+        priority: 100,
+        run:      () => (
+            process.env.GEE_ANALYSIS_CHILD === 'true'
+                ? executeAnalysis(key, options)
+                : geeAnalysisProcess.run({
+                    kind:    'fire-risk',
+                    payload: { analysisDate: key, options },
+                })
+        ),
+    })
+        .catch(async (error) => {
+            if (process.env.GEE_ANALYSIS_CHILD !== 'true') {
+                await repo.failActiveRunsForDate(key, error.message).catch((dbError) => {
+                    console.error(
+                        `[FIRE-RISK] cannot close interrupted child run date=${key}: `
+                        + dbError.message,
+                    );
+                });
+            }
+            throw error;
+        })
         .finally(() => {
             if (activeRuns.get(key) === run) activeRuns.delete(key);
         });
@@ -1231,7 +1325,7 @@ const refreshExpiredDistrictUrls = async () => {
 
     const results = [];
     for (const r of rows) {
-        const date = fmtDate(r.analysis_date);
+        const date = _formatDateVN(r.analysis_date);
         try {
             console.log(`[FIRE-RISK-URL-REFRESH] tái sinh URL cho analysis_date=${date} — chạy lại pipeline`);
             const snap = await runAnalysis(date);
@@ -1254,4 +1348,5 @@ module.exports = {
     refreshExpiredDistrictUrls,
     todayUtc,
     fmtDate,
+    formatDateVN: _formatDateVN,
 };

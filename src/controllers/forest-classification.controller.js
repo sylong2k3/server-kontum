@@ -343,6 +343,7 @@ function formatSnapshot(s) {
         month:              s.month,
         status:             s.status,
         provinceSummary:    s.province_summary,
+        districtExportSummary: s.district_export_summary || null,
         oobAccuracy:        numericOrNull(s.oob_accuracy),
         testKappa:          numericOrNull(s.test_kappa),
         geoserverLayer:     s.geoserver_layer || null,

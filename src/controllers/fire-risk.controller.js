@@ -272,6 +272,7 @@ const formatSnapshot = (snapshot) => {
         status: snapshot.status,
         provinceSummary: formatProvinceSummary(snapshot.province_summary),
         districtStats,
+        districtExportSummary: snapshot.district_export_summary || null,
         geoserverLayer: snapshot.geoserver_layer || null,
         geeTileUrl: snapshot.gee_tile_url || null,
         geeTileGeneratedAt: snapshot.gee_tile_generated_at || null,
