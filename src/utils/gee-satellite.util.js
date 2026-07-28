@@ -106,7 +106,7 @@ function getKonTumRegion() {
 
 // NOTE — HARD-CODED, KHÔNG dùng env override.
 // User đã quyết định 1 file duy nhất tại `data/RanhGioiHuyen_Polygon.geojson`.
-// GADM v2 WGS84 (10 huyện Kon Tum, properties `ID_2/NAME_2/VARNAME_2/TYPE_2`).
+// WGS84 (10 huyện Kon Tum, properties `ma_huyen/ten_huyen/ten/loai`).
 const KON_TUM_DISTRICTS_PATH = path.resolve(__dirname, '../../data/RanhGioiHuyen_Polygon.geojson');
 
 let _cachedDistrictsFC = null;
@@ -114,8 +114,8 @@ let _cachedDistrictsSource = null;
 
 /**
  * Districts (huyện) của Kon Tum. Chỉ dùng 1 file:
- *   • `data/RanhGioiHuyen_Polygon.geojson` — GADM v2 WGS84 (10 huyện Kon Tum,
- *     properties `ID_2/NAME_2/VARNAME_2/TYPE_2/NAME_1`, có duplicate 18→9).
+ *   • `data/RanhGioiHuyen_Polygon.geojson` — WGS84 (10 huyện Kon Tum,
+ *     properties `ma_huyen/ten_huyen/ten/loai/ma_tinh/ten_tinh`).
  *   • Path HARD-CODED, không dùng env override.
  *
  * Fallback FAO/GAUL/2015/level2 (8 huyện cũ, đã lỗi thời) khi file local
@@ -186,8 +186,8 @@ function _tryLoadDistrictsFile(filePath) {
     const projLbl = epsg ? `EPSG:${epsg}` : null;
     const nonWgs84 = epsg && epsg !== '4326';
 
-    // Build ee.Feature per doc.feature (có dedupe theo ID_2 vì file GADM v2
-    // có duplicate 18 → 9 huyện unique).
+    // Build ee.Feature per doc.feature. Ưu tiên schema ranh giới hành chính mới,
+    // nhưng vẫn giữ alias GADM cũ để tương thích khi vận hành với file legacy.
     const seenCodes = new Set();
     const eeFeats = [];
     let addedIdx = 0;
@@ -200,15 +200,10 @@ function _tryLoadDistrictsFile(filePath) {
             continue;
         }
         const p = f.properties || {};
-        // File data/RanhGioiHuyen_Polygon.geojson (nguồn dùng cho Kon Tum) dùng
-        // key tiếng Việt `ten_huyen`/`ma_huyen`; GADM chuẩn quốc tế dùng
-        // `ADM2_NAME`/`ADM2_CODE`. Chấp nhận cả hai để loader không rơi vào
-        // fallback "Huyện <n>" khi file thay format.
-        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2
-            || p.NAME_EN || p.ten_huyen || p.ten || null;
+        const rawName = p.ten_huyen || p.NAME_VN || p.ADM2_NAME || p.NAME_2
+            || p.VARNAME_2 || p.NAME_EN || p.ten || null;
         const name    = rawName || `Huyện ${addedIdx + 1}`;
-        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID
-            ?? p.ma_huyen ?? null;
+        const rawCode = p.ma_huyen ?? p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
         const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${addedIdx + 1}`;
         const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
         if (seenCodes.has(dedupeKey)) { skippedDup += 1; continue; }
@@ -223,7 +218,7 @@ function _tryLoadDistrictsFile(filePath) {
             ADM2_NAME: name,
             NAME_EN:   p.NAME_EN || p.VARNAME_2 || null,
             NAME_VN:   name,
-            TYPE_2:    p.TYPE_2 || p.ENGTYPE_2 || null,
+            TYPE_2:    p.loai || p.TYPE_2 || p.ENGTYPE_2 || null,
             source:    projLbl ? `LOCAL_${projLbl}` : 'LOCAL_WGS84',
         }));
         addedIdx += 1;
@@ -296,13 +291,10 @@ function getKonTumDistrictsGeoJson() {
         const g = f?.geometry;
         if (!g || !Array.isArray(g.coordinates) || g.coordinates.length === 0) continue;
         const p = f.properties || {};
-        // Xem chú thích ở getKonTumDistricts() — cần chấp nhận cả key GADM
-        // (ADM2_NAME/CODE) lẫn key tiếng Việt (ten_huyen/ma_huyen).
-        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2
-            || p.NAME_EN || p.ten_huyen || p.ten || null;
+        const rawName = p.ten_huyen || p.NAME_VN || p.ADM2_NAME || p.NAME_2
+            || p.VARNAME_2 || p.NAME_EN || p.ten || null;
         const name    = rawName || `Huyện ${idx + 1}`;
-        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID
-            ?? p.ma_huyen ?? null;
+        const rawCode = p.ma_huyen ?? p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID ?? null;
         const code    = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${idx + 1}`;
         const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
         if (seen.has(dedupeKey)) continue;
@@ -311,7 +303,7 @@ function getKonTumDistrictsGeoJson() {
             ADM2_CODE: code,
             ADM2_NAME: name,
             NAME_EN:   p.NAME_EN || p.VARNAME_2 || null,
-            TYPE_2:    p.TYPE_2 || p.ENGTYPE_2 || null,
+            TYPE_2:    p.loai || p.TYPE_2 || p.ENGTYPE_2 || null,
             geometry:  { type: g.type, coordinates: _stripZ(g.coordinates) },
             epsg:      epsg ? Number(epsg) : 4326,
         });

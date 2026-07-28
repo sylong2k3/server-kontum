@@ -14,7 +14,7 @@ const router = Router();
 router.get('/latest',  optionalAuth, asyncHandler(ctrl.getLatest));
 router.get('/map',     optionalAuth, asyncHandler(ctrl.getMap));
 
-// Per-district products (migration 040): 9 huyện + area stats + public
+// Per-district products (migration 040): 10 huyện + area stats + public
 // GeoServer layer. Internal GEE/MinIO/job fields chỉ trả cho admin có quyền.
 router.get('/snapshots/:id/districts', optionalAuth, asyncHandler(ctrl.getDistrictExports));
 

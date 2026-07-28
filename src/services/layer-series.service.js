@@ -16,12 +16,12 @@ const safeUnlink = async (filePath) => {
     await fs.promises.unlink(filePath).catch(() => {});
 };
 
-const requireGroup = async (code, user, lang) => {
+const requireGroup = async (code, user, lang, internal = false) => {
     const group = await repo.findGroupByCode(code);
     if (!group || group.is_active !== true) {
         throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
     }
-    if (group.is_public !== true && !isAdmin(user)) {
+    if (group.is_public !== true && !internal && !isAdmin(user)) {
         throw new Api403Error(t('map_layer_read_forbidden', lang), ['MAP_LAYER_READ_FORBIDDEN']);
     }
     return group;
@@ -130,7 +130,7 @@ const writeMosaicConfig = async (dir) => {
     });
 };
 
-const ingestGranule = async ({ groupCode, file, payload, user, lang = 'vi' }) => {
+const ingestGranule = async ({ groupCode, file, payload, user, lang = 'vi', internal = false }) => {
     if (!file?.path) {
         throw new Api400Error(t('layer_series_file_required', lang), ['FILE_REQUIRED']);
     }
@@ -138,7 +138,7 @@ const ingestGranule = async ({ groupCode, file, payload, user, lang = 'vi' }) =>
     let publishedPath = null;
     let geoserverAccepted = false;
     try {
-        const group = await requireGroup(groupCode, user, lang);
+        const group = await requireGroup(groupCode, user, lang, internal);
         const existing = await repo.findGranule(group.id, payload.year_from, payload.year_to);
         if (existing && !payload.force) {
             throw new Api409Error(t('layer_series_granule_exists', lang), ['GRANULE_EXISTS']);

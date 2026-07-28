@@ -448,7 +448,7 @@ async function executeAnalysis(year, month, {
                     // + JRC water override + threshold + visualize + clip). Lần
                     // gọi getDownloadURL đầu tiên phải chờ EE materialize toàn bộ
                     // pipeline; các lần sau nhanh hơn vì classifier đã cache.
-                    // 60s cũ không đủ ngay cả cho huyện nhỏ nhất — cả 9 huyện
+                    // 60s cũ không đủ ngay cả cho huyện nhỏ nhất — cả 10 huyện
                     // timeout đồng loạt (xem log 2026-07-27 01:12+). Env override
                     // FC_DOWNLOAD_TIMEOUT_MS nếu cần tinh chỉnh sau.
                     const DL_TIMEOUT_MS = Number(process.env.FC_DOWNLOAD_TIMEOUT_MS) || 5 * 60_000;
@@ -697,6 +697,10 @@ async function _autoIngestDistrict(snapshot, districtRow, year, month) {
             year, month,
             scale_m:        cfg.DOWNLOAD_SCALE_M || 150,
             autoIngested:   true,
+            // Xem ghi chú tương tự ở fire-risk.service.js _autoIngestDistrict —
+            // enqueue() không có param layerGroup riêng, phải nhét vào requestParams
+            // để _upsertRasterLayer đọc được job.request_params.layer_group.
+            layer_group:    'phan_loai_rung',
         },
         user: null,
         lang: 'vi',

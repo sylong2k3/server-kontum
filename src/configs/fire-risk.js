@@ -142,7 +142,7 @@ const GEE_POLL_MAX_ATTEMPTS       = parseInt(process.env.FIRE_RISK_GEE_POLL_MAX,
 const MINIO_BUCKET                = process.env.FIRE_RISK_MINIO_BUCKET || 'fire-risk-rasters';
 const EXPECTED_DISTRICT_COUNT     = Math.max(
     1,
-    parseInt(process.env.FIRE_RISK_EXPECTED_DISTRICT_COUNT, 10) || 9,
+    parseInt(process.env.FIRE_RISK_EXPECTED_DISTRICT_COUNT, 10) || 10,
 );
 const GEE_TEMPORARY_URL_MAX_AGE_MS = Math.max(
     60 * 1000,

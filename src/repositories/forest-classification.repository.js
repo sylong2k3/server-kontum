@@ -289,7 +289,7 @@ const listCompleted = async ({
     )`;
     // `requireCompleteDistrictSet` = published-history mode. Chấp nhận cả:
     //   (a) snapshot cũ (pre-migration 040) publish single-layer province-wide
-    //   (b) snapshot mới có đủ per-district set 9/9
+    //   (b) snapshot mới có đủ per-district set 10/10
     // Nếu chỉ dùng (b), snapshot cũ (không có district_exports) bị loại → history
     // hiển thị thiếu kỳ đã publish trước đây.
     if (requireCompleteDistrictSet) {
