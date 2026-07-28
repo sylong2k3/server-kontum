@@ -396,9 +396,62 @@ const publishFsGeoTiffLayer = async ({
     return layerName;
 };
 
+const publishTimeMosaic = async ({ storeName, mosaicPath, title }) => {
+    const config = assertGeoserverConfigured();
+    const workspace = config.workspace;
+    const { pathToFileURL } = require('url');
+    const fileUrl = mosaicPath.startsWith('file://')
+        ? mosaicPath
+        : pathToFileURL(mosaicPath).href;
+
+    try {
+        await requestGeoserver(
+            `/rest/workspaces/${workspace}/coveragestores/${encodeURIComponent(storeName)}/external.imagemosaic?configure=first&coverageName=${encodeURIComponent(storeName)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: fileUrl,
+            }
+        );
+    } catch (err) {
+        if (!isAlreadyExistsError(err)) { throw err; }
+    }
+
+    await requestGeoserver(
+        `/rest/workspaces/${workspace}/coveragestores/${encodeURIComponent(storeName)}/coverages/${encodeURIComponent(storeName)}`,
+        {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                coverage: {
+                    name: storeName,
+                    title: title || storeName,
+                    enabled: true,
+                    metadata: {
+                        entry: [{
+                            '@key': 'time',
+                            dimensionInfo: {
+                                enabled: true,
+                                presentation: 'LIST',
+                                units: 'ISO8601',
+                                defaultValue: { strategy: 'MAXIMUM' },
+                                nearestMatchEnabled: true,
+                                rawNearestMatchEnabled: false,
+                            },
+                        }],
+                    },
+                },
+            }),
+        }
+    );
+
+    return `${workspace}:${storeName}`;
+};
+
 const harvestGeoTiff = async (coverageStore, tifPath) => {
     const config = assertGeoserverConfigured();
-    const fileUrl = tifPath.startsWith('file://') ? tifPath : `file://${tifPath}`;
+    const { pathToFileURL } = require('url');
+    const fileUrl = tifPath.startsWith('file://') ? tifPath : pathToFileURL(tifPath).href;
 
     await requestGeoserver(
         `/rest/workspaces/${config.workspace}/coveragestores/${coverageStore}/external.imagemosaic`,
@@ -431,6 +484,7 @@ module.exports = {
     publishS3GeoTiffLayer,
     publishFsGeoTiffLayer,
     publishTimelapseLayer,
+    publishTimeMosaic,
     unpublishLayer,
     setLayerEnabled,
     truncateGwcLayer,

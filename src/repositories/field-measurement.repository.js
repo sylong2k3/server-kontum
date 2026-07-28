@@ -66,9 +66,8 @@ const buildValidPolygon = async (points) => {
 // ── Bước 1b: chặn vùng đo nằm ngoài tỉnh Kon Tum ─────────────────────────────
 // Joi chỉ chặn theo khung chữ nhật 106–109°E / 13–16.5°N (bao trùm cả các tỉnh
 // lân cận như Đà Nẵng, Quảng Ngãi...) nên không đủ — phải kiểm tra polygon
-// thật so với ranh giới tỉnh (gis."RanhGioiTinh_Polygon", cùng lớp GeoServer
-// dùng để clip ảnh vệ tinh, xem gee-satellite.util.js). Cho phép buffer dung
-// sai ~200m để tránh loại oan các phiên đo sát biên giới do trôi GPS.
+// thật so với ranh giới tỉnh (gis.vungkontum). Cho phép buffer dung sai ~200m
+// để tránh loại oan các phiên đo sát biên giới do trôi GPS.
 const PROVINCE_BOUNDARY_TOLERANCE_M = 200;
 
 // Ranh giới tỉnh không đổi khi server đang chạy — cache WKB đã buffer sẵn để
@@ -82,10 +81,10 @@ const getProvinceBufferWKB = async (toleranceM) => {
     }
     const { rows } = await db.query(
         `SELECT ST_AsEWKB(ST_Buffer(
-            ST_Transform(ST_Force2D(ST_Union("Shape")), 4326)::geography,
+            ST_Transform(ST_Force2D(ST_Union(geom)), 4326)::geography,
             $1
         )::geometry) AS wkb
-        FROM gis."RanhGioiTinh_Polygon"`,
+        FROM gis.vungkontum`,
         [toleranceM]
     );
     _cachedProvinceBufferWKB = rows[0]?.wkb || null;
