@@ -157,16 +157,56 @@ const publishTimelapseLayer = async (layer, lang = 'vi') => {
 
     const fileUrl = mosaicPath.startsWith('file://') ? mosaicPath : `file://${mosaicPath}`;
 
+    // configure=first&coverageName= bắt buộc để GeoServer tạo Coverage ngay lần
+    // đầu (không có 2 tham số này, store được tạo nhưng không có coverage nào
+    // được publish — xem docs/guides/13-geoserver-postgis-setup-guide.md §4.2).
     await requestGeoserver(
-        `/rest/workspaces/${workspace}/coveragestores/${storeName}/external.imagemosaic`,
+        `/rest/workspaces/${workspace}/coveragestores/${storeName}/external.imagemosaic`
+            + `?configure=first&coverageName=${encodeURIComponent(storeName)}`,
         {
-            method: 'POST',
+            method: 'PUT',
             headers: { 'Content-Type': 'text/plain' },
             body: fileUrl,
         }
     );
 
     return `${workspace}:${storeName}`;
+};
+
+/**
+ * Bật time dimension cho 1 coverage ImageMosaic đã tồn tại — tương đương thao
+ * tác tay "Layers → Dimensions → bật Time" mô tả ở docs/guides/13 §4.2 Bước 3,
+ * nhưng làm qua REST để tự động hoá lúc tạo mosaic lần đầu.
+ *
+ * @param {string} coverageStore  — tên CoverageStore (== tên Coverage, quy ước dùng chung trong app)
+ * @param {object} [opts]
+ * @param {'LIST'|'CONTINUOUS'|'DISCRETE_INTERVAL'} [opts.presentation]
+ * @param {'MINIMUM'|'MAXIMUM'|'NEAREST'|'FIXED'} [opts.defaultStrategy]
+ */
+const enableTimeDimension = async (coverageStore, { presentation = 'LIST', defaultStrategy = 'MAXIMUM' } = {}) => {
+    const config = assertGeoserverConfigured();
+    await requestGeoserver(
+        `/rest/workspaces/${config.workspace}/coveragestores/${coverageStore}/coverages/${coverageStore}`,
+        {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                coverage: {
+                    metadata: {
+                        entry: [{
+                            '@key': 'time',
+                            dimensionInfo: {
+                                enabled: true,
+                                presentation,
+                                units: 'ISO8601',
+                                defaultValue: { strategy: defaultStrategy },
+                            },
+                        }],
+                    },
+                },
+            }),
+        }
+    );
 };
 
 const encodeLayerName = (geoserverLayerName) => String(geoserverLayerName)
@@ -427,6 +467,7 @@ module.exports = {
     publishS3GeoTiffLayer,
     publishFsGeoTiffLayer,
     publishTimelapseLayer,
+    enableTimeDimension,
     unpublishLayer,
     setLayerEnabled,
     truncateGwcLayer,
