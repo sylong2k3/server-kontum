@@ -6,16 +6,12 @@ const mapController = require('../controllers/map.controller');
 const rasterIngestController = require('../controllers/raster-ingest.controller');
 const layerSeriesController = require('../controllers/layer-series.controller');
 const { uploadGeoFile } = require('../middlewares/uploadGeoFile.middleware');
-const { uploadLayerGranule } = require('../middlewares/uploadLayerGranule.middleware');
 const { verifyToken, optionalAuth, requirePermission } = require('../middlewares/auth.middleware');
 
 const router = Router();
 
 router.get('/layer-groups', optionalAuth, asyncHandler(layerSeriesController.listGroups));
 router.get('/layer-groups/:group/timeline', optionalAuth, asyncHandler(layerSeriesController.getTimeline));
-router.post('/layer-groups/:group/granules',
-    verifyToken, requirePermission('map_layers', 'harvest'), uploadLayerGranule,
-    asyncHandler(layerSeriesController.ingestGranule));
 
 router.get('/layers', optionalAuth, asyncHandler(mapController.listLayers));
 router.get('/layers/:code', optionalAuth, asyncHandler(mapController.getLayer));

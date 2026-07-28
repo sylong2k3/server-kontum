@@ -10,7 +10,10 @@ const isAdmin = (user) => user && ADMIN_ROLES.has(user.role);
 const hasRolePermission = (user, action) => user?.role === 'system_admin' || user?.role_permissions?.map_layers?.[action] === true;
 
 const requireLayer = async (code, lang) => {
-    const layer = await layerRepo.findByCode(code);
+    const isNumericId = /^\d+$/.test(String(code));
+    const layer = isNumericId
+        ? (await layerRepo.findById(Number(code)) || await layerRepo.findByCode(code))
+        : await layerRepo.findByCode(code);
     if (!layer) { throw new Api404Error(t('map_layer_not_found', lang), ['LAYER_NOT_FOUND']); }
     return layer;
 };
