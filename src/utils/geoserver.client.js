@@ -155,65 +155,18 @@ const publishTimelapseLayer = async (layer, lang = 'vi') => {
         throw new Error(t('geoserver_timelapse_mosaic_required', lang));
     }
 
-    // pathToFileURL xử lý drive letter + backslash trên Windows đúng chuẩn
-    // (file:///C:/... thay vì file://C:\... — cái sau GeoServer parse sai,
-    // trả 400 Bad Request không rõ lý do). Cùng cách publishFsGeoTiffLayer dùng.
-    const { pathToFileURL } = require('url');
-    const fileUrl = mosaicPath.startsWith('file://') ? mosaicPath : pathToFileURL(mosaicPath).href;
+    const fileUrl = mosaicPath.startsWith('file://') ? mosaicPath : `file://${mosaicPath}`;
 
-    // configure=first&coverageName= bắt buộc để GeoServer tạo Coverage ngay lần
-    // đầu — NHƯNG thư mục mosaic PHẢI đã có ít nhất 1 GeoTIFF hợp lệ trước khi
-    // gọi hàm này, nếu không GeoServer không suy ra được band/CRS và trả 400
-    // Bad Request (không có message rõ ràng). Xem
-    // docs/guides/13-geoserver-postgis-setup-guide.md §4.2 — caller (layer-series
-    // .service#ingestGranule) phải ghi granule đầu tiên vào đĩa TRƯỚC khi gọi.
     await requestGeoserver(
-        `/rest/workspaces/${workspace}/coveragestores/${storeName}/external.imagemosaic`
-            + `?configure=first&coverageName=${encodeURIComponent(storeName)}`,
+        `/rest/workspaces/${workspace}/coveragestores/${storeName}/external.imagemosaic`,
         {
-            method: 'PUT',
+            method: 'POST',
             headers: { 'Content-Type': 'text/plain' },
             body: fileUrl,
         }
     );
 
     return `${workspace}:${storeName}`;
-};
-
-/**
- * Bật time dimension cho 1 coverage ImageMosaic đã tồn tại — tương đương thao
- * tác tay "Layers → Dimensions → bật Time" mô tả ở docs/guides/13 §4.2 Bước 3,
- * nhưng làm qua REST để tự động hoá lúc tạo mosaic lần đầu.
- *
- * @param {string} coverageStore  — tên CoverageStore (== tên Coverage, quy ước dùng chung trong app)
- * @param {object} [opts]
- * @param {'LIST'|'CONTINUOUS'|'DISCRETE_INTERVAL'} [opts.presentation]
- * @param {'MINIMUM'|'MAXIMUM'|'NEAREST'|'FIXED'} [opts.defaultStrategy]
- */
-const enableTimeDimension = async (coverageStore, { presentation = 'LIST', defaultStrategy = 'MAXIMUM' } = {}) => {
-    const config = assertGeoserverConfigured();
-    await requestGeoserver(
-        `/rest/workspaces/${config.workspace}/coveragestores/${coverageStore}/coverages/${coverageStore}`,
-        {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                coverage: {
-                    metadata: {
-                        entry: [{
-                            '@key': 'time',
-                            dimensionInfo: {
-                                enabled: true,
-                                presentation,
-                                units: 'ISO8601',
-                                defaultValue: { strategy: defaultStrategy },
-                            },
-                        }],
-                    },
-                },
-            }),
-        }
-    );
 };
 
 const encodeLayerName = (geoserverLayerName) => String(geoserverLayerName)
@@ -445,9 +398,7 @@ const publishFsGeoTiffLayer = async ({
 
 const harvestGeoTiff = async (coverageStore, tifPath) => {
     const config = assertGeoserverConfigured();
-    // pathToFileURL — xem ghi chú trong publishTimelapseLayer ở trên.
-    const { pathToFileURL } = require('url');
-    const fileUrl = tifPath.startsWith('file://') ? tifPath : pathToFileURL(tifPath).href;
+    const fileUrl = tifPath.startsWith('file://') ? tifPath : `file://${tifPath}`;
 
     await requestGeoserver(
         `/rest/workspaces/${config.workspace}/coveragestores/${coverageStore}/external.imagemosaic`,
@@ -480,7 +431,6 @@ module.exports = {
     publishS3GeoTiffLayer,
     publishFsGeoTiffLayer,
     publishTimelapseLayer,
-    enableTimeDimension,
     unpublishLayer,
     setLayerEnabled,
     truncateGwcLayer,
