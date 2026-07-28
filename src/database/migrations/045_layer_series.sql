@@ -1,4 +1,4 @@
-﻿-- Layer time-series: one GeoServer ImageMosaic per group, one row per raster time step.
+-- Layer time-series: one GeoServer ImageMosaic per group, one row per raster time step.
 CREATE TABLE IF NOT EXISTS gis.layer_series_groups (
     id SERIAL PRIMARY KEY,
     code VARCHAR(80) UNIQUE NOT NULL,

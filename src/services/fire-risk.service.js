@@ -918,6 +918,11 @@ async function _autoIngestDistrict(snapshot, districtRow, analysisDate) {
             analysis_date:  analysisDate,
             scale_m:        cfg.EXPORT_SCALE_M || 150,
             autoIngested:   true,
+            // `enqueue()` không có param `layerGroup` riêng — nhét vào đây vì
+            // `_upsertRasterLayer` đọc thẳng `job.request_params.layer_group`
+            // (xem raster-ingest.service.js dòng ~305, ~573). Không có field
+            // này thì layer rơi vào nhóm "Khác" trong layer picker mobile.
+            layer_group:    'chay_rung',
         },
         user: null,
         lang: 'vi',

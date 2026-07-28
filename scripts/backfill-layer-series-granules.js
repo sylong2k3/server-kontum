@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * Backfill các GeoTIFF đã publish rời rạc vào bốn ImageMosaic time-series.
@@ -131,6 +131,7 @@ const main = async () => {
                 },
                 user: null,
                 lang: 'vi',
+                internal: true,
             });
             console.log(`[DONE] ${tag}`);
         } finally {

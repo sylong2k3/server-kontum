@@ -697,6 +697,10 @@ async function _autoIngestDistrict(snapshot, districtRow, year, month) {
             year, month,
             scale_m:        cfg.DOWNLOAD_SCALE_M || 150,
             autoIngested:   true,
+            // Xem ghi chú tương tự ở fire-risk.service.js _autoIngestDistrict —
+            // enqueue() không có param layerGroup riêng, phải nhét vào requestParams
+            // để _upsertRasterLayer đọc được job.request_params.layer_group.
+            layer_group:    'phan_loai_rung',
         },
         user: null,
         lang: 'vi',
