@@ -35,7 +35,7 @@ async function bulkZoneFromFeatureCollection(fc, user) {
             f.properties.observedAt = now;
         }
         const c = f.properties.classId ?? f.properties.class_id ?? f.properties.class;
-        if (c == null) throw new Api400Error('Feature thiếu class_id (0-10).', ['MISSING_CLASS_ID']);
+        if (c == null) throw new Api400Error('Feature thiếu class_id (0-12).', ['MISSING_CLASS_ID']);
     });
     dbg(`bulkZone count=${fc.features.length} user=${user?.id}`);
     return repo.insertZoneBulk(fc.features, user?.id);

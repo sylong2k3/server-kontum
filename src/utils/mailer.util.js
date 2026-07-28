@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 let transporter = null;
 let isConfigured = false;

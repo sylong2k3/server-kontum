@@ -304,7 +304,7 @@ const CLASSIFIED_CLASSES = fcCfg.CLASS_NAMES.map((name, id) => ({
 }));
 
 /**
- * On-demand 11-class forest cover classification for Kon Tum.
+ * On-demand 13-class forest cover classification v5.3 for Kon Tum.
  *
  * Mirrors the v3 GEE script (lopPhuRungFinal): Landsat 5/7/8/9 + Sentinel-2
  * seasonal composites (dry/wet), spectral indices, DEM, threshold + Dynamic
@@ -321,7 +321,7 @@ async function buildClassified(params, region) {
     const t0 = Date.now();
     const year = new Date(params.startDate).getUTCFullYear();
     const hasGT = Boolean(params.groundTruthAssetId);
-    dbg('CLASSIFIED', `start — 11-class RF year=${year} region=${params.geometry ? 'custom' : 'Kon Tum'} groundTruth=${hasGT ? params.groundTruthAssetId : 'none'}`);
+    dbg('CLASSIFIED', `start — 13-class RF year=${year} region=${params.geometry ? 'custom' : 'Kon Tum'} groundTruth=${hasGT ? params.groundTruthAssetId : 'none'}`);
 
     // Wrap ee.Geometry as FeatureCollection so pipeline helpers that need
     // `region.geometry()` (stratifiedSample, export) work uniformly whether
@@ -336,6 +336,10 @@ async function buildClassified(params, region) {
         testKappa,
         quotas,
     } = await runRfClassification(year, regionFC, regionGeom, {
+        // v4.1: month=12 mặc định — pipeline tự chọn cửa sổ mùa gần nhất
+        // KẾT THÚC ≤ tháng anchor. Nếu caller muốn snapshot cuối năm khác,
+        // truyền params.month qua endpoint.
+        month:              Number.isInteger(params.month) ? params.month : 12,
         seed:               year,
         groundTruthAssetId: params.groundTruthAssetId,
         gtBufferM:          params.gtBufferM,
@@ -344,11 +348,8 @@ async function buildClassified(params, region) {
         // RF training to materialise synchronously and take 5+ minutes for Kon Tum.
         // Tiles are still rendered correctly; stats are omitted for on-demand requests.
         skipStats: true,
-        // Lite mode: on-demand endpoint bỏ dataset labels (DW+WC+JRC), giảm sample,
-        // giảm RF trees, dùng sample scale coarser. Cần thiết vì graph v3 gốc
-        // vượt quá budget của getMapId (~200 s → GEE "Please try again").
-        // Batch/admin forest-classification dùng cùng lite mode để kết quả và
-        // thời gian xử lý nhất quán với endpoint on-demand này.
+        // v4.1 base pipeline đã nhẹ; lite mode ở đây chỉ bỏ external priors
+        // (WorldCover epoch, JRC water) và giảm sample budget ~30 %.
         liteMode:           params.liteMode !== false,
     });
     dbgTime('CLASSIFIED', `RF graph built (stats skipped)`, t0);

@@ -20,6 +20,10 @@ router.post('/query',  optionalAuth, asyncHandler(ctrl.queryPeriod));
 // Poll a specific snapshot (for clients waiting on computing=true results).
 router.get('/snapshot/:id', optionalAuth, asyncHandler(ctrl.getSnapshot));
 
+// Per-district downloads (migration 040): list URL/huyện + area_by_class.
+// optionalAuth — public đọc được. GEE URL tự expire 24h nên không leak lâu dài.
+router.get('/snapshots/:id/districts', optionalAuth, asyncHandler(ctrl.getDistrictExports));
+
 // Public browse các snapshot ĐÃ publish GeoServer — client sidebar dùng để
 // hiển thị list history + add WMS overlay các tháng cũ. Trả subset field an
 // toàn (không leak error_message, minio_key, download URL...).
@@ -36,9 +40,9 @@ router.get('/history', verifyToken, requirePermission('forest_classification', '
 router.post('/refresh', verifyToken, requirePermission('forest_classification', 'manage'),
     asyncHandler(ctrl.refresh));
 
-// Publish snapshot GeoTIFF → MinIO → GeoServer, back-link `geoserver_layer` vào
-// snapshot khi job xong. Cùng permission `map_layers.ingest_raster` với
-// fire-risk (đã có ở system_admin + so_nnmt từ migration 031).
+// Publish the snapshot's district raster batch → MinIO → GeoServer. Each job
+// back-links its forest_district_exports row; the snapshot becomes published
+// only after the complete stable district set is ready.
 router.post('/snapshots/:id/publish-raster',
     verifyToken, requirePermission('map_layers', 'ingest_raster'),
     asyncHandler(ctrl.publishRaster));

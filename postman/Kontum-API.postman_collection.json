@@ -6795,7 +6795,7 @@
                 }
               ]
             },
-            "description": "So sánh diện tích rừng giữa 2 năm theo đơn vị: delta_area_ha, delta_pct, trend (increase/decrease/stable).\n\nVí dụ thực: tỉnh Kon Tum 2023→2024 = 616.123,37 → 616.195,94 ha (+72,57 ha).\n\nLưu ý: chỉ huyện có dữ liệu cả 2 năm mới xuất hiện. Hiện per-district chỉ có 2024 → để xem cấp huyện cần thêm dữ liệu năm khác. Cấp tỉnh (unit_code=62) có cả 2023 & 2024.\n\nPhân tích suy giảm mức raster/NDVI cần GEE (rasterAnalysis.available=false).\n\nQuyền: spatial.read.\n\nYêu cầu Bearer token/quyền tương ứng."
+            "description": "So sánh diện tích rừng giữa 2 năm theo đơn vị: delta_area_ha, delta_pct, trend (increase/decrease/stable).\n\nDữ liệu nguồn: forest.forest_snapshots (kết quả pipeline phân loại 13-class v5.3) — mỗi năm lấy snapshot completed mới nhất. Bảng gis.landcover_statistics đã BỎ (migration 041).\n\nLưu ý: chỉ huyện có snapshot cả 2 năm mới xuất hiện. Muốn có nhiều năm để so sánh → chạy /forest-classification/refresh cho các kỳ khác nhau.\n\nQuyền: spatial.read.\n\nYêu cầu Bearer token/quyền tương ứng."
           },
           "response": []
         },

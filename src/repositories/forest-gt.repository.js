@@ -5,7 +5,7 @@
  *
  * Cùng shape với fire-gt.repository.js nhưng:
  *   - schema `forest` thay vì `fire`
- *   - `class_id` (0-10) thay vì `severity` (1-5)
+ *   - `class_id` (0-12) thay vì `severity` (1-5)
  *   - `observed_at` thay vì `occurred_at` (đo đạc chứ không phải sự cố)
  */
 
@@ -48,7 +48,7 @@ const insertZoneBulk = async (features, createdBy) => {
             // shape khác nhau tùy tool xuất.
             const classId = p.classId ?? p.class_id ?? p.class;
             if (classId == null) {
-                throw new Error(`Feature ${ids.length + 1} thiếu class_id (0-10).`);
+                throw new Error(`Feature ${ids.length + 1} thiếu class_id (0-12).`);
             }
             const { rows } = await client.query(
                 `INSERT INTO forest.forest_gt_zones

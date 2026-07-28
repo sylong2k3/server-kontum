@@ -51,6 +51,7 @@ const dbg = (msg) => { if (DEBUG) console.debug(`[FIRE-RISK-JOB] ${msg}`); };
 // muốn tự chạy analysis khi restart pod).
 const CATCHUP_ENABLED = process.env.FIRE_RISK_CATCHUP !== 'false';
 const WATCHDOG_INTERVAL_MS = 5 * 60_000;
+const RETRY_DELAYS_MS = [15 * 60_000, 60 * 60_000, 6 * 60 * 60_000];
 
 // Parse "0 6 * * *" → { hour: 6, minute: 0 }. Trả null nếu không match dạng
 // chuẩn ngày-thường (dùng cho catch-up quyết định "đã qua giờ cron chưa").
@@ -100,6 +101,20 @@ function _getCronLocalTime(now = new Date()) {
     };
 }
 
+// Chuyển analysis_date (DATE trong Postgres → JS Date theo local tz của Node)
+// về "YYYY-MM-DD" trong CRON timezone. Trước đây dùng `toISOString().slice(0,10)`
+// → so sánh với `localDate` (đã format theo VN tz) luôn lệch 1 ngày do server
+// Node ở VN (+7): pg-node parse DATE '2026-07-24' thành `2026-07-24T00:00+07`
+// → ISO UTC = '2026-07-23T17:00Z' → slice = '2026-07-23'. Watchdog vì thế
+// TRIGGER lại phân tích mỗi 5 phút dù snapshot hôm nay đã completed
+// → spam GEE compute + broadcast notification tới 3 role.
+function _toCronLocalDate(dateLike) {
+    if (dateLike == null || dateLike === '') return null;
+    const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+    if (!Number.isFinite(d.getTime())) return null;
+    return _getCronLocalTime(d).date;
+}
+
 const runDailyAnalysis = async (analysisDate) => {
     if (analysisRunning) {
         console.warn('[FIRE RISK] Daily analysis skipped: previous run still active');
@@ -110,9 +125,28 @@ const runDailyAnalysis = async (analysisDate) => {
     // Cron chạy lúc 06:00 VN, khi UTC vẫn có thể là ngày hôm trước. Luôn lấy
     // analysis_date theo timezone của cron thay vì Date#toISOString().
     const today = analysisDate || _getCronLocalTime().date;
+
+    // Guard trước khi bắt đầu (migration 040 fix): nếu today đã có attempt
+    // completed/published/exporting thì SKIP — tránh watchdog trigger run
+    // đè lên kết quả đã có, đồng thời tránh spam GEE quota. Không dùng
+    // getLatest() vì với schema mới có thể tồn tại attempt failed mới hơn
+    // dòng completed cũ (retry sau khi thành công).
+    try {
+        if (await repo.hasCompletedAttempt(today)) {
+            console.log(`[FIRE RISK] Daily analysis SKIP date=${today} — đã có completed attempt (migration 040 guard)`);
+            return;
+        }
+    } catch (guardErr) {
+        console.warn(`[FIRE RISK] Daily analysis guard failed (proceeding): ${guardErr.message}`);
+    }
+
     console.log(`[FIRE RISK] Daily analysis START date=${today} gcs=${cfg.isGcsConfigured() ? 'on' : 'off'}`);
     try {
         const snap = await svc.runAnalysis(today);
+        await repo.updateStatus(snap.id, snap.status, {
+            next_retry_at: null,
+            last_retry_error: null,
+        });
         const riskDist = snap.province_summary?.riskLevelDist || {};
         console.log(
             `[FIRE RISK] Daily analysis DONE date=${today} status=${snap.status} ` +
@@ -125,6 +159,34 @@ const runDailyAnalysis = async (analysisDate) => {
         dbg(`riskDist=${JSON.stringify(riskDist)}`);
     } catch (err) {
         console.error(`[FIRE RISK] Daily analysis FAILED date=${today} elapsed=${Date.now() - t0}ms — ${err.code || err.name || 'ERR'}: ${err.message}`);
+        try {
+            // Đếm tổng attempt failed cho date thay vì đọc retry_count từ 1 dòng
+            // (migration 040: mỗi lần chạy tạo dòng mới, retry_count reset về 0).
+            // failedCount đã bao gồm attempt vừa fail này → RETRY_DELAYS_MS[failedCount-1]
+            // là khoảng chờ TỚI lần thứ (failedCount+1).
+            const failedCount = await repo.countFailedAttempts(today);
+            if (failedCount < RETRY_DELAYS_MS.length) {
+                const failed = await repo.getLatest();
+                const failedDate = _toCronLocalDate(failed?.analysis_date);
+                if (failedDate === today && failed?.id) {
+                    const scheduled = await repo.scheduleRetry(
+                        failed.id,
+                        RETRY_DELAYS_MS[failedCount - 1] || RETRY_DELAYS_MS[0],
+                        err.message,
+                    );
+                    if (scheduled) {
+                        console.warn(
+                            `[FIRE RISK] retry ${failedCount}/${RETRY_DELAYS_MS.length} scheduled at ` +
+                            `${new Date(scheduled.next_retry_at).toISOString()}`,
+                        );
+                    }
+                }
+            } else {
+                console.error(`[FIRE RISK] retry limit reached for ${today} (${failedCount}/${RETRY_DELAYS_MS.length}) — dừng retry`);
+            }
+        } catch (retryErr) {
+            console.error(`[FIRE RISK] failed to persist retry state: ${retryErr.message}`);
+        }
         if (DEBUG && err.stack) console.debug(err.stack);
     } finally {
         analysisRunning = false;
@@ -195,26 +257,55 @@ async function _catchupIfNeeded() {
         return;
     }
 
-    // Đã qua giờ — check mọi trạng thái. Snapshot computing/failed cũng chứng
-    // minh lịch hôm nay đã được gọi; không tự tạo retry loop gây quá tải GEE.
+    // Đã qua giờ — kiểm tra 3 tình huống theo thứ tự ưu tiên (migration 040):
+    //   1. Đã có attempt completed cho localDate → SKIP tuyệt đối (dù có attempt
+    //      failed mới hơn thì kết quả trước vẫn còn giá trị).
+    //   2. Tổng số attempt failed hôm nay >= RETRY_DELAYS_MS.length → SKIP —
+    //      đã hết quota retry, không spam GEE nữa.
+    //   3. Có attempt failed với next_retry_at đã qua → trigger retry.
+    //   4. Chưa có snapshot nào cho localDate → trigger run mới.
+    let hasCompleted = false;
+    try { hasCompleted = await repo.hasCompletedAttempt(localDate); }
+    catch (err) { console.warn(`[FIRE RISK] watchdog hasCompletedAttempt fail: ${err.message}`); }
+
+    if (hasCompleted) {
+        dbg(`recovery watchdog SKIP — có completed attempt cho ${localDate}`);
+        return;
+    }
+
+    let failedCount = 0;
+    try { failedCount = await repo.countFailedAttempts(localDate); }
+    catch (err) { console.warn(`[FIRE RISK] watchdog countFailedAttempts fail: ${err.message}`); }
+
+    if (failedCount >= RETRY_DELAYS_MS.length) {
+        dbg(`recovery watchdog SKIP — retry limit reached (${failedCount}/${RETRY_DELAYS_MS.length}) cho ${localDate}`);
+        return;
+    }
+
     const latest = await repo.getLatest().catch((err) => {
         console.warn(`[FIRE RISK] recovery watchdog: getLatest failed: ${err.message}`);
         return null;
     });
-    // pg parse cột DATE thành Date object theo GIỜ LOCAL của process
-    // (xem postgres-date: `new Date(year, month, day)`), không phải UTC.
-    // Dùng .toISOString() ở đây sẽ lệch -1 ngày khi server chạy ở timezone
-    // dương (VD Asia/Ho_Chi_Minh, +7) → watchdog tưởng snapshot hôm nay
-    // chưa tồn tại và cứ retrigger runDailyAnalysis() mỗi 5 phút. Phải đọc
-    // Y/M/D bằng local getters để khớp với cách Date được dựng.
-    const latestDate = latest?.analysis_date
-        ? (latest.analysis_date instanceof Date
-            ? `${latest.analysis_date.getFullYear()}-${String(latest.analysis_date.getMonth() + 1).padStart(2, '0')}-${String(latest.analysis_date.getDate()).padStart(2, '0')}`
-            : String(latest.analysis_date).slice(0, 10))
-        : null;
+    const latestDate = _toCronLocalDate(latest?.analysis_date);
 
     if (latestDate === localDate) {
-        dbg(`recovery watchdog SKIP — snapshot ${localDate} exists (id=${latest.id} status=${latest.status})`);
+        // Có snapshot hôm nay nhưng chưa completed. Nếu là computing → đợi.
+        // Nếu failed + next_retry_at qua → retry.
+        if (['pending', 'computing', 'exporting'].includes(latest.status)) {
+            dbg(`recovery watchdog SKIP — snapshot ${localDate} đang ${latest.status} (id=${latest.id})`);
+            return;
+        }
+        const retryDue = latest.status === 'failed'
+            && latest.next_retry_at
+            && new Date(latest.next_retry_at).getTime() <= Date.now();
+        if (retryDue) {
+            console.warn(`[FIRE RISK] recovery watchdog starting retry ${failedCount + 1}/${RETRY_DELAYS_MS.length} for ${localDate}`);
+            runDailyAnalysis(localDate).catch((err) => {
+                console.error(`[FIRE RISK] retry analysis error: ${err.message}`);
+            });
+            return;
+        }
+        dbg(`recovery watchdog SKIP — snapshot ${localDate} status=${latest.status} (chưa tới retry time)`);
         return;
     }
 
@@ -249,13 +340,30 @@ const start = () => {
     // region cần tz khác.
     const cronOpts = { timezone: process.env.FIRE_RISK_CRON_TZ || 'Asia/Ho_Chi_Minh' };
 
-    analysisTask = cron.schedule(ANALYSIS_CRON, runDailyAnalysis, cronOpts);
+    // node-cron v4 passes TaskContext to callbacks. Wrapping prevents that
+    // object from being mistaken for an analysis date ("[object Object]").
+    analysisTask = cron.schedule(ANALYSIS_CRON, () => runDailyAnalysis(), cronOpts);
     pollTask     = cron.schedule(POLL_CRON,     runPollExports,   cronOpts);
+
+    const staleRunMaxAgeMs = Number(process.env.FIRE_RISK_ACTIVE_RUN_MAX_AGE_MS)
+        || 45 * 60 * 1000;
+    repo.failStaleActiveRuns(staleRunMaxAgeMs)
+        .then((rows) => {
+            if (rows.length > 0) {
+                console.warn(
+                    `[FIRE RISK] Đã đóng ${rows.length} snapshot bị gián đoạn: `
+                    + rows.map((row) => `#${row.id}`).join(', '),
+                );
+            }
+        })
+        .catch((error) => {
+            console.warn(`[FIRE RISK] Không thể dọn snapshot bị gián đoạn: ${error.message}`);
+        });
 
     console.log(
         `[FIRE RISK] STARTED analysis="${ANALYSIS_CRON}" poll="${POLL_CRON}" ` +
         `timezone=${cronOpts.timezone} catchup=${CATCHUP_ENABLED ? 'on' : 'off'} ` +
-        `gcsConfigured=${cfg.isGcsConfigured() ? 'yes' : 'NO — raster export skipped'} ` +
+        `gcsConfigured=${cfg.isGcsConfigured() ? 'yes' : 'NO — province GCS export skipped; district direct export enabled'} ` +
         `debug=${DEBUG} snapshot_retention=UNLIMITED (cleanup disabled)`,
     );
     console.log(`  ✓ Fire risk analysis job scheduled (${ANALYSIS_CRON} @ ${cronOpts.timezone})`);
