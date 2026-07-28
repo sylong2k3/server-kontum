@@ -155,7 +155,7 @@ const create = async (client, payload) => {
             $8, $9, $10, $11, $12,
             $13, $14, $15, $16
         )
-        ON CONFLICT (measured_by, client_uuid) WHERE client_uuid IS NOT NULL DO NOTHING
+        ON CONFLICT (measured_by, client_uuid) WHERE client_uuid IS NOT NULL AND deleted_at IS NULL DO NOTHING
         RETURNING ${MEASUREMENT_COLUMNS}`,
         [
             payload.areaId || null,

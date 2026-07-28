@@ -408,7 +408,7 @@ const publishTimeMosaic = async ({ storeName, mosaicPath, title }) => {
         await requestGeoserver(
             `/rest/workspaces/${workspace}/coveragestores/${encodeURIComponent(storeName)}/external.imagemosaic?configure=first&coverageName=${encodeURIComponent(storeName)}`,
             {
-                method: 'POST',
+                method: 'PUT',
                 headers: { 'Content-Type': 'text/plain' },
                 body: fileUrl,
             }
