@@ -41,39 +41,30 @@ const buildLabel = (yearFrom, yearTo, lang) => {
 };
 
 /**
- * Đảm bảo nhóm layer đã có CoverageStore ImageMosaic + time dimension trên
- * GeoServer. Idempotent — nếu đã publish (mosaic_path + geoserver_layer đã
- * set) thì trả về ngay, không gọi lại GeoServer.
+ * Đảm bảo có thư mục mosaic trên đĩa cho 1 nhóm (KHÔNG gọi GeoServer — việc
+ * configure mosaic chỉ được phép làm SAU KHI đã có ít nhất 1 GeoTIFF thật
+ * trong thư mục, xem ghi chú trong ingestGranule bên dưới).
  */
-const ensureMosaic = async (groupCode, lang = 'vi') => {
-    const layer = await repo.findGroupByCode(groupCode);
-    if (!layer) {
-        throw new Api404Error(t('layer_series_group_not_found', lang), ['LAYER_GROUP_NOT_FOUND']);
-    }
-    if (layer.mosaic_path && layer.geoserver_layer) { return layer; }
+const _ensureMosaicDir = async (layer, lang) => {
+    if (layer.mosaic_path) { return layer.mosaic_path; }
 
     const dataDir = process.env.GEOSERVER_DATA_DIR;
     if (!dataDir) {
         throw new Api400Error(t('layer_series_data_dir_missing', lang), ['RASTER_DIR_MISSING']);
     }
-
-    const mosaicDir = path.join(dataDir, 'mosaics', groupCode);
+    const mosaicDir = path.join(dataDir, 'mosaics', layer.code);
     await fs.promises.mkdir(mosaicDir, { recursive: true });
-
-    const geoserverLayer = await geoserver.publishTimelapseLayer({
-        geoserver_store: groupCode,
-        table_name:      groupCode,
-        mosaic_path:     mosaicDir,
-    }, lang);
-    await geoserver.enableTimeDimension(groupCode);
-
-    return repo.setMosaicPublished(null, {
-        layerId: layer.id, mosaicPath: mosaicDir, geoserverLayer, geoserverStore: groupCode,
-    });
+    return mosaicDir;
 };
 
 /**
  * Thêm 1 GeoTIFF (1 năm hoặc 1 giai đoạn) vào chuỗi thời gian của 1 nhóm.
+ *
+ * QUAN TRỌNG — thứ tự bắt buộc: GeoServer's `external.imagemosaic?configure=
+ * first` cần đọc được ít nhất 1 GeoTIFF trong thư mục để suy ra band/CRS; gọi
+ * nó khi thư mục còn rỗng sẽ luôn trả 400 Bad Request (không rõ lý do). Vì
+ * vậy: ghi granule đầu tiên xuống đĩa TRƯỚC rồi mới configure=first; các
+ * granule sau đó dùng harvestGeoTiff (append vào mosaic đã tồn tại).
  *
  * @param {object} args
  * @param {string} args.group        — code nhóm (vd 'lop_phu')
@@ -93,19 +84,38 @@ const ingestGranule = async ({ group, yearFrom, yearTo, fileBuffer, user, lang =
         throw new Api400Error(t('layer_series_invalid_tiff', lang), ['INVALID_TIFF']);
     }
 
-    const layer = await ensureMosaic(group, lang);
+    const layer = await repo.findGroupByCode(group);
+    if (!layer) {
+        throw new Api404Error(t('layer_series_group_not_found', lang), ['LAYER_GROUP_NOT_FOUND']);
+    }
+    const isFirstGranule = !(layer.mosaic_path && layer.geoserver_layer);
+    const mosaicDir = await _ensureMosaicDir(layer, lang);
 
     const timeDate = computeTimeValue(yf, yt);
     const dateTag  = isoDate(timeDate);
     const filename = `${group}_${dateTag}.tif`;
-    const destPath = path.join(layer.mosaic_path, filename);
+    const destPath = path.join(mosaicDir, filename);
 
     await fs.promises.writeFile(destPath, fileBuffer);
     const sha = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
-    await geoserver.harvestGeoTiff(group, destPath);
-    if (layer.geoserver_layer) {
-        await geoserver.truncateGwcLayer(layer.geoserver_layer).catch((err) => {
+    let geoserverLayer = layer.geoserver_layer;
+    if (isFirstGranule) {
+        geoserverLayer = await geoserver.publishTimelapseLayer({
+            geoserver_store: group,
+            table_name:      group,
+            mosaic_path:     mosaicDir,
+        }, lang);
+        await geoserver.enableTimeDimension(group);
+        await repo.setMosaicPublished(null, {
+            layerId: layer.id, mosaicPath: mosaicDir, geoserverLayer, geoserverStore: group,
+        });
+    } else {
+        await geoserver.harvestGeoTiff(group, destPath);
+    }
+
+    if (geoserverLayer) {
+        await geoserver.truncateGwcLayer(geoserverLayer).catch((err) => {
             console.warn(`[LAYER-SERIES] GWC truncate failed group=${group}: ${err.message}`);
         });
     }
@@ -123,7 +133,7 @@ const ingestGranule = async ({ group, yearFrom, yearTo, fileBuffer, user, lang =
     });
     await repo.touchLastUpdated(layer.id);
 
-    console.log(`[LAYER-SERIES] group=${group} ingested ${filename} time=${dateTag} by user=${user?.id || 'anon'}`);
+    console.log(`[LAYER-SERIES] group=${group} ingested ${filename} time=${dateTag} first=${isFirstGranule} by user=${user?.id || 'anon'}`);
     return granule;
 };
 
@@ -153,5 +163,5 @@ const listGroups = async (lang = 'vi') => {
 };
 
 module.exports = {
-    computeTimeValue, buildLabel, ensureMosaic, ingestGranule, listTimesteps, listGroups,
+    computeTimeValue, buildLabel, ingestGranule, listTimesteps, listGroups,
 };

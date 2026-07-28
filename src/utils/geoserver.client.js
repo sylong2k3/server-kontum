@@ -155,11 +155,18 @@ const publishTimelapseLayer = async (layer, lang = 'vi') => {
         throw new Error(t('geoserver_timelapse_mosaic_required', lang));
     }
 
-    const fileUrl = mosaicPath.startsWith('file://') ? mosaicPath : `file://${mosaicPath}`;
+    // pathToFileURL xử lý drive letter + backslash trên Windows đúng chuẩn
+    // (file:///C:/... thay vì file://C:\... — cái sau GeoServer parse sai,
+    // trả 400 Bad Request không rõ lý do). Cùng cách publishFsGeoTiffLayer dùng.
+    const { pathToFileURL } = require('url');
+    const fileUrl = mosaicPath.startsWith('file://') ? mosaicPath : pathToFileURL(mosaicPath).href;
 
     // configure=first&coverageName= bắt buộc để GeoServer tạo Coverage ngay lần
-    // đầu (không có 2 tham số này, store được tạo nhưng không có coverage nào
-    // được publish — xem docs/guides/13-geoserver-postgis-setup-guide.md §4.2).
+    // đầu — NHƯNG thư mục mosaic PHẢI đã có ít nhất 1 GeoTIFF hợp lệ trước khi
+    // gọi hàm này, nếu không GeoServer không suy ra được band/CRS và trả 400
+    // Bad Request (không có message rõ ràng). Xem
+    // docs/guides/13-geoserver-postgis-setup-guide.md §4.2 — caller (layer-series
+    // .service#ingestGranule) phải ghi granule đầu tiên vào đĩa TRƯỚC khi gọi.
     await requestGeoserver(
         `/rest/workspaces/${workspace}/coveragestores/${storeName}/external.imagemosaic`
             + `?configure=first&coverageName=${encodeURIComponent(storeName)}`,
@@ -438,7 +445,9 @@ const publishFsGeoTiffLayer = async ({
 
 const harvestGeoTiff = async (coverageStore, tifPath) => {
     const config = assertGeoserverConfigured();
-    const fileUrl = tifPath.startsWith('file://') ? tifPath : `file://${tifPath}`;
+    // pathToFileURL — xem ghi chú trong publishTimelapseLayer ở trên.
+    const { pathToFileURL } = require('url');
+    const fileUrl = tifPath.startsWith('file://') ? tifPath : pathToFileURL(tifPath).href;
 
     await requestGeoserver(
         `/rest/workspaces/${config.workspace}/coveragestores/${coverageStore}/external.imagemosaic`,
