@@ -150,8 +150,11 @@ const loadGeoJSONToPostgis = async ({ filePath, schema, table, mode = 'overwrite
     const propKeys = [...propKeySet].filter(k => IDENTIFIER_RE.test(k));
 
     // Xác định kiểu geometry từ feature đầu tiên có geometry
+    // Dùng MULTI type để khớp với ST_Multi() khi INSERT
     const firstGeom = features.find(f => f.geometry);
-    const geomType = firstGeom ? normalizeGeomType(firstGeom.geometry.type) : 'GEOMETRY';
+    const baseGeomType = firstGeom ? normalizeGeomType(firstGeom.geometry.type) : 'GEOMETRY';
+    const MULTI_PROMOTE = { POINT: 'MULTIPOINT', LINESTRING: 'MULTILINESTRING', POLYGON: 'MULTIPOLYGON' };
+    const geomType = MULTI_PROMOTE[baseGeomType] || baseGeomType;
 
     if (onProgress) { onProgress(10, t('ogr_loading_postgis', lang)); }
 
