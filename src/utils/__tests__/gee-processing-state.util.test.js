@@ -4,6 +4,8 @@ const queue = require('../../queues/gee-task.queue');
 const {
     buildGeeProcessingState,
     normalizeDistrictExport,
+    toPublicProcessingError,
+    toPublicProcessingText,
 } = require('../gee-processing-state.util');
 
 describe('gee-processing-state', () => {
@@ -95,7 +97,7 @@ describe('gee-processing-state', () => {
         expect(() => queue.preflight({ key, cooldownMs: 60 * 1000 }))
             .toThrow(expect.objectContaining({
                 status: 429,
-                errors: ['GEE_TASK_COOLDOWN'],
+                errors: ['PROCESSING_REQUEST_COOLDOWN'],
             }));
     });
 
@@ -125,12 +127,48 @@ describe('gee-processing-state', () => {
                 key: 'analysis:fire-risk:capacity-overflow',
             })).toThrow(expect.objectContaining({
                 status: 503,
-                errors: ['GEE_QUEUE_FULL'],
+                errors: ['PROCESSING_QUEUE_FULL'],
             }));
         } finally {
             releaseActive();
         }
 
         await Promise.all([active, ...queued]);
+    });
+
+    test('không trả thuật ngữ kỹ thuật hoặc lỗi thô cho giao diện', () => {
+        const publicMessage = toPublicProcessingError(
+            'Google Earth Engine raster export failed: User memory limit exceeded',
+        );
+        const state = buildGeeProcessingState({
+            pipeline: 'fire-risk',
+            snapshot: {
+                status: 'failed',
+                error_message: 'WMS GeoServer timeout while reading GeoTIFF',
+            },
+        });
+
+        expect(publicMessage).toBe(
+            'Hệ thống tạm thiếu tài nguyên để xử lý. Yêu cầu sẽ được thử lại tự động.',
+        );
+        expect(state.retry.lastError).toBe(
+            'Quá trình xử lý mất nhiều thời gian hơn dự kiến. Yêu cầu sẽ được thử lại tự động.',
+        );
+        expect(`${publicMessage} ${state.retry.lastError}`)
+            .not.toMatch(/GEE|GeoServer|WMS|GeoTIFF|raster/i);
+    });
+
+    test('làm sạch nội dung thông báo lịch sử nhưng giữ nguyên số liệu nghiệp vụ', () => {
+        const oldNotification = 'Đã hoàn thành phân loại 11 lớp cho kỳ 2026-05. '
+            + 'Tổng diện tích 963.916 ha; diện tích rừng 671.173 ha. '
+            + 'Raster GeoServer đang được xử lý tự động.';
+        const publicNotification = toPublicProcessingText(oldNotification);
+
+        expect(publicNotification).toBe(
+            'Đã hoàn thành phân loại 11 lớp cho kỳ 2026-05. '
+            + 'Tổng diện tích 963.916 ha; diện tích rừng 671.173 ha. '
+            + 'Dữ liệu bản đồ chi tiết theo huyện đang được hoàn thiện tự động.',
+        );
+        expect(publicNotification).not.toMatch(/GeoServer|raster/i);
     });
 });

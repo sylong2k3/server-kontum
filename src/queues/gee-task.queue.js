@@ -49,8 +49,8 @@ const preflight = ({ key = null, cooldownMs = 0 } = {}) => {
     }
     if (!accepting) {
         throw new BusinessLogicError(
-            'Hàng đợi GEE đang dừng; yêu cầu chưa được tiếp nhận.',
-            ['GEE_QUEUE_STOPPING'],
+            'Hệ thống xử lý đang tạm dừng; yêu cầu chưa được tiếp nhận.',
+            ['PROCESSING_QUEUE_STOPPING'],
             StatusCodes.SERVICE_UNAVAILABLE,
         );
     }
@@ -62,8 +62,8 @@ const preflight = ({ key = null, cooldownMs = 0 } = {}) => {
         const retryAfterMs = cooldown - (Date.now() - recent.finishedAt);
         if (retryAfterMs > 0) {
             const error = new Api429Error(
-                'Tác vụ này vừa hoàn tất. Vui lòng chờ trước khi chạy lại.',
-                ['GEE_TASK_COOLDOWN'],
+                'Yêu cầu này vừa hoàn tất. Vui lòng chờ trước khi gửi lại.',
+                ['PROCESSING_REQUEST_COOLDOWN'],
             );
             error.retryAfterMs = retryAfterMs;
             throw error;
@@ -72,8 +72,8 @@ const preflight = ({ key = null, cooldownMs = 0 } = {}) => {
 
     if (pending.length >= MAX_PENDING) {
         throw new BusinessLogicError(
-            'Hàng đợi GEE đang đầy. Vui lòng thử lại sau.',
-            ['GEE_QUEUE_FULL'],
+            'Hàng chờ xử lý đang đầy. Vui lòng thử lại sau.',
+            ['PROCESSING_QUEUE_FULL'],
             StatusCodes.SERVICE_UNAVAILABLE,
         );
     }

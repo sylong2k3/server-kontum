@@ -12,6 +12,65 @@ const nonNegativeInteger = (value) => {
     return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
 };
 
+/**
+ * Chuyển lỗi kỹ thuật thành lời giải thích an toàn, dễ hiểu cho giao diện/API.
+ * Lỗi gốc vẫn được giữ trong DB và log để quản trị viên chẩn đoán.
+ */
+const toPublicProcessingError = (value) => {
+    if (value == null || value === '') return null;
+    const message = String(value);
+
+    if (/out of memory|heap|memory limit|rss|oom/i.test(message)) {
+        return 'Hệ thống tạm thiếu tài nguyên để xử lý. Yêu cầu sẽ được thử lại tự động.';
+    }
+    if (/timed?\s*out|timeout|deadline exceeded/i.test(message)) {
+        return 'Quá trình xử lý mất nhiều thời gian hơn dự kiến. Yêu cầu sẽ được thử lại tự động.';
+    }
+    if (/quota|rate.?limit|too many requests|http\s*429|\b429\b/i.test(message)) {
+        return 'Nguồn dữ liệu đang bận. Hệ thống sẽ tự thử lại sau.';
+    }
+    if (
+        /permission|credential|unauthori[sz]ed|forbidden|service account|authentication/i
+            .test(message)
+    ) {
+        return 'Nguồn dữ liệu hiện chưa sẵn sàng. Vui lòng liên hệ quản trị viên.';
+    }
+    if (/network|socket|econn|fetch failed|connection/i.test(message)) {
+        return 'Kết nối tới nguồn dữ liệu bị gián đoạn. Hệ thống sẽ tự thử lại.';
+    }
+
+    return 'Quá trình xử lý chưa hoàn tất. Hệ thống sẽ tự thử lại; nếu lỗi lặp lại, vui lòng liên hệ quản trị viên.';
+};
+
+/**
+ * Giữ nguyên nội dung nghiệp vụ của thông báo cũ nhưng thay các thuật ngữ hạ
+ * tầng bằng cách diễn đạt dễ hiểu. Dùng ở đầu ra API/realtime/push để các bản
+ * ghi đã lưu trước đây cũng được hiển thị đúng mà không cần xóa lịch sử.
+ */
+const toPublicProcessingText = (value) => {
+    if (value == null || value === '') return value;
+
+    return String(value)
+        .replace(
+            /Raster\s+GeoServer\s+đang\s+được\s+xử\s+lý\s+tự\s+động\.?/gi,
+            'Dữ liệu bản đồ chi tiết theo huyện đang được hoàn thiện tự động.',
+        )
+        .replace(/\braster\s+GeoServer\b/gi, 'dữ liệu bản đồ')
+        .replace(/Google\s+Earth\s+Engine/gi, 'hệ thống xử lý')
+        .replace(/\bGeoServer\b/gi, 'dịch vụ bản đồ')
+        .replace(/\bMinIO\b/gi, 'kho dữ liệu')
+        .replace(/\bGeoTIFF\b/gi, 'dữ liệu bản đồ')
+        .replace(/\bCOG\b/gi, 'dữ liệu bản đồ')
+        .replace(/\bWMS\b/gi, 'dịch vụ bản đồ')
+        .replace(/\bWCS\b/gi, 'dịch vụ tải bản đồ')
+        .replace(/\braster\b/gi, 'dữ liệu bản đồ')
+        .replace(/\bGEE\b/gi, 'hệ thống xử lý')
+        .replace(/\bworker\b/gi, 'hệ thống xử lý')
+        .replace(/\bpipeline\b/gi, 'quy trình xử lý')
+        .replace(/\bingest\b/gi, 'cập nhật')
+        .replace(/\bjob\b/gi, 'tiến trình');
+};
+
 const pipelineFromKey = (key) => {
     const value = String(key || '');
     if (value.startsWith('analysis:fire-risk:')) return 'fire-risk';
@@ -125,11 +184,11 @@ const buildGeeProcessingState = ({
         retry: {
             count: nonNegativeInteger(snapshot?.retry_count ?? snapshot?.retryCount),
             nextRetryAt: snapshot?.next_retry_at || snapshot?.nextRetryAt || null,
-            lastError: snapshot?.last_retry_error
+            lastError: toPublicProcessingError(snapshot?.last_retry_error
                 || snapshot?.lastRetryError
                 || snapshot?.error_message
                 || snapshot?.errorMessage
-                || null,
+                || null),
         },
     };
 };
@@ -137,4 +196,6 @@ const buildGeeProcessingState = ({
 module.exports = {
     buildGeeProcessingState,
     normalizeDistrictExport,
+    toPublicProcessingError,
+    toPublicProcessingText,
 };

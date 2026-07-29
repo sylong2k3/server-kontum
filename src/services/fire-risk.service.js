@@ -30,6 +30,7 @@ const repo   = require('../repositories/fire-risk.repository');
 const geeQueue = require('../queues/gee-task.queue');
 const districtRasterWorker = require('../workers/districtRasterExport.worker');
 const geeAnalysisProcess = require('../workers/geeAnalysisProcess.worker');
+const { toPublicProcessingError } = require('../utils/gee-processing-state.util');
 const {
     eeEval: eeEvaluate,
     getKonTumRegion,
@@ -1093,11 +1094,12 @@ async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
 async function _notifyFireRiskFailed(analysisDate, errMsg) {
     const notifSvc = require('./notification.service');
     const dateStr  = _formatDateVN(analysisDate);
+    const publicError = toPublicProcessingError(errMsg);
     await notifSvc.broadcastToRole('system_admin', {
         type:    'fire_risk_failed',
         title:   `Phân tích cháy rừng ${dateStr} thất bại`,
-        body:    errMsg?.slice(0, 200) || 'Không rõ lỗi',
-        data:    { analysisDate: dateStr, error: errMsg },
+        body:    publicError,
+        data:    { analysisDate: dateStr, error: publicError },
         channel: 'system',
     }).catch(() => {});
 }

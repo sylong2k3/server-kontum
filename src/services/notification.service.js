@@ -3,6 +3,10 @@ const pushProvider = require('../utils/pushProvider.util');
 const ws = require('../realtime/websocket.server');
 const { Api400Error, Api404Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
+const {
+    toPublicProcessingError,
+    toPublicProcessingText,
+} = require('../utils/gee-processing-state.util');
 
 const WS_EVENT = 'notification';
 const TOPIC_ALL = 'all';
@@ -209,26 +213,37 @@ const unregisterDevice = async (actor, { token }, context = {}) => {
 //  HELPERS
 // ════════════════════════════════════════════════════════════════════════════
 
+const _toPublicData = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return value || {};
+    }
+    const data = { ...value };
+    for (const key of ['error', 'errorMessage', 'error_message', 'lastError']) {
+        if (data[key]) data[key] = toPublicProcessingError(data[key]);
+    }
+    return data;
+};
+
 const _toClientPayload = (n) => ({
     id: n.id,
     channel: n.channel,
     type: n.type,
-    title: n.title,
-    body: n.body,
-    data: n.data || {},
+    title: toPublicProcessingText(n.title),
+    body: toPublicProcessingText(n.body),
+    data: _toPublicData(n.data),
     isRead: n.is_read === true,
     readAt: n.read_at || null,
     createdAt: n.created_at,
 });
 
 const _toPushPayload = (n) => ({
-    title: n.title,
-    body: n.body,
+    title: toPublicProcessingText(n.title),
+    body: toPublicProcessingText(n.body),
     data: {
         notificationId: n.id,
         channel: n.channel,
         type: n.type,
-        ...(n.data || {}),
+        ..._toPublicData(n.data),
     },
 });
 

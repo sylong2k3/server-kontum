@@ -47,6 +47,7 @@ const districtRasterWorker = require('../workers/districtRasterExport.worker');
 const geeAnalysisProcess = require('../workers/geeAnalysisProcess.worker');
 const { BusinessLogicError } = require('../core/error.response');
 const { StatusCodes } = require('../core/http-status-code');
+const { toPublicProcessingError } = require('../utils/gee-processing-state.util');
 
 // Full RF pipeline (feature image build, threshold + dataset pseudo-labels,
 // stratified sampling, Random Forest training, JRC water correction) lives in
@@ -752,7 +753,7 @@ async function _notifyForestClassificationCompleted(snapshot, provinceSummary) {
     const body = `Đã hoàn thành phân loại 11 lớp cho kỳ ${period}. `
         + `Tổng diện tích ${Math.round(totalHa).toLocaleString('vi')} ha; `
         + `diện tích rừng ${Math.round(forestHa).toLocaleString('vi')} ha. `
-        + 'Raster GeoServer đang được xử lý tự động.';
+        + 'Dữ liệu bản đồ chi tiết theo huyện đang được hoàn thiện tự động.';
     const data = {
         snapshotId: snapshot.id,
         year: snapshot.year,
@@ -778,11 +779,12 @@ async function _notifyForestClassificationCompleted(snapshot, provinceSummary) {
 async function _notifyForestClassificationFailed(year, month, errorMessage) {
     const notifSvc = require('./notification.service');
     const period = `${year}-${String(month).padStart(2, '0')}`;
+    const publicError = toPublicProcessingError(errorMessage);
     await notifSvc.broadcastToRole('system_admin', {
         type: 'forest_classification_failed',
         title: `Phân loại lớp phủ rừng ${period} thất bại`,
-        body: errorMessage?.slice(0, 200) || 'Không rõ lỗi',
-        data: { year, month, period, error: errorMessage },
+        body: publicError,
+        data: { year, month, period, error: publicError },
         channel: 'system',
     }).catch(() => {});
 }
