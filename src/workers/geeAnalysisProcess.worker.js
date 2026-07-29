@@ -30,8 +30,16 @@ const CHILD_TIMEOUT_MS = Math.max(
 );
 const MEMORY_LIMIT_SAMPLES = 2;
 const KILL_GRACE_MS = 5000;
+const CHILD_MEMORY_WARN_PCT = Math.max(
+    50,
+    Math.min(
+        95,
+        Number.parseInt(process.env.GEE_CHILD_MEMORY_WARN_PCT, 10) || 80,
+    ),
+);
 
 const run = ({ kind, payload }) => new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const execArgv = process.execArgv
         .filter((arg) =>
             !arg.startsWith('--inspect')
@@ -54,6 +62,9 @@ const run = ({ kind, payload }) => new Promise((resolve, reject) => {
     let settled = false;
     let overMemorySamples = 0;
     let forceKillTimer = null;
+    let peakRssBytes = 0;
+    let peakHeapUsedBytes = 0;
+    let memoryWarningLogged = false;
 
     const clearWatchdogs = () => {
         clearTimeout(timeoutTimer);
@@ -91,6 +102,20 @@ const run = ({ kind, payload }) => new Promise((resolve, reject) => {
         if (message?.type === 'memory') {
             const rssBytes = Number(message.rss) || 0;
             const rssMb = rssBytes / (1024 * 1024);
+            const heapUsedBytes = Number(message.heapUsed) || 0;
+            peakRssBytes = Math.max(peakRssBytes, rssBytes);
+            peakHeapUsedBytes = Math.max(peakHeapUsedBytes, heapUsedBytes);
+            if (
+                !memoryWarningLogged &&
+                rssMb >= CHILD_MAX_RSS_MB * (CHILD_MEMORY_WARN_PCT / 100)
+            ) {
+                memoryWarningLogged = true;
+                console.warn(
+                    `[GEE-CHILD] memory warning kind=${kind} pid=${child.pid || '-'} ` +
+                    `rss=${rssMb.toFixed(0)}MB (${CHILD_MEMORY_WARN_PCT}% threshold) ` +
+                    `heapUsed=${(heapUsedBytes / (1024 * 1024)).toFixed(0)}MB`,
+                );
+            }
             overMemorySamples = rssMb > CHILD_MAX_RSS_MB
                 ? overMemorySamples + 1
                 : 0;
@@ -118,6 +143,13 @@ const run = ({ kind, payload }) => new Promise((resolve, reject) => {
     });
     child.once('exit', (code, signal) => {
         clearWatchdogs();
+        console.info(
+            `[GEE-CHILD] exited kind=${kind} pid=${child.pid || '-'} ` +
+            `code=${code ?? 'null'} signal=${signal || 'none'} ` +
+            `peakRss=${(peakRssBytes / (1024 * 1024)).toFixed(0)}MB ` +
+            `peakHeap=${(peakHeapUsedBytes / (1024 * 1024)).toFixed(0)}MB ` +
+            `elapsed=${Date.now() - startedAt}ms`,
+        );
         if (settled) return;
         settled = true;
         if (watchdogError) {

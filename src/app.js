@@ -144,10 +144,13 @@ app.use(
   }),
 );
 
+const shouldSkipCachedRequestLog = (_req, res) =>
+  process.env.HTTP_LOG_CACHE_HITS !== "true" && res.statusCode === 304;
+
 if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"));
+  app.use(morgan("dev", { skip: shouldSkipCachedRequestLog }));
 } else {
-  app.use(morgan("combined"));
+  app.use(morgan("combined", { skip: shouldSkipCachedRequestLog }));
 }
 
 const limiter = rateLimit({
