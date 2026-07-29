@@ -8,11 +8,13 @@
  *  - Credential DB qua biến môi trường PGPASSWORD (không xuất hiện trong log).
  *  - filePath và table_name được whitelist trước khi truyền.
  *
- * Yêu cầu môi trường: `gdal-bin` (ogr2ogr, ogrinfo) phải được cài sẵn.
+ * Fallback: .geojson được xử lý native (không cần GDAL) qua PostGIS ST_GeomFromGeoJSON.
+ * Yêu cầu môi trường cho các format khác: `gdal-bin` (ogr2ogr, ogrinfo) phải được cài sẵn.
  *   Docker: RUN apt-get install -y gdal-bin
  */
 
 const { spawn } = require('child_process');
+const fs         = require('fs');
 const path       = require('path');
 const { t }      = require('./i18n.util');
 
@@ -103,10 +105,123 @@ const buildPgConn = (lang = 'vi') => {
     return `PG:host=${DB_HOST} port=${DB_PORT || 5432} dbname=${DB_NAME} user=${DB_USER}`;
 };
 
+// ── Native GeoJSON fallback (không cần GDAL) ─────────────────────────────────
+
+const inspectGeoJSON = (filePath) => {
+    const gj = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
+
+    let geometryType = 'GEOMETRY';
+    if (features.length > 0 && features[0].geometry) {
+        geometryType = normalizeGeomType(features[0].geometry.type);
+    }
+
+    const layerName = path.basename(filePath, path.extname(filePath)).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
+
+    return {
+        layerName,
+        geometryType,
+        epsgCode: 4326,
+        featureCount: features.length,
+        layers: [layerName],
+    };
+};
+
+const loadGeoJSONToPostgis = async ({ filePath, schema, table, mode = 'overwrite', onProgress, lang = 'vi' }) => {
+    const safeSchema = assertIdentifier(schema, 'schema');
+    const safeTable  = assertIdentifier(table, 'table');
+
+    const { getClient } = require('../configs/database');
+
+    if (onProgress) { onProgress(5, t('ogr_prepare', lang)); }
+
+    const gj = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
+
+    if (features.length === 0) {
+        throw new Error(t('ogrinfo_failed', lang, { msg: 'GeoJSON has no features' }));
+    }
+
+    // Collect property keys (chỉ giữ tên hợp lệ làm identifier)
+    const propKeySet = new Set();
+    for (const f of features) {
+        if (f.properties) { Object.keys(f.properties).forEach(k => propKeySet.add(k)); }
+    }
+    const propKeys = [...propKeySet].filter(k => IDENTIFIER_RE.test(k));
+
+    // Xác định kiểu geometry từ feature đầu tiên có geometry
+    const firstGeom = features.find(f => f.geometry);
+    const geomType = firstGeom ? normalizeGeomType(firstGeom.geometry.type) : 'GEOMETRY';
+
+    if (onProgress) { onProgress(10, t('ogr_loading_postgis', lang)); }
+
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
+
+        if (mode === 'overwrite') {
+            await client.query(`DROP TABLE IF EXISTS "${safeSchema}"."${safeTable}"`);
+        }
+
+        const colDefs = propKeys.map(c => `"${c}" TEXT`).join(', ');
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS "${safeSchema}"."${safeTable}" (
+                id   SERIAL PRIMARY KEY
+                ${colDefs ? ', ' + colDefs : ''}
+                , geom geometry(${geomType}, 4326)
+            )
+        `);
+
+        const BATCH = 500;
+        for (let i = 0; i < features.length; i += BATCH) {
+            const batch = features.slice(i, i + BATCH);
+            for (const feat of batch) {
+                if (!feat.geometry) { continue; }
+                const props = feat.properties || {};
+                const vals  = propKeys.map(c => (props[c] != null ? String(props[c]) : null));
+                const geomJson = JSON.stringify(feat.geometry);
+
+                if (propKeys.length > 0) {
+                    const colList   = propKeys.map(c => `"${c}"`).join(', ');
+                    const paramList = propKeys.map((_, idx) => `$${idx + 1}`).join(', ');
+                    await client.query(
+                        `INSERT INTO "${safeSchema}"."${safeTable}" (${colList}, geom)
+                         VALUES (${paramList}, ST_Multi(ST_GeomFromGeoJSON($${propKeys.length + 1})))`,
+                        [...vals, geomJson],
+                    );
+                } else {
+                    await client.query(
+                        `INSERT INTO "${safeSchema}"."${safeTable}" (geom)
+                         VALUES (ST_Multi(ST_GeomFromGeoJSON($1)))`,
+                        [geomJson],
+                    );
+                }
+            }
+            if (onProgress) {
+                onProgress(10 + Math.round(((i + batch.length) / features.length) * 65), t('ogr_loading_postgis', lang));
+            }
+        }
+
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS "${safeTable}_geom_idx" ON "${safeSchema}"."${safeTable}" USING GIST(geom)`,
+        );
+
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+
+    if (onProgress) { onProgress(80, t('ogr_load_completed', lang)); }
+};
+
 // ── Inspect (ogrinfo) ─────────────────────────────────────────────────────────
 
 /**
  * Lấy thông tin lớp đầu tiên (hoặc `layerName` cụ thể) trong file geo.
+ * .geojson dùng native parser (không cần GDAL).
  *
  * @param {string} filePath    - Đường dẫn tuyệt đối đến file (.zip/.geojson/.kml/.tif...)
  * @param {string} [layerName] - Tên layer con trong FileGDB/KML nhiều layer (không bắt buộc)
@@ -120,6 +235,10 @@ const buildPgConn = (lang = 'vi') => {
  */
 const inspect = async (filePath, layerName = null, lang = 'vi') => {
     const safePath = assertSafePath(filePath);
+
+    if (safePath.toLowerCase().endsWith('.geojson')) {
+        return inspectGeoJSON(safePath);
+    }
 
     // Lấy danh sách layers trước
     const listResult = await runProcess('ogrinfo', ['-al', '-so', safePath]);
@@ -171,10 +290,11 @@ const inspect = async (filePath, layerName = null, lang = 'vi') => {
     };
 };
 
-// ── Load to PostGIS (ogr2ogr) ─────────────────────────────────────────────────
+// ── Load to PostGIS (ogr2ogr hoặc native cho GeoJSON) ────────────────────────
 
 /**
  * Nạp dữ liệu vector từ file vào bảng PostGIS.
+ * .geojson dùng native loader (không cần GDAL).
  * Tự tạo bảng nếu chưa có (chế độ overwrite/-overwrite).
  *
  * @param {object} opts
@@ -200,7 +320,12 @@ const loadToPostgis = async ({
     const safePath   = assertSafePath(filePath);
     const safeSchema = assertIdentifier(schema, 'schema');
     const safeTable  = assertIdentifier(table, 'table');
-    const connStr    = buildPgConn(lang);
+
+    if (safePath.toLowerCase().endsWith('.geojson')) {
+        return loadGeoJSONToPostgis({ filePath: safePath, schema: safeSchema, table: safeTable, mode, onProgress, lang });
+    }
+
+    const connStr = buildPgConn(lang);
 
     if (onProgress) { onProgress(5, t('ogr_prepare', lang)); }
 
