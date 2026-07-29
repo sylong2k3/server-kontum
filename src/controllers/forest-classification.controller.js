@@ -9,6 +9,11 @@ const { OK, OK_LIST, CREATED } = require('../core/success.response');
 const { Api400Error, Api404Error } = require('../core/error.response');
 const { hasPermission } = require('../middlewares/auth.middleware');
 const { t } = require('../utils/i18n.util');
+const {
+    buildGeeProcessingState,
+    toPublicProcessingError,
+} = require('../utils/gee-processing-state.util');
+const geeQueue = require('../queues/gee-task.queue');
 
 // Debug — FC_DEBUG=true (hoặc NODE_ENV=development) → in `[FOREST-CTL:DBG] ...`
 // cho các endpoint. Info/warn/error luôn ghi.
@@ -166,7 +171,14 @@ const resolveDistrictPublishSource = async (row) => {
 // ── GET /forest-classification/latest ────────────────────────────────────────
 const getLatest = async (req, res) => {
     dbg('LATEST', `caller user=${req.user?.id || 'anon'} lang=${req.lang}`);
-    const { snapshot, districtAreas, comparison, stale, computing }
+    const {
+        snapshot,
+        processingSnapshot,
+        districtAreas,
+        comparison,
+        stale,
+        computing,
+    }
         = await svc.getLatest();
     OK(res, t('get_detail_success', req.lang), {
         snapshot: formatSnapshot(snapshot),
@@ -174,6 +186,10 @@ const getLatest = async (req, res) => {
         comparison,
         stale,
         computing,
+        processing: buildGeeProcessingState({
+            pipeline: 'forest-classification',
+            snapshot: processingSnapshot || snapshot,
+        }),
     });
 };
 
@@ -190,7 +206,12 @@ const getHistory = async (req, res) => {
     if (req.query.hasGeoserverLayer === 'false') hasGeoserverLayer = false;
     dbg('HISTORY', `page=${page} limit=${limit} hasGeoserverLayer=${hasGeoserverLayer ?? 'all'} user=${req.user?.id || 'anon'}`);
     const { items, total } = await svc.getHistory({ page, limit, hasGeoserverLayer });
-    OK_LIST(res, t('get_list_success', req.lang), items, {
+    const responseItems = items.map((item) => ({
+        ...item,
+        error_message: toPublicProcessingError(item.error_message),
+        last_retry_error: toPublicProcessingError(item.last_retry_error),
+    }));
+    OK_LIST(res, t('get_list_success', req.lang), responseItems, {
         page, limit, total,
         ...(hasGeoserverLayer !== undefined ? { hasGeoserverLayer } : {}),
     });
@@ -255,6 +276,12 @@ const refresh = async (req, res) => {
     const gtBufferM    = req.body?.gtBufferM    != null ? Number(req.body.gtBufferM)    : undefined;
     const minFieldTest = req.body?.minFieldTest != null ? Number(req.body.minFieldTest) : undefined;
 
+    const periodKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const taskKey = `analysis:forest-classification:${periodKey}`;
+    const admission = geeQueue.preflight({
+        key: taskKey,
+        cooldownMs: geeQueue.MANUAL_TASK_COOLDOWN_MS,
+    });
     svc.refresh({
         year: selectedYear,
         month: selectedMonth,
@@ -267,14 +294,22 @@ const refresh = async (req, res) => {
             error.message,
         );
     });
+    const processing = buildGeeProcessingState({
+        pipeline: 'forest-classification',
+        taskKey,
+    });
     res.status(202).json({
-        message: 'Đã tiếp nhận yêu cầu phân loại lớp phủ rừng.',
+        message: admission.deduplicated
+            ? 'Yêu cầu phân loại kỳ này đã có trong hàng chờ xử lý.'
+            : 'Đã tiếp nhận yêu cầu phân loại lớp phủ rừng.',
         status: 202,
         data: {
             run: {
                 year: selectedYear,
                 month: selectedMonth,
-                status: 'queued',
+                status: processing.state,
+                deduplicated: admission.deduplicated,
+                processing,
             },
         },
     });
@@ -302,6 +337,11 @@ const queryPeriod = async (req, res) => {
             comparison,
             cached,
             computing,
+            processing: buildGeeProcessingState({
+                pipeline: 'forest-classification',
+                taskKey: `analysis:forest-classification:${year}-${String(month).padStart(2, '0')}`,
+                snapshot,
+            }),
         },
     );
 };
@@ -310,10 +350,10 @@ const queryPeriod = async (req, res) => {
 // Poll a specific run by ID — used after POST /query returns computing=true.
 const getSnapshot = async (req, res) => {
     const id = parseInt(req.params.id, 10);
-    if (!id || id <= 0) return res.status(400).json({ message: 'id không hợp lệ.' });
+    if (!id || id <= 0) return res.status(400).json({ message: 'Mã kết quả không hợp lệ.' });
 
     const result = await svc.getSnapshotById(id);
-    if (!result) return res.status(404).json({ message: 'Không tìm thấy snapshot.' });
+    if (!result) return res.status(404).json({ message: 'Không tìm thấy kết quả.' });
 
     // BUG-FIX (2026-07-19): trước đây `!['completed','published'].includes(status)`
     // trả TRUE cho cả `failed` → UI hiện "Đang phân tích..." mãi cho snapshot đã
@@ -325,6 +365,10 @@ const getSnapshot = async (req, res) => {
         districtAreas: result.districtAreas,
         comparison:    result.comparison,
         computing:     activeStates.includes(result.snapshot.status),
+        processing:    buildGeeProcessingState({
+            pipeline: 'forest-classification',
+            snapshot: result.snapshot,
+        }),
     });
 };
 
@@ -343,6 +387,7 @@ function formatSnapshot(s) {
         month:              s.month,
         status:             s.status,
         provinceSummary:    s.province_summary,
+        districtExportSummary: s.district_export_summary || null,
         oobAccuracy:        numericOrNull(s.oob_accuracy),
         testKappa:          numericOrNull(s.test_kappa),
         geoserverLayer:     s.geoserver_layer || null,
@@ -352,6 +397,10 @@ function formatSnapshot(s) {
         geoserverDownloadUrl: buildGeoserverDownloadUrl(s.geoserver_layer),
         downloadFilename:     forestFilename(s.year, s.month),
         computedAt:         s.computed_at,
+        errorMessage:       toPublicProcessingError(s.error_message),
+        retryCount:         Number(s.retry_count) || 0,
+        nextRetryAt:        s.next_retry_at || null,
+        lastRetryError:     toPublicProcessingError(s.last_retry_error),
     };
 }
 
@@ -362,10 +411,10 @@ function formatSnapshot(s) {
 const getDistrictExports = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
-        throw new Api400Error('ID snapshot không hợp lệ.', ['INVALID_ID']);
+        throw new Api400Error('Mã kết quả không hợp lệ.', ['INVALID_ID']);
     }
     let snap = await repo.getById(id);
-    if (!snap) throw new Api404Error('Snapshot không tồn tại.', ['SNAPSHOT_NOT_FOUND']);
+    if (!snap) throw new Api404Error('Không tìm thấy kết quả.', ['RESULT_NOT_FOUND']);
 
     await repo.reconcileDistrictExportArtifacts(id);
     const promoted = await repo.markPublishedIfDistrictsReady(id);
@@ -427,7 +476,9 @@ const getDistrictExports = async (req, res) => {
             geoserverStore:      r.geoserver_store || r.ingest_geoserver_store || null,
             rasterIngestJobId:   r.raster_ingest_job_id || null,
             rasterIngestStatus:  r.ingest_job_status || null,
-            errorMessage:        r.error_message || r.ingest_job_error || null,
+            errorMessage:        toPublicProcessingError(
+                r.error_message || r.ingest_job_error,
+            ),
             durationMs:          r.duration_ms || null,
             startedAt:           r.started_at,
             completedAt:         r.completed_at,
@@ -478,17 +529,17 @@ const publishRaster = async (req, res) => {
     const id = Number(req.params.id);
     const force = req.query.force === '1';
     if (!Number.isInteger(id) || id <= 0) {
-        throw new Api400Error('ID snapshot không hợp lệ.', ['INVALID_ID']);
+        throw new Api400Error('Mã kết quả không hợp lệ.', ['INVALID_ID']);
     }
 
     const snap = await repo.getById(id);
     if (!snap) {
-        throw new Api404Error('Snapshot không tồn tại.', ['SNAPSHOT_NOT_FOUND']);
+        throw new Api404Error('Không tìm thấy kết quả.', ['RESULT_NOT_FOUND']);
     }
     if (!['completed', 'published'].includes(snap.status)) {
         throw new Api400Error(
-            'Snapshot chưa hoàn thành nên chưa thể công bố.',
-            ['SNAPSHOT_NOT_COMPLETED'],
+            'Kết quả chưa hoàn tất nên chưa thể công bố.',
+            ['RESULT_NOT_READY'],
         );
     }
 
@@ -643,7 +694,7 @@ const publishRaster = async (req, res) => {
         jobs,
         errors: [...enqueueErrors.entries()].map(([districtExportId, message]) => ({
             districtExportId,
-            message,
+            message: toPublicProcessingError(message),
         })),
         // Backward compatibility for consumers that previously expected one job.
         jobId: firstJob?.jobId || null,
@@ -653,13 +704,17 @@ const publishRaster = async (req, res) => {
     };
 
     if (enqueuedCount > 0) {
-        return CREATED(res, `Đã xếp hàng ${enqueuedCount} raster huyện để công bố.`, data);
+        return CREATED(
+            res,
+            `Đã đưa dữ liệu của ${enqueuedCount} huyện vào hàng chờ cập nhật bản đồ.`,
+            data,
+        );
     }
     return OK(
         res,
         alreadyPublished
-            ? `Đủ ${cfg.EXPECTED_DISTRICT_COUNT}/${cfg.EXPECTED_DISTRICT_COUNT} raster huyện đã được lưu trữ và công bố.`
-            : 'Đã kiểm tra trạng thái công bố raster theo huyện.',
+            ? `Dữ liệu bản đồ của ${cfg.EXPECTED_DISTRICT_COUNT}/${cfg.EXPECTED_DISTRICT_COUNT} huyện đã được lưu và công bố.`
+            : 'Đã kiểm tra trạng thái cập nhật bản đồ theo huyện.',
         data,
     );
 };

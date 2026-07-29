@@ -5,6 +5,10 @@ const asyncHandler = require('../helpers/async-handler');
 const ctrl         = require('../controllers/forest-classification.controller');
 const gtCtrl       = require('../controllers/forest-gt.controller');
 const { optionalAuth, verifyToken, requirePermission } = require('../middlewares/auth.middleware');
+const {
+    geeManualTriggerLimiter,
+    geeQueryLimiter,
+} = require('../middlewares/gee-rate-limit.middleware');
 
 const router = Router();
 
@@ -15,7 +19,7 @@ router.get('/latest',  optionalAuth, asyncHandler(ctrl.getLatest));
 
 // On-demand user query: cache-hit returns immediately; miss triggers async run.
 // optionalAuth so authenticated users are logged as requester.
-router.post('/query',  optionalAuth, asyncHandler(ctrl.queryPeriod));
+router.post('/query', optionalAuth, geeQueryLimiter, asyncHandler(ctrl.queryPeriod));
 
 // Poll a specific snapshot (for clients waiting on computing=true results).
 router.get('/snapshot/:id', optionalAuth, asyncHandler(ctrl.getSnapshot));
@@ -38,7 +42,7 @@ router.get('/history', verifyToken, requirePermission('forest_classification', '
 // Full audit log — all runs, all statuses, timing, trigger, errors.
 // Manually trigger a run for a specific period.
 router.post('/refresh', verifyToken, requirePermission('forest_classification', 'manage'),
-    asyncHandler(ctrl.refresh));
+    geeManualTriggerLimiter, asyncHandler(ctrl.refresh));
 
 // Publish the snapshot's district raster batch → MinIO → GeoServer. Each job
 // back-links its forest_district_exports row; the snapshot becomes published

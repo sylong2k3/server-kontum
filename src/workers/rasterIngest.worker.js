@@ -87,6 +87,12 @@ const startWorker = () => {
         return;
     }
     const s3ok = cfg.isS3Configured();
+    if (cfg.REQUESTED_CONCURRENCY !== cfg.CONCURRENCY) {
+        console.warn(
+            `[${WORKER_ID}] concurrency=${cfg.REQUESTED_CONCURRENCY} bị giới hạn còn ` +
+            `${cfg.CONCURRENCY} để tránh tăng đột biến bộ nhớ`,
+        );
+    }
     console.log(
         `[${WORKER_ID}] STARTED — poll="${cfg.WORKER_POLL_CRON}" ` +
         `concurrency=${cfg.CONCURRENCY} maxRetries=${cfg.MAX_RETRIES} ` +

@@ -97,13 +97,13 @@ async function enqueue({
     if (!cfg.ENABLED) {
         throw new BusinessLogicError(
             t('raster_ingest_disabled', lang),
-            ['RASTER_INGEST_DISABLED'], StatusCodes.SERVICE_UNAVAILABLE,
+            ['MAP_UPDATE_DISABLED'], StatusCodes.SERVICE_UNAVAILABLE,
         );
     }
     if (!cfg.isS3Configured()) {
         throw new BusinessLogicError(
             t('raster_ingest_s3_not_configured', lang),
-            ['RASTER_INGEST_S3_NOT_CONFIGURED'], StatusCodes.SERVICE_UNAVAILABLE,
+            ['MAP_STORAGE_NOT_READY'], StatusCodes.SERVICE_UNAVAILABLE,
         );
     }
     if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {

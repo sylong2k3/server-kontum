@@ -26,6 +26,7 @@
 
 const cron = require('node-cron');
 const cfg  = require('../configs/forest-classification');
+const retentionCfg = require('../configs/analysis-retention');
 const svc  = require('../services/forest-classification.service');
 const repo = require('../repositories/forest-classification.repository');
 
@@ -132,10 +133,7 @@ const runScheduledAnalysis = async ({ recoverStale = false } = {}) => {
     );
     try {
         const snap = await svc.runAnalysis(year, month);
-        await repo.updateStatus(snap.id, snap.status, {
-            next_retry_at: null,
-            last_retry_error: null,
-        });
+        await repo.clearRetryState(snap.id);
         const summary = snap.province_summary || {};
         let forestHa = 0;
         for (const id of cfg.FOREST_CLASS_IDS) {
@@ -261,7 +259,8 @@ const start = () => {
     console.log(
         `[FOREST] STARTED analysis="${ANALYSIS_CRON}" timezone=${CRON_TZ} ` +
         `catchup=${CATCHUP_ENABLED ? `on/${CATCHUP_DELAY_MS}ms` : 'off'} ` +
-        `bucket=${cfg.MINIO_BUCKET || '(default)'} alertPct=${cfg.ALERT_CHANGE_PCT ?? '(default)'} debug=${DEBUG}`,
+        `bucket=${cfg.MINIO_BUCKET || '(default)'} alertPct=${cfg.ALERT_CHANGE_PCT ?? '(default)'} ` +
+        `debug=${DEBUG} snapshotRetention=${retentionCfg.FOREST_CLASSIFICATION_MONTHS}m`,
     );
     console.log(`  ✓ Forest classification job scheduled (${ANALYSIS_CRON} @ ${CRON_TZ}, previous calendar month)`);
 };

@@ -4,6 +4,7 @@ const ingestSvc  = require('../services/raster-ingest.service');
 const schemas    = require('../validators/raster-ingest.validator');
 const { OK, CREATED } = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
+const { toPublicProcessingError } = require('../utils/gee-processing-state.util');
 
 const DEBUG = process.env.RASTER_INGEST_DEBUG === 'true'
     || process.env.NODE_ENV === 'development';
@@ -20,6 +21,15 @@ const validate = (schema, source, lang = 'vi') => {
         throw err;
     }
     return value;
+};
+
+const toPublicJob = (job) => {
+    if (!job) return job;
+    return {
+        ...job,
+        error_log: toPublicProcessingError(job.error_log),
+        error_message: toPublicProcessingError(job.error_message),
+    };
 };
 
 // ── POST /api/v1/map/rasters/ingest-gee ──────────────────────────────────────
@@ -67,14 +77,18 @@ const getIngestJob = async (req, res) => {
     const id = Number(req.params.id);
     const job = await ingestSvc.getJobById(id, req.lang);
     dbg(`GET /ingest-jobs/${id} → status=${job.status} progress=${job.progress}`);
-    OK(res, t('raster_ingest_job_get_success', req.lang), job);
+    OK(res, t('raster_ingest_job_get_success', req.lang), toPublicJob(job));
 };
 
 // ── GET /api/v1/map/layers/:code/ingest-jobs ─────────────────────────────────
 
 const listIngestJobsByLayer = async (req, res) => {
     const jobs = await ingestSvc.listJobsByLayer(req.params.code, req.query || {});
-    OK(res, t('raster_ingest_jobs_list_success', req.lang), jobs);
+    OK(
+        res,
+        t('raster_ingest_jobs_list_success', req.lang),
+        Array.isArray(jobs) ? jobs.map(toPublicJob) : jobs,
+    );
 };
 
 module.exports = { enqueueGeeIngest, getIngestJob, listIngestJobsByLayer };

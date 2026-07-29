@@ -34,8 +34,9 @@ const AUTO_YES = args.includes('--yes') || args.includes('-y');
 
 const DISTRICTS_FILE = path.resolve(__dirname, '../data/RanhGioiHuyen_Polygon.geojson');
 
-// Same logic as gee-satellite.util.js loader (post-fix). Giữ đồng bộ để mapping
-// N ↔ feature index khớp với cả code cũ (fallback KT-N) và code mới.
+// Iterate cùng thứ tự với loader ở gee-satellite.util.js để mapping
+// N ↔ feature index khớp với code cũ (fallback KT-N).
+// Loader chỉ đọc `ma_huyen`/`ten_huyen` (schema tiếng Việt) — script này giống.
 function readDistricts() {
     const doc = JSON.parse(fs.readFileSync(DISTRICTS_FILE, 'utf8'));
     if (doc.type !== 'FeatureCollection' || !Array.isArray(doc.features)) {
@@ -48,15 +49,13 @@ function readDistricts() {
         const g = f?.geometry;
         if (!g || !Array.isArray(g.coordinates) || g.coordinates.length === 0) continue;
         const p = f.properties || {};
-        const rawName = p.NAME_VN || p.ADM2_NAME || p.NAME_2 || p.VARNAME_2
-            || p.NAME_EN || p.ten_huyen || p.ten || null;
-        const rawCode = p.CODE_2002 ?? p.ADM2_CODE ?? p.ID_2 ?? p.OBJECTID
-            ?? p.ma_huyen ?? null;
-        const name = rawName || `Huyện ${idx + 1}`;
-        const code = rawCode != null && rawCode !== '' ? String(rawCode) : `KT-${idx + 1}`;
-        const dedupeKey = String(rawCode ?? '') || `name:${name.toLowerCase()}`;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
+        const rawName = p.ten_huyen || p.ten || null;
+        const rawCode = p.ma_huyen ?? null;
+        if (!rawName || rawCode == null || rawCode === '') continue;
+        const name = String(rawName);
+        const code = String(rawCode);
+        if (seen.has(code)) continue;
+        seen.add(code);
         idx += 1;
         out.push({ n: idx, code, name });
     }

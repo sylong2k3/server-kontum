@@ -17,6 +17,8 @@ const geoserverClient = require("./src/utils/geoserver.client");
 
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
+const analysisRetentionJob = require("./src/jobs/analysis-retention.job");
+const memoryMonitorJob = require("./src/jobs/memory-monitor.job");
 const weatherJob = require("./src/jobs/weather.job");
 const fireRiskJob            = require("./src/jobs/fire-risk.job");
 const fireRiskUrlRefreshJob  = require("./src/jobs/fire-risk-url-refresh.job");
@@ -24,6 +26,8 @@ const forestClassificationJob = require("./src/jobs/forest-classification.job");
 const imageProcessingWorker = require("./src/workers/imageProcessing.worker");
 const geoImportWorker       = require("./src/workers/geoImport.worker");
 const rasterIngestWorker    = require("./src/workers/rasterIngest.worker");
+const geeInterruptedRunRecovery = require("./src/workers/geeInterruptedRunRecovery.worker");
+const geeTaskQueue = require("./src/queues/gee-task.queue");
 const {
   initWebSocketServer,
   closeWebSocketServer,
@@ -64,8 +68,16 @@ const startBackgroundWorkers = async () => {
     return;
   }
 
+  geeTaskQueue.start();
+  try {
+    await geeInterruptedRunRecovery.recoverInterruptedRuns();
+  } catch (error) {
+    console.warn(`[GEE-RECOVERY] Không thể chạy startup recovery: ${error.message}`);
+  }
+
   tokenCleanupJob.start();
   notificationCleanupJob.start();
+  analysisRetentionJob.start();
   weatherJob.start();
   fireRiskJob.start();
   fireRiskUrlRefreshJob.start();
@@ -78,6 +90,7 @@ const startBackgroundWorkers = async () => {
 const stopBackgroundWorkers = async () => {
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
+  analysisRetentionJob.stop();
   weatherJob.stop();
   fireRiskJob.stop();
   fireRiskUrlRefreshJob.stop();
@@ -85,6 +98,7 @@ const stopBackgroundWorkers = async () => {
   imageProcessingWorker.stopWorker();
   geoImportWorker.stopWorker();
   rasterIngestWorker.stopWorker();
+  geeTaskQueue.stop();
 
   if (!backgroundWorkerLockClient) return;
   const client = backgroundWorkerLockClient;
@@ -156,6 +170,7 @@ async function gracefulShutdown(signal) {
   );
 
   await stopBackgroundWorkers();
+  memoryMonitorJob.stop();
   closeWebSocketServer();
 
   if (server) {
@@ -222,6 +237,7 @@ const initializeAndStartServer = async () => {
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
 
+    memoryMonitorJob.start();
     await startBackgroundWorkers();
 
     process.on("unhandledRejection", (error) => {
@@ -267,6 +283,7 @@ const initializeAndStartServer = async () => {
     });
     initWebSocketServer(server, { path: WS_PATH });
 
+    memoryMonitorJob.start();
     await startBackgroundWorkers();
 
     process.on("unhandledRejection", (error) => {

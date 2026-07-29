@@ -144,10 +144,13 @@ app.use(
   }),
 );
 
+const shouldSkipCachedRequestLog = (_req, res) =>
+  process.env.HTTP_LOG_CACHE_HITS !== "true" && res.statusCode === 304;
+
 if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"));
+  app.use(morgan("dev", { skip: shouldSkipCachedRequestLog }));
 } else {
-  app.use(morgan("combined"));
+  app.use(morgan("combined", { skip: shouldSkipCachedRequestLog }));
 }
 
 const limiter = rateLimit({
@@ -179,7 +182,9 @@ const authLimiter = rateLimit({
 
 const expensiveLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parseInt(process.env.EXPENSIVE_RATE_LIMIT_MAX, 10) || 20,
+  // UI fire/forest poll nhiều endpoint read-only trong lúc GEE chạy. Giữ ngưỡng
+  // đủ cho polling; POST khởi chạy graph có limiter riêng chặt hơn theo user/IP.
+  max: parseInt(process.env.EXPENSIVE_RATE_LIMIT_MAX, 10) || 120,
   standardHeaders: true,
   legacyHeaders: false,
   message: {

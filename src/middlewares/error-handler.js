@@ -14,6 +14,9 @@ const errorHandler = (err, req, res, next) => {
     if (res.headersSent) {return next(err);}
 
     if (err instanceof BaseError) {
+        if (Number.isFinite(err.retryAfterMs) && err.retryAfterMs > 0) {
+            res.setHeader('Retry-After', String(Math.ceil(err.retryAfterMs / 1000)));
+        }
         return res.status(err.status).json({
             success: false,
             message: err.message,

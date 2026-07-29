@@ -59,6 +59,10 @@ const repo      = require('../repositories/satellite.repository');
 const geoserver = require('../utils/geoserver.client');
 const { BusinessLogicError } = require('../core/error.response');
 const { StatusCodes } = require('../core/http-status-code');
+const {
+    normalizeParams,
+    resolveClassifiedAnchor,
+} = require('../utils/satellite-request.util');
 
 // MinIO bucket for satellite rasters.
 const SATELLITE_MINIO_BUCKET = process.env.SATELLITE_MINIO_BUCKET || 'satellite-rasters';
@@ -67,30 +71,6 @@ const GCS_KEY_FILE           = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
 const EXPORT_SCALE_M         = parseInt(process.env.SATELLITE_EXPORT_SCALE_M, 10) || 30;
 
 // ── Request normalization & caching helpers ───────────────────────────────────
-
-function normalizeParams(raw) {
-    return {
-        imageType:   raw.imageType   || 'rgb',
-        collection:  raw.collection  || null,
-        cloudCover:  raw.cloudCover  != null ? Number(raw.cloudCover) : 50,
-        startDate:   raw.startDate   || null,
-        endDate:     raw.endDate     || null,
-        geometry:    raw.geometry    || null,
-        ndviMinThresh: raw.ndviMinThresh != null ? Number(raw.ndviMinThresh) : null,
-        // Forest classification v3 ground-truth params (used by /classified).
-        groundTruthAssetId: raw.groundTruthAssetId ? String(raw.groundTruthAssetId).trim() : '',
-        gtBufferM:          raw.gtBufferM != null ? Number(raw.gtBufferM) : 60,
-        minFieldTest:       raw.minFieldTest != null ? Number(raw.minFieldTest) : 10,
-        // Fire warning v8.1 params (used by /fire-risk). analysisDate falls
-        // back to endDate so a single date field works for both.
-        analysisDate:       raw.analysisDate || raw.endDate || null,
-        enableRf:           raw.enableRf !== undefined ? Boolean(raw.enableRf) : null,
-        inputFireAssetId:   raw.inputFireAssetId ? String(raw.inputFireAssetId).trim() : '',
-        // Which fire-risk layer to visualise: 'riskLevel' (default), 'score',
-        // 'priorityWarning', 'confidence'.
-        fireLayer:          raw.fireLayer || 'riskLevel',
-    };
-}
 
 // Validate required date params per image type. Throws a 400 BusinessLogicError
 // with a clear message rather than letting the GEE server complain later with
@@ -116,12 +96,15 @@ function validateParams(imageType, params) {
             StatusCodes.BAD_REQUEST,
         );
     }
+    if (imageType === 'classified') {
+        resolveClassifiedAnchor(params);
+    }
 }
 
 function hashParams(params) {
     const str = JSON.stringify({
         t: params.imageType, c: params.collection, cc: params.cloudCover,
-        sd: params.startDate, ed: params.endDate,
+        sd: params.startDate, ed: params.endDate, m: params.month,
         g: params.geometry,
         // Ground-truth params affect classification output, so include in cache key.
         gt: params.groundTruthAssetId || null,
@@ -312,16 +295,14 @@ const CLASSIFIED_CLASSES = fcCfg.CLASS_NAMES.map((name, id) => ({
  * and JRC stable-water post-correction. Shared with the scheduled monthly
  * snapshot service via forest-classification.pipeline.js.
  *
- * The RF pipeline is year-based (seasonal composites need fixed month windows),
- * so we derive `year` from `params.startDate`. `params.endDate` and `cloudCover`
- * are used only to gate the composite range; the pipeline uses fcCfg month
- * windows for base/dry/wet.
+ * The RF pipeline needs a year-month anchor for its seasonal windows. Both are
+ * derived from `endDate`; callers may override only the month with `month=1..12`.
  */
 async function buildClassified(params, region) {
     const t0 = Date.now();
-    const year = new Date(params.startDate).getUTCFullYear();
+    const { year, month } = resolveClassifiedAnchor(params);
     const hasGT = Boolean(params.groundTruthAssetId);
-    dbg('CLASSIFIED', `start — 13-class RF year=${year} region=${params.geometry ? 'custom' : 'Kon Tum'} groundTruth=${hasGT ? params.groundTruthAssetId : 'none'}`);
+    dbg('CLASSIFIED', `start — 13-class RF period=${year}-${String(month).padStart(2, '0')} region=${params.geometry ? 'custom' : 'Kon Tum'} groundTruth=${hasGT ? params.groundTruthAssetId : 'none'}`);
 
     // Wrap ee.Geometry as FeatureCollection so pipeline helpers that need
     // `region.geometry()` (stratifiedSample, export) work uniformly whether
@@ -336,11 +317,9 @@ async function buildClassified(params, region) {
         testKappa,
         quotas,
     } = await runRfClassification(year, regionFC, regionGeom, {
-        // v4.1: month=12 mặc định — pipeline tự chọn cửa sổ mùa gần nhất
-        // KẾT THÚC ≤ tháng anchor. Nếu caller muốn snapshot cuối năm khác,
-        // truyền params.month qua endpoint.
-        month:              Number.isInteger(params.month) ? params.month : 12,
-        seed:               year,
+        // Neo cửa sổ mùa theo endDate (hoặc month override đã được kiểm tra).
+        month,
+        seed:               year * 100 + month,
         groundTruthAssetId: params.groundTruthAssetId,
         gtBufferM:          params.gtBufferM,
         minFieldTest:       params.minFieldTest,
@@ -393,6 +372,7 @@ async function buildClassified(params, region) {
         vizParams,
         stats:  {
             year,
+            month,
             oobAccuracyPct:  Math.round((oobPct || 0) * 100) / 100,
             testAccuracyPct: testAccuracyPct != null ? Math.round(testAccuracyPct * 100) / 100 : null,
             testKappa:       testKappa != null ? Math.round(testKappa * 1000) / 1000 : null,
@@ -410,6 +390,7 @@ async function buildClassified(params, region) {
         })),
         metadata: {
             year,
+            month,
             startDate:  params.startDate,
             endDate:    params.endDate,
             classCount: nClasses,
@@ -712,6 +693,7 @@ async function publishResult(resultId) {
         geometry:           result.geometry,
         groundTruthAssetId: meta.groundTruthAssetId || '',
         gtBufferM:          meta.gtBufferM,
+        month:              meta.month,
     });
     const handler = IMAGE_BUILDERS[result.image_type];
     const region  = toEeGeometry(params.geometry);
@@ -813,4 +795,6 @@ module.exports = {
     publishResult,
     pollPublishes,
     CLASSIFIED_CLASSES,
+    normalizeParams,
+    resolveClassifiedAnchor,
 };

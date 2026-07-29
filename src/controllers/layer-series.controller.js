@@ -2,7 +2,7 @@
 
 const service = require('../services/layer-series.service');
 const schemas = require('../validators/layer-series.validator');
-const { OK } = require('../core/success.response');
+const { CREATED, OK } = require('../core/success.response');
 const { t } = require('../utils/i18n.util');
 
 const validate = (schema, source, lang) => {
@@ -27,4 +27,35 @@ const getTimeline = async (req, res) => {
     return OK(res, t('layer_series_timeline_success', req.lang), timeline);
 };
 
-module.exports = { getTimeline, listGroups };
+const createGroup = async (req, res) => {
+    const payload = validate(schemas.createGroup, req.body || {}, req.lang);
+    const group = await service.createGroup(payload, req.lang);
+    return CREATED(
+        res,
+        req.lang === 'en' ? 'Layer group created successfully' : 'Tạo nhóm lớp thành công',
+        group
+    );
+};
+
+const updateGroup = async (req, res) => {
+    const params = validate(schemas.groupParams, req.params, req.lang);
+    const payload = validate(schemas.updateGroup, req.body || {}, req.lang);
+    const group = await service.updateGroup(params.group, payload, req.lang);
+    return OK(
+        res,
+        req.lang === 'en' ? 'Layer group updated successfully' : 'Cập nhật nhóm lớp thành công',
+        group
+    );
+};
+
+const deleteGroup = async (req, res) => {
+    const params = validate(schemas.groupParams, req.params, req.lang);
+    const group = await service.deleteGroup(params.group, req.lang);
+    return OK(
+        res,
+        req.lang === 'en' ? 'Layer group deleted successfully' : 'Xóa nhóm lớp thành công',
+        group
+    );
+};
+
+module.exports = { createGroup, deleteGroup, getTimeline, listGroups, updateGroup };

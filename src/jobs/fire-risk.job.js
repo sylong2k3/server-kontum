@@ -22,9 +22,8 @@
  *   Toggle: FIRE_RISK_CATCHUP=false để tắt (default: true).
  *   Delay 60s: tránh chạy analysis lúc server chưa initialize xong (GEE, GDAL).
  *
- * Cleanup: ĐÃ BỎ. Chính sách hiện tại là "giữ toàn bộ lịch sử snapshot" —
- * không xoá bất kỳ hàng nào để đảm bảo audit + so sánh long-term. Nếu về sau
- * cần dọn, ưu tiên archive ra bảng history riêng thay vì DELETE.
+ * Cleanup do analysis-retention.job quản lý: giữ lịch sử trong thời hạn cấu
+ * hình, dọn tuần tự tệp lưu trữ/lớp bản đồ rồi mới xóa snapshot đã kết thúc.
  *
  * Debug: bật FIRE_RISK_DEBUG=true (hoặc NODE_ENV=development) để thấy chi tiết
  * mỗi tick + counters. Log info luôn ghi bất kể flag để trace state transitions.
@@ -32,6 +31,7 @@
 
 const cron = require('node-cron');
 const cfg  = require('../configs/fire-risk');
+const retentionCfg = require('../configs/analysis-retention');
 const svc  = require('../services/fire-risk.service');
 const repo = require('../repositories/fire-risk.repository');
 
@@ -143,10 +143,7 @@ const runDailyAnalysis = async (analysisDate) => {
     console.log(`[FIRE RISK] Daily analysis START date=${today} gcs=${cfg.isGcsConfigured() ? 'on' : 'off'}`);
     try {
         const snap = await svc.runAnalysis(today);
-        await repo.updateStatus(snap.id, snap.status, {
-            next_retry_at: null,
-            last_retry_error: null,
-        });
+        await repo.clearRetryState(snap.id);
         const riskDist = snap.province_summary?.riskLevelDist || {};
         console.log(
             `[FIRE RISK] Daily analysis DONE date=${today} status=${snap.status} ` +
@@ -364,7 +361,7 @@ const start = () => {
         `[FIRE RISK] STARTED analysis="${ANALYSIS_CRON}" poll="${POLL_CRON}" ` +
         `timezone=${cronOpts.timezone} catchup=${CATCHUP_ENABLED ? 'on' : 'off'} ` +
         `gcsConfigured=${cfg.isGcsConfigured() ? 'yes' : 'NO — province GCS export skipped; district direct export enabled'} ` +
-        `debug=${DEBUG} snapshot_retention=UNLIMITED (cleanup disabled)`,
+        `debug=${DEBUG} snapshotRetention=${retentionCfg.FIRE_RISK_DAYS}d`,
     );
     console.log(`  ✓ Fire risk analysis job scheduled (${ANALYSIS_CRON} @ ${cronOpts.timezone})`);
     console.log(`  ✓ Fire risk export poll job scheduled (${POLL_CRON})`);

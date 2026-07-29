@@ -30,7 +30,14 @@ const FETCH_TIMEOUT_MS = Number(process.env.RASTER_INGEST_FETCH_TIMEOUT_MS || 90
 const MAX_RETRIES      = Number(process.env.RASTER_INGEST_MAX_RETRIES || 3);
 // Earth Engine Restricted Mode chỉ cho phép rất ít request getPixels đồng thời.
 // Chạy tuần tự mặc định để các URL forest/fire không tự tranh quota với nhau.
-const CONCURRENCY      = Math.max(1, Number(process.env.RASTER_INGEST_CONCURRENCY || 1));
+// Khóa tuần tự để hai luồng tải/xử lý ảnh không cùng tạo đỉnh RAM. Biến môi
+// trường cũ vẫn được đọc để cảnh báo lúc khởi động, nhưng không được phép nâng
+// concurrency trên production ngoài ý muốn.
+const parsedConcurrency = Number.parseInt(process.env.RASTER_INGEST_CONCURRENCY, 10);
+const REQUESTED_CONCURRENCY = Number.isFinite(parsedConcurrency)
+    ? Math.max(1, parsedConcurrency)
+    : 1;
+const CONCURRENCY = 1;
 
 // GDAL cache khi merge band GEE zip → RGB GeoTIFF (MB).
 const GDAL_CACHEMAX_MB = Number(process.env.GDAL_CACHEMAX_MB || 512);
@@ -68,6 +75,7 @@ module.exports = {
     FETCH_TIMEOUT_MS,
     MAX_RETRIES,
     CONCURRENCY,
+    REQUESTED_CONCURRENCY,
     GDAL_CACHEMAX_MB,
     S3_ENDPOINT,
     S3_REGION,

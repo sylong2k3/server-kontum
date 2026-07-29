@@ -12,6 +12,9 @@ const router = Router();
 
 router.get('/layer-groups', optionalAuth, asyncHandler(layerSeriesController.listGroups));
 router.get('/layer-groups/:group/timeline', optionalAuth, asyncHandler(layerSeriesController.getTimeline));
+router.post('/layer-groups', verifyToken, requirePermission('map_layers', 'create'), asyncHandler(layerSeriesController.createGroup));
+router.patch('/layer-groups/:group', verifyToken, requirePermission('map_layers', 'update'), asyncHandler(layerSeriesController.updateGroup));
+router.delete('/layer-groups/:group', verifyToken, requirePermission('map_layers', 'delete'), asyncHandler(layerSeriesController.deleteGroup));
 
 router.get('/layers', optionalAuth, asyncHandler(mapController.listLayers));
 router.get('/layers/:code', optionalAuth, asyncHandler(mapController.getLayer));
