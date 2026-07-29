@@ -701,6 +701,9 @@ function runAnalysis(year, month, options = {}) {
         key:      `analysis:forest-classification:${key}`,
         label:    `Forest classification ${key}`,
         priority: 100,
+        cooldownMs: ['manual', 'user'].includes(options.trigger)
+            ? geeQueue.MANUAL_TASK_COOLDOWN_MS
+            : 0,
         run:      () => (
             process.env.GEE_ANALYSIS_CHILD === 'true'
                 ? executeAnalysis(year, month, options)
@@ -926,6 +929,14 @@ const getLatest = async () => {
     const t0 = Date.now();
     let snapshot = await repo.getLatestCompleted();
     const newest = await repo.getLatest();
+    const queueState = geeQueue.getState();
+    const hasQueuedRun = Boolean(
+        String(queueState.active?.key || '')
+            .startsWith('analysis:forest-classification:')
+        || queueState.pending.some((entry) =>
+            String(entry.key || '')
+                .startsWith('analysis:forest-classification:')),
+    );
     const activeStatuses = new Set(['pending', 'computing', 'exporting']);
     const newestUpdatedAt = new Date(
         newest?.updated_at || newest?.created_at || 0,
@@ -945,6 +956,7 @@ const getLatest = async () => {
         );
         return {
             snapshot: newest,
+            processingSnapshot: newest,
             districtAreas: [],
             stale: true,
             computing: true,
@@ -956,9 +968,21 @@ const getLatest = async () => {
             dbgTime('GET_LATEST', `pending id=${newest.id} status=${newest.status} y/m=${newest.year}/${newest.month}`, t0);
             return {
                 snapshot: newest,
+                processingSnapshot: newest,
                 districtAreas: [],
                 stale: true,
                 computing: activeStatuses.has(newest.status),
+                comparison: null,
+            };
+        }
+        if (hasQueuedRun) {
+            dbgTime('GET_LATEST', 'queue active before snapshot row exists', t0);
+            return {
+                snapshot: null,
+                processingSnapshot: null,
+                districtAreas: [],
+                stale: true,
+                computing: true,
                 comparison: null,
             };
         }
@@ -980,8 +1004,16 @@ const getLatest = async () => {
         `snapshot=${snapshot.id} y/m=${snapshot.year}/${snapshot.month} status=${snapshot.status} ` +
         `districts=${districtAreas.length} hasLayer=${Boolean(snapshot.geoserver_layer)} ` +
         `hasDlUrl=${Boolean(snapshot.gee_download_url)}`, t0);
+    const isServingFallback = Boolean(
+        newest && Number(newest.id) > Number(snapshot.id),
+    );
     return {
-        snapshot, districtAreas, comparison, stale: false, computing: false,
+        snapshot,
+        processingSnapshot: isServingFallback ? newest : snapshot,
+        districtAreas,
+        comparison,
+        stale: isServingFallback,
+        computing: false,
     };
 };
 

@@ -10,13 +10,75 @@
  */
 
 const CONCURRENCY = 1;
+const MAX_PENDING = Math.max(
+    1,
+    Math.min(50, Number.parseInt(process.env.GEE_QUEUE_MAX_PENDING, 10) || 6),
+);
+const RECENT_COMPLETION_RETENTION_MS = Math.max(
+    60 * 1000,
+    Number.parseInt(process.env.GEE_QUEUE_RECENT_RETENTION_MS, 10)
+        || 60 * 60 * 1000,
+);
+const MANUAL_TASK_COOLDOWN_MS = Math.max(
+    0,
+    Number.parseInt(process.env.GEE_MANUAL_COOLDOWN_MS, 10)
+        || 10 * 60 * 1000,
+);
+const { Api429Error, BusinessLogicError } = require('../core/error.response');
+const { StatusCodes } = require('../core/http-status-code');
 
 let accepting = true;
 let active = null;
 let sequence = 0;
 const pending = [];
 const keyedPromises = new Map();
+const recentCompletions = new Map();
 const idleWaiters = [];
+
+const pruneRecentCompletions = () => {
+    const cutoff = Date.now() - RECENT_COMPLETION_RETENTION_MS;
+    for (const [key, value] of recentCompletions) {
+        if (value.finishedAt < cutoff) recentCompletions.delete(key);
+    }
+};
+
+const preflight = ({ key = null, cooldownMs = 0 } = {}) => {
+    const normalizedKey = key ? String(key) : null;
+    if (normalizedKey && keyedPromises.has(normalizedKey)) {
+        return { deduplicated: true };
+    }
+    if (!accepting) {
+        throw new BusinessLogicError(
+            'Hàng đợi GEE đang dừng; yêu cầu chưa được tiếp nhận.',
+            ['GEE_QUEUE_STOPPING'],
+            StatusCodes.SERVICE_UNAVAILABLE,
+        );
+    }
+
+    pruneRecentCompletions();
+    const cooldown = Math.max(0, Number(cooldownMs) || 0);
+    const recent = normalizedKey ? recentCompletions.get(normalizedKey) : null;
+    if (recent && cooldown > 0) {
+        const retryAfterMs = cooldown - (Date.now() - recent.finishedAt);
+        if (retryAfterMs > 0) {
+            const error = new Api429Error(
+                'Tác vụ này vừa hoàn tất. Vui lòng chờ trước khi chạy lại.',
+                ['GEE_TASK_COOLDOWN'],
+            );
+            error.retryAfterMs = retryAfterMs;
+            throw error;
+        }
+    }
+
+    if (pending.length >= MAX_PENDING) {
+        throw new BusinessLogicError(
+            'Hàng đợi GEE đang đầy. Vui lòng thử lại sau.',
+            ['GEE_QUEUE_FULL'],
+            StatusCodes.SERVICE_UNAVAILABLE,
+        );
+    }
+    return { deduplicated: false };
+};
 
 const resolveIdleWaiters = () => {
     if (active || pending.length > 0) return;
@@ -42,6 +104,7 @@ async function drain() {
     const entry = pending.shift();
     active = entry;
     const startedAt = Date.now();
+    entry.startedAt = new Date(startedAt).toISOString();
     console.info(
         `[GEE-QUEUE] START key=${entry.key || '-'} label="${entry.label}" `
         + `waiting=${pending.length} concurrency=${CONCURRENCY}`,
@@ -49,6 +112,12 @@ async function drain() {
 
     try {
         const result = await entry.run();
+        if (entry.key) {
+            recentCompletions.set(entry.key, {
+                finishedAt: Date.now(),
+            });
+            pruneRecentCompletions();
+        }
         entry.resolve(result);
         console.info(
             `[GEE-QUEUE] DONE key=${entry.key || '-'} label="${entry.label}" `
@@ -74,17 +143,15 @@ function enqueue({
     key = null,
     label,
     priority = 0,
+    cooldownMs = 0,
     run,
 }) {
     if (typeof run !== 'function') {
         return Promise.reject(new TypeError('GEE queue task requires run().'));
     }
-    if (!accepting) {
-        return Promise.reject(new Error('GEE queue is stopping; task was not accepted.'));
-    }
-
     const normalizedKey = key ? String(key) : null;
-    if (normalizedKey && keyedPromises.has(normalizedKey)) {
+    const admission = preflight({ key: normalizedKey, cooldownMs });
+    if (admission.deduplicated) {
         console.warn(`[GEE-QUEUE] DEDUPE key=${normalizedKey}`);
         return keyedPromises.get(normalizedKey);
     }
@@ -100,6 +167,8 @@ function enqueue({
         label: String(label || normalizedKey || 'GEE task'),
         priority: Number(priority) || 0,
         sequence: sequence++,
+        enqueuedAt: new Date().toISOString(),
+        startedAt: null,
         run,
         resolve,
         reject,
@@ -133,14 +202,23 @@ function stop() {
 function getState() {
     return {
         concurrency: CONCURRENCY,
+        maxPending: MAX_PENDING,
+        capacityRemaining: Math.max(0, MAX_PENDING - pending.length),
         accepting,
         active: active
-            ? { key: active.key, label: active.label, priority: active.priority }
+            ? {
+                key: active.key,
+                label: active.label,
+                priority: active.priority,
+                enqueuedAt: active.enqueuedAt,
+                startedAt: active.startedAt,
+            }
             : null,
         pending: pending.map((entry) => ({
             key: entry.key,
             label: entry.label,
             priority: entry.priority,
+            enqueuedAt: entry.enqueuedAt,
         })),
     };
 }
@@ -152,10 +230,15 @@ function onIdle() {
     });
 }
 
+const hasTask = (key) => keyedPromises.has(String(key || ''));
+
 module.exports = {
     enqueue,
+    preflight,
+    hasTask,
     start,
     stop,
     getState,
     onIdle,
+    MANUAL_TASK_COOLDOWN_MS,
 };

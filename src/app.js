@@ -179,7 +179,9 @@ const authLimiter = rateLimit({
 
 const expensiveLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: parseInt(process.env.EXPENSIVE_RATE_LIMIT_MAX, 10) || 20,
+  // UI fire/forest poll nhiều endpoint read-only trong lúc GEE chạy. Giữ ngưỡng
+  // đủ cho polling; POST khởi chạy graph có limiter riêng chặt hơn theo user/IP.
+  max: parseInt(process.env.EXPENSIVE_RATE_LIMIT_MAX, 10) || 120,
   standardHeaders: true,
   legacyHeaders: false,
   message: {

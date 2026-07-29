@@ -9,8 +9,26 @@ const geeQueue = require('../queues/gee-task.queue');
 const districtRasterWorker = require('./districtRasterExport.worker');
 
 let received = false;
+const MEMORY_HEARTBEAT_MS = Math.max(
+    1000,
+    Number.parseInt(process.env.GEE_CHILD_MEMORY_HEARTBEAT_MS, 10) || 5000,
+);
+const memoryHeartbeat = setInterval(() => {
+    if (typeof process.send !== 'function' || !process.connected) return;
+    const memory = process.memoryUsage();
+    process.send({
+        type: 'memory',
+        rss: memory.rss,
+        heapTotal: memory.heapTotal,
+        heapUsed: memory.heapUsed,
+        external: memory.external,
+        arrayBuffers: memory.arrayBuffers,
+    }, () => {});
+}, MEMORY_HEARTBEAT_MS);
+memoryHeartbeat.unref();
 
 const sendAndExit = (message, code) => {
+    clearInterval(memoryHeartbeat);
     if (typeof process.send !== 'function') {
         process.exit(code);
         return;

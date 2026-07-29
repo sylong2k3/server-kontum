@@ -9,6 +9,8 @@ const { OK, OK_LIST, CREATED } = require('../core/success.response');
 const { Api400Error, Api404Error } = require('../core/error.response');
 const { hasPermission } = require('../middlewares/auth.middleware');
 const { t } = require('../utils/i18n.util');
+const { buildGeeProcessingState } = require('../utils/gee-processing-state.util');
+const geeQueue = require('../queues/gee-task.queue');
 
 // Derive filename ổn định cho download GeoTIFF fire-risk. GEE `getDownloadURL`
 // với `filePerBand:false` trên `.visualize()` trả TIFF trần (Content-Type
@@ -182,13 +184,17 @@ const slimAreaStats = (stats) => {
 // ── GET /fire-risk/latest ─────────────────────────────────────────────────────
 const getLatest = async (req, res) => {
     const minRiskLevel = parseInt(req.query.minRiskLevel, 10) || 1;
-    const { snapshot, features, stale, computing } =
+    const { snapshot, processingSnapshot, features, stale, computing } =
         await svc.getLatest({ minRiskLevel });
     OK(res, t('get_detail_success', req.lang), {
         snapshot: formatSnapshot(snapshot),
         features,
         stale,
         computing,
+        processing: buildGeeProcessingState({
+            pipeline: 'fire-risk',
+            snapshot: processingSnapshot || snapshot,
+        }),
     });
 };
 
@@ -281,6 +287,10 @@ const formatSnapshot = (snapshot) => {
         downloadFilename: fireRiskFilename(snapshot.analysis_date),
         computedAt: snapshot.computed_at || null,
         publishedAt: snapshot.published_at || null,
+        errorMessage: snapshot.error_message || null,
+        retryCount: Number(snapshot.retry_count) || 0,
+        nextRetryAt: snapshot.next_retry_at || null,
+        lastRetryError: snapshot.last_retry_error || null,
     };
 };
 
@@ -333,6 +343,11 @@ const refresh = async (req, res) => {
         ? Boolean(req.body.computeOob) : undefined;
 
     const requestedDate = analysisDate || new Date().toISOString().slice(0, 10);
+    const taskKey = `analysis:fire-risk:${requestedDate}`;
+    const admission = geeQueue.preflight({
+        key: taskKey,
+        cooldownMs: geeQueue.MANUAL_TASK_COOLDOWN_MS,
+    });
     svc.refresh({
         analysisDate, submitExport, enableRf, inputFireAssetId, computeOob,
     }).catch((error) => {
@@ -341,13 +356,21 @@ const refresh = async (req, res) => {
             error.message,
         );
     });
+    const processing = buildGeeProcessingState({
+        pipeline: 'fire-risk',
+        taskKey,
+    });
     res.status(202).json({
-        message: 'Đã tiếp nhận yêu cầu phân tích cháy rừng.',
+        message: admission.deduplicated
+            ? 'Tác vụ phân tích cháy rừng đã có trong hàng đợi.'
+            : 'Đã tiếp nhận yêu cầu phân tích cháy rừng.',
         status: 202,
         data: {
             run: {
                 analysisDate: requestedDate,
-                status: 'queued',
+                status: processing.state,
+                deduplicated: admission.deduplicated,
+                processing,
             },
         },
     });

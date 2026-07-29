@@ -964,6 +964,9 @@ function runAnalysis(analysisDate, options = {}) {
         key:      `analysis:fire-risk:${key}`,
         label:    `Fire risk analysis ${key}`,
         priority: 100,
+        cooldownMs: options.trigger === 'manual'
+            ? geeQueue.MANUAL_TASK_COOLDOWN_MS
+            : 0,
         run:      () => (
             process.env.GEE_ANALYSIS_CHILD === 'true'
                 ? executeAnalysis(key, options)
@@ -1138,6 +1141,12 @@ async function pollExports() {
 const getLatest = async ({ minRiskLevel = 1 } = {}) => {
     let snapshot = await repo.getLatestCompleted();
     const newest = await repo.getLatest();
+    const queueState = geeQueue.getState();
+    const hasQueuedRun = Boolean(
+        String(queueState.active?.key || '').startsWith('analysis:fire-risk:')
+        || queueState.pending.some((entry) =>
+            String(entry.key || '').startsWith('analysis:fire-risk:')),
+    );
     const activeStatuses = new Set(['pending', 'computing', 'exporting']);
     const newestUpdatedAt = new Date(
         newest?.updated_at || newest?.created_at || 0,
@@ -1152,6 +1161,7 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
     if (hasFreshActiveRun) {
         return {
             snapshot: newest,
+            processingSnapshot: newest,
             features: [],
             stale: true,
             computing: true,
@@ -1161,9 +1171,19 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
         if (newest) {
             return {
                 snapshot: newest,
+                processingSnapshot: newest,
                 features: [],
                 stale: true,
                 computing: activeStatuses.has(newest.status),
+            };
+        }
+        if (hasQueuedRun) {
+            return {
+                snapshot: null,
+                processingSnapshot: null,
+                features: [],
+                stale: true,
+                computing: true,
             };
         }
         throw new BusinessLogicError(
@@ -1180,10 +1200,14 @@ const getLatest = async ({ minRiskLevel = 1 } = {}) => {
         includeGeometry: false,
     });
     const features = rows.map(toPublicFeatureRow);
+    const isServingFallback = Boolean(
+        newest && Number(newest.id) > Number(snapshot.id),
+    );
     return {
         snapshot,
+        processingSnapshot: isServingFallback ? newest : snapshot,
         features,
-        stale:        false,
+        stale:        isServingFallback,
         computing:    false,
     };
 };
@@ -1288,6 +1312,7 @@ const getHistory = async ({
 const refresh = async ({ analysisDate, submitExport, enableRf, inputFireAssetId, computeOob } = {}) => {
     const date = analysisDate || todayUtc();
     return runAnalysis(date, {
+        trigger: 'manual',
         ...(submitExport     !== undefined ? { submitExport }     : {}),
         ...(enableRf         !== undefined ? { enableRf }         : {}),
         ...(inputFireAssetId !== undefined ? { inputFireAssetId } : {}),

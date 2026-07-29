@@ -25,6 +25,17 @@ class Api409Error extends BaseError {
   }
 }
 
+class Api429Error extends BaseError {
+  constructor(
+    message = ReasonPhrases.TOO_MANY_REQUESTS,
+    errors = [],
+    status = StatusCodes.TOO_MANY_REQUESTS,
+    isOperational = true,
+  ) {
+    super(message, status, errors, isOperational);
+  }
+}
+
 class Api400Error extends BaseError {
   constructor(
     message = ReasonPhrases.BAD_REQUEST,
@@ -130,6 +141,7 @@ module.exports = {
   Api403Error,
   Api404Error,
   Api409Error,
+  Api429Error,
   BusinessLogicError,
   BaseError,
   SatelliteError,

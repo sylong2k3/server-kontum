@@ -9,6 +9,8 @@ const { OK, OK_LIST, CREATED } = require('../core/success.response');
 const { Api400Error, Api404Error } = require('../core/error.response');
 const { hasPermission } = require('../middlewares/auth.middleware');
 const { t } = require('../utils/i18n.util');
+const { buildGeeProcessingState } = require('../utils/gee-processing-state.util');
+const geeQueue = require('../queues/gee-task.queue');
 
 // Debug — FC_DEBUG=true (hoặc NODE_ENV=development) → in `[FOREST-CTL:DBG] ...`
 // cho các endpoint. Info/warn/error luôn ghi.
@@ -166,7 +168,14 @@ const resolveDistrictPublishSource = async (row) => {
 // ── GET /forest-classification/latest ────────────────────────────────────────
 const getLatest = async (req, res) => {
     dbg('LATEST', `caller user=${req.user?.id || 'anon'} lang=${req.lang}`);
-    const { snapshot, districtAreas, comparison, stale, computing }
+    const {
+        snapshot,
+        processingSnapshot,
+        districtAreas,
+        comparison,
+        stale,
+        computing,
+    }
         = await svc.getLatest();
     OK(res, t('get_detail_success', req.lang), {
         snapshot: formatSnapshot(snapshot),
@@ -174,6 +183,10 @@ const getLatest = async (req, res) => {
         comparison,
         stale,
         computing,
+        processing: buildGeeProcessingState({
+            pipeline: 'forest-classification',
+            snapshot: processingSnapshot || snapshot,
+        }),
     });
 };
 
@@ -255,6 +268,12 @@ const refresh = async (req, res) => {
     const gtBufferM    = req.body?.gtBufferM    != null ? Number(req.body.gtBufferM)    : undefined;
     const minFieldTest = req.body?.minFieldTest != null ? Number(req.body.minFieldTest) : undefined;
 
+    const periodKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const taskKey = `analysis:forest-classification:${periodKey}`;
+    const admission = geeQueue.preflight({
+        key: taskKey,
+        cooldownMs: geeQueue.MANUAL_TASK_COOLDOWN_MS,
+    });
     svc.refresh({
         year: selectedYear,
         month: selectedMonth,
@@ -267,14 +286,22 @@ const refresh = async (req, res) => {
             error.message,
         );
     });
+    const processing = buildGeeProcessingState({
+        pipeline: 'forest-classification',
+        taskKey,
+    });
     res.status(202).json({
-        message: 'Đã tiếp nhận yêu cầu phân loại lớp phủ rừng.',
+        message: admission.deduplicated
+            ? 'Tác vụ phân loại kỳ này đã có trong hàng đợi.'
+            : 'Đã tiếp nhận yêu cầu phân loại lớp phủ rừng.',
         status: 202,
         data: {
             run: {
                 year: selectedYear,
                 month: selectedMonth,
-                status: 'queued',
+                status: processing.state,
+                deduplicated: admission.deduplicated,
+                processing,
             },
         },
     });
@@ -302,6 +329,11 @@ const queryPeriod = async (req, res) => {
             comparison,
             cached,
             computing,
+            processing: buildGeeProcessingState({
+                pipeline: 'forest-classification',
+                taskKey: `analysis:forest-classification:${year}-${String(month).padStart(2, '0')}`,
+                snapshot,
+            }),
         },
     );
 };
@@ -325,6 +357,10 @@ const getSnapshot = async (req, res) => {
         districtAreas: result.districtAreas,
         comparison:    result.comparison,
         computing:     activeStates.includes(result.snapshot.status),
+        processing:    buildGeeProcessingState({
+            pipeline: 'forest-classification',
+            snapshot: result.snapshot,
+        }),
     });
 };
 
@@ -353,6 +389,10 @@ function formatSnapshot(s) {
         geoserverDownloadUrl: buildGeoserverDownloadUrl(s.geoserver_layer),
         downloadFilename:     forestFilename(s.year, s.month),
         computedAt:         s.computed_at,
+        errorMessage:       s.error_message || null,
+        retryCount:         Number(s.retry_count) || 0,
+        nextRetryAt:        s.next_retry_at || null,
+        lastRetryError:     s.last_retry_error || null,
     };
 }
 

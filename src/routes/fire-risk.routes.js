@@ -5,6 +5,7 @@ const asyncHandler = require('../helpers/async-handler');
 const ctrl = require('../controllers/fire-risk.controller');
 const gtCtrl = require('../controllers/fire-gt.controller');
 const { optionalAuth, verifyToken, requirePermission } = require('../middlewares/auth.middleware');
+const { geeManualTriggerLimiter } = require('../middlewares/gee-rate-limit.middleware');
 
 const router = Router();
 
@@ -27,7 +28,13 @@ router.get('/published-history', optionalAuth, asyncHandler(ctrl.getPublishedHis
 
 // ── Admin: cần đăng nhập + quyền fire_risk.manage ────────────────────────────
 router.get('/history', verifyToken, requirePermission('fire_risk', 'manage'), asyncHandler(ctrl.getHistory));
-router.post('/refresh', verifyToken, requirePermission('fire_risk', 'manage'), asyncHandler(ctrl.refresh));
+router.post(
+    '/refresh',
+    verifyToken,
+    requirePermission('fire_risk', 'manage'),
+    geeManualTriggerLimiter,
+    asyncHandler(ctrl.refresh),
+);
 
 // Publish snapshot GeoTIFF → MinIO → GeoServer, back-link `geoserver_layer` vào
 // snapshot khi job xong. Cần quyền `map_layers.ingest_raster` (đã có ở system_admin
