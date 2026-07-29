@@ -37,8 +37,16 @@ const enforcePasswordChange = (req, res, next) => {
 };
 
 const optionalAuth = (req, res, next) => {
-    passport.authenticate('jwt', { session: false }, (err, user) => {
+    passport.authenticate('jwt', { session: false }, (err, user, info) => {
         if (err) {return next(err);}
+        // Có gửi Authorization nhưng JWT không hợp lệ (hết hạn/bị thu hồi/user
+        // bị khoá) — phải trả 401 thật để AuthInterceptor phía client tự
+        // refresh token, thay vì âm thầm hạ xuống guest khiến các endpoint
+        // yêu cầu định danh (vd. ensureOwnerIdentity trong feedback.service.js)
+        // báo lỗi khó hiểu "thiếu x-anonymous-id".
+        if (!user && req.headers.authorization) {
+            return next(new Api401Error(info?.message || t('please_login', req.lang)));
+        }
         req.user = user || null;
         next();
     })(req, res, next);

@@ -115,6 +115,18 @@
       "type": "string"
     },
     {
+      "key": "layerSeriesGroup",
+      "value": "lop_phu",
+      "type": "string",
+      "description": "Nhóm time series công khai dùng để lấy timeline."
+    },
+    {
+      "key": "layerSeriesTestGroup",
+      "value": "postman_time_series",
+      "type": "string",
+      "description": "Mã nhóm time series dùng cho chuỗi request CRUD."
+    },
+    {
       "key": "mapLayerCode",
       "value": "ranh_gioi_rung",
       "type": "string"
@@ -6148,6 +6160,262 @@
           "description": "Request hợp lệ, đồng bộ collection nghiệp vụ.",
           "item": [
             {
+              "name": "Time series",
+              "description": "Request hợp lệ cho danh sách, timeline và CRUD nhóm lớp theo thời gian.",
+              "item": [
+                {
+                  "name": "GET /map/layer-groups — Danh sách nhóm time series",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                          "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                          "pm.test(\"Danh sách hợp lệ\", function () { pm.expect(pm.response.json().data.items).to.be.an(\"array\"); });"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/map/layer-groups?lang={{lang}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "map",
+                        "layer-groups"
+                      ],
+                      "query": [
+                        {
+                          "key": "lang",
+                          "value": "{{lang}}"
+                        }
+                      ]
+                    },
+                    "description": "Endpoint công khai.",
+                    "auth": {
+                      "type": "noauth"
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "GET /map/layer-groups/:group/timeline — Timeline của nhóm",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                          "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                          "pm.test(\"Timeline hợp lệ\", function () { const data = pm.response.json().data; pm.expect(data.group.code).to.eql(pm.collectionVariables.get(\"layerSeriesGroup\")); pm.expect(data.steps).to.be.an(\"array\"); });"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesGroup}}/timeline?lang={{lang}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "map",
+                        "layer-groups",
+                        "{{layerSeriesGroup}}",
+                        "timeline"
+                      ],
+                      "query": [
+                        {
+                          "key": "lang",
+                          "value": "{{lang}}"
+                        }
+                      ]
+                    },
+                    "description": "Endpoint công khai.",
+                    "auth": {
+                      "type": "noauth"
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "POST /map/layer-groups — Tạo nhóm time series",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                          "pm.test(\"HTTP 201\", function () { pm.response.to.have.status(201); });"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json",
+                        "type": "text"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/map/layer-groups?lang={{lang}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "map",
+                        "layer-groups"
+                      ],
+                      "query": [
+                        {
+                          "key": "lang",
+                          "value": "{{lang}}"
+                        }
+                      ]
+                    },
+                    "description": "Yêu cầu quyền map_layers.create.",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"code\": \"{{layerSeriesTestGroup}}\",\n  \"name_vi\": \"Nhóm chuỗi thời gian Postman\",\n  \"name_en\": \"Postman time series\",\n  \"geoserver_store\": \"remote_sensing\",\n  \"geoserver_layer\": \"kontum:lop_phu_2023\",\n  \"is_active\": false,\n  \"is_public\": false\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "PATCH /map/layer-groups/:group — Cập nhật nhóm time series",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                          "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "PATCH",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json",
+                        "type": "text"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesTestGroup}}?lang={{lang}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "map",
+                        "layer-groups",
+                        "{{layerSeriesTestGroup}}"
+                      ],
+                      "query": [
+                        {
+                          "key": "lang",
+                          "value": "{{lang}}"
+                        }
+                      ]
+                    },
+                    "description": "Yêu cầu quyền map_layers.update.",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"name_vi\": \"Nhóm chuỗi thời gian Postman đã cập nhật\",\n  \"is_active\": false\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "DELETE /map/layer-groups/:group — Xóa nhóm time series",
+                  "event": [
+                    {
+                      "listen": "test",
+                      "script": {
+                        "type": "text/javascript",
+                        "exec": [
+                          "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });"
+                        ]
+                      }
+                    }
+                  ],
+                  "request": {
+                    "method": "DELETE",
+                    "header": [
+                      {
+                        "key": "Accept",
+                        "value": "application/json",
+                        "type": "text"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesTestGroup}}?lang={{lang}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "map",
+                        "layer-groups",
+                        "{{layerSeriesTestGroup}}"
+                      ],
+                      "query": [
+                        {
+                          "key": "lang",
+                          "value": "{{lang}}"
+                        }
+                      ]
+                    },
+                    "description": "Yêu cầu quyền map_layers.delete."
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
               "name": "GET /map/layers — Danh sách layer bản đồ",
               "event": [
                 {
@@ -6918,6 +7186,151 @@
           "name": "Validator 400",
           "description": "Request cố ý sai; kỳ vọng HTTP 400.",
           "item": [
+            {
+              "name": "[400] GET /map/layer-groups/:group/timeline — Mã nhóm sai định dạng",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Validation error shape\", function () { const json = pm.response.json(); pm.expect(JSON.stringify(json).toLowerCase()).to.match(/error|valid|fail|invalid|không hợp lệ/); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups/invalid-group!/timeline",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups",
+                    "invalid-group!",
+                    "timeline"
+                  ]
+                },
+                "description": "Kỳ vọng HTTP 400 do group không đúng định dạng.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "[400] POST /map/layer-groups — Thiếu trường bắt buộc",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Validation error shape\", function () { const json = pm.response.json(); pm.expect(JSON.stringify(json).toLowerCase()).to.match(/error|valid|fail|required|invalid|không hợp lệ|bắt buộc/); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups"
+                  ]
+                },
+                "description": "Kỳ vọng HTTP 400 do thiếu name_vi, geoserver_store và geoserver_layer.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"invalid_group\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "[400] PATCH /map/layer-groups/:group — Payload rỗng",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Validation error shape\", function () { const json = pm.response.json(); pm.expect(JSON.stringify(json).toLowerCase()).to.match(/error|valid|fail|required|invalid|không hợp lệ|bắt buộc/); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesGroup}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups",
+                    "{{layerSeriesGroup}}"
+                  ]
+                },
+                "description": "Kỳ vọng HTTP 400 do payload không có trường cập nhật.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
             {
               "name": "[400] GET /map/layers — List map layers invalid limit",
               "event": [

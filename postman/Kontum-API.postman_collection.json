@@ -115,6 +115,18 @@
       "type": "string"
     },
     {
+      "key": "layerSeriesGroup",
+      "value": "lop_phu",
+      "type": "string",
+      "description": "Nhóm time series công khai dùng để lấy timeline."
+    },
+    {
+      "key": "layerSeriesTestGroup",
+      "value": "postman_time_series",
+      "type": "string",
+      "description": "Mã nhóm time series dùng cho chuỗi request CRUD."
+    },
+    {
       "key": "mapLayerCode",
       "value": "ranh_gioi_rung",
       "type": "string"
@@ -4326,6 +4338,270 @@
       "name": "Bản đồ / GeoServer",
       "description": "Lớp GIS, import dữ liệu, publish và raster ingest.",
       "item": [
+        {
+          "name": "Time series",
+          "description": "Danh sách nhóm, timeline và quản trị nhóm lớp raster theo thời gian.",
+          "item": [
+            {
+              "name": "GET /map/layer-groups — Danh sách nhóm time series",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"Danh sách hợp lệ\", function () { const json = pm.response.json(); pm.expect(json.data.items).to.be.an(\"array\"); });",
+                      "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups?lang={{lang}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups"
+                  ],
+                  "query": [
+                    {
+                      "key": "lang",
+                      "value": "{{lang}}"
+                    }
+                  ]
+                },
+                "description": "Trả các nhóm time series active, public; admin thấy cả nhóm private.\n\nEndpoint công khai.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /map/layer-groups/:group/timeline — Timeline của nhóm",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"Timeline hợp lệ\", function () { const data = pm.response.json().data; pm.expect(data.group.code).to.eql(pm.collectionVariables.get(\"layerSeriesGroup\")); pm.expect(data.steps).to.be.an(\"array\"); });",
+                      "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesGroup}}/timeline?lang={{lang}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups",
+                    "{{layerSeriesGroup}}",
+                    "timeline"
+                  ],
+                  "query": [
+                    {
+                      "key": "lang",
+                      "value": "{{lang}}"
+                    }
+                  ]
+                },
+                "description": "Trả các mốc raster rời, URL WMS tile và index mặc định của nhóm.\n\nEndpoint công khai.",
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /map/layer-groups — Tạo nhóm time series",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 201\", function () { pm.response.to.have.status(201); });",
+                      "pm.test(\"Nhóm được tạo\", function () { const data = pm.response.json().data; pm.expect(data.code).to.eql(pm.collectionVariables.get(\"layerSeriesTestGroup\")); });",
+                      "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups?lang={{lang}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups"
+                  ],
+                  "query": [
+                    {
+                      "key": "lang",
+                      "value": "{{lang}}"
+                    }
+                  ]
+                },
+                "description": "Tạo cấu hình nhóm time series. Yêu cầu quyền map_layers.create.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"{{layerSeriesTestGroup}}\",\n  \"name_vi\": \"Nhóm chuỗi thời gian Postman\",\n  \"name_en\": \"Postman time series\",\n  \"geoserver_store\": \"remote_sensing\",\n  \"geoserver_layer\": \"kontum:lop_phu_2023\",\n  \"geoserver_style\": \"\",\n  \"is_active\": false,\n  \"is_public\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "PATCH /map/layer-groups/:group — Cập nhật nhóm time series",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"Nhóm được cập nhật\", function () { const data = pm.response.json().data; pm.expect(data.name_vi).to.eql(\"Nhóm chuỗi thời gian Postman đã cập nhật\"); });",
+                      "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesTestGroup}}?lang={{lang}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups",
+                    "{{layerSeriesTestGroup}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "lang",
+                      "value": "{{lang}}"
+                    }
+                  ]
+                },
+                "description": "Cập nhật cấu hình nhóm time series. Yêu cầu quyền map_layers.update.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name_vi\": \"Nhóm chuỗi thời gian Postman đã cập nhật\",\n  \"is_active\": false,\n  \"is_public\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "DELETE /map/layer-groups/:group — Xóa nhóm time series",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"HTTP 200\", function () { pm.response.to.have.status(200); });",
+                      "pm.test(\"Đúng nhóm được xóa\", function () { const data = pm.response.json().data; pm.expect(data.code).to.eql(pm.collectionVariables.get(\"layerSeriesTestGroup\")); });",
+                      "pm.test(\"Response time < 30s\", function () { pm.expect(pm.response.responseTime).to.be.below(30000); });"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/map/layer-groups/{{layerSeriesTestGroup}}?lang={{lang}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "map",
+                    "layer-groups",
+                    "{{layerSeriesTestGroup}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "lang",
+                      "value": "{{lang}}"
+                    }
+                  ]
+                },
+                "description": "Xóa cấu hình nhóm time series. Không xóa các layer nguồn. Yêu cầu quyền map_layers.delete."
+              },
+              "response": []
+            }
+          ]
+        },
         {
           "name": "GET /map/layers — Danh sách layer bản đồ",
           "event": [
