@@ -19,7 +19,7 @@ const { t }      = require('./i18n.util');
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const IDENTIFIER_RE     = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-const SAFE_PATH_RE      = /^[\w\-. /\\:()[\]{}]+$/;   // cho phép đường dẫn hệ thống thông thường
+const SAFE_PATH_RE      = /^[\w\-. /\\:()[\]{}~]+$/;   // cho phép đường dẫn hệ thống thông thường (kể cả Windows 8.3 short path ~)
 const GEOM_TYPE_MAP     = {
     point:           'POINT',
     multipoint:      'MULTIPOINT',
