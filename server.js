@@ -17,6 +17,8 @@ const geoserverClient = require("./src/utils/geoserver.client");
 
 const tokenCleanupJob = require("./src/jobs/token-cleanup.job");
 const notificationCleanupJob = require("./src/jobs/notification-cleanup.job");
+const analysisRetentionJob = require("./src/jobs/analysis-retention.job");
+const memoryMonitorJob = require("./src/jobs/memory-monitor.job");
 const weatherJob = require("./src/jobs/weather.job");
 const fireRiskJob            = require("./src/jobs/fire-risk.job");
 const fireRiskUrlRefreshJob  = require("./src/jobs/fire-risk-url-refresh.job");
@@ -75,6 +77,7 @@ const startBackgroundWorkers = async () => {
 
   tokenCleanupJob.start();
   notificationCleanupJob.start();
+  analysisRetentionJob.start();
   weatherJob.start();
   fireRiskJob.start();
   fireRiskUrlRefreshJob.start();
@@ -87,6 +90,7 @@ const startBackgroundWorkers = async () => {
 const stopBackgroundWorkers = async () => {
   tokenCleanupJob.stop();
   notificationCleanupJob.stop();
+  analysisRetentionJob.stop();
   weatherJob.stop();
   fireRiskJob.stop();
   fireRiskUrlRefreshJob.stop();
@@ -166,6 +170,7 @@ async function gracefulShutdown(signal) {
   );
 
   await stopBackgroundWorkers();
+  memoryMonitorJob.stop();
   closeWebSocketServer();
 
   if (server) {
@@ -232,6 +237,7 @@ const initializeAndStartServer = async () => {
     // Kích hoạt WebSocket realtime (dùng chung HTTP server qua sự kiện 'upgrade').
     initWebSocketServer(server, { path: WS_PATH });
 
+    memoryMonitorJob.start();
     await startBackgroundWorkers();
 
     process.on("unhandledRejection", (error) => {
@@ -277,6 +283,7 @@ const initializeAndStartServer = async () => {
     });
     initWebSocketServer(server, { path: WS_PATH });
 
+    memoryMonitorJob.start();
     await startBackgroundWorkers();
 
     process.on("unhandledRejection", (error) => {
