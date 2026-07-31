@@ -58,4 +58,15 @@ const deleteGroup = async (req, res) => {
     );
 };
 
-module.exports = { createGroup, deleteGroup, getTimeline, listGroups, updateGroup };
+const reorderSteps = async (req, res) => {
+    const params = validate(schemas.groupParams, req.params, req.lang);
+    const payload = validate(schemas.reorderSteps, req.body || {}, req.lang);
+    const result = await service.reorderSteps(params.group, payload.order, req.lang);
+    return OK(
+        res,
+        req.lang === 'en' ? 'Steps reordered successfully' : 'Cập nhật thứ tự thành công',
+        result
+    );
+};
+
+module.exports = { createGroup, deleteGroup, getTimeline, listGroups, reorderSteps, updateGroup };

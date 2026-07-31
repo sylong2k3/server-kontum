@@ -14,6 +14,7 @@ router.get('/layer-groups', optionalAuth, asyncHandler(layerSeriesController.lis
 router.get('/layer-groups/:group/timeline', optionalAuth, asyncHandler(layerSeriesController.getTimeline));
 router.post('/layer-groups', verifyToken, requirePermission('map_layers', 'create'), asyncHandler(layerSeriesController.createGroup));
 router.patch('/layer-groups/:group', verifyToken, requirePermission('map_layers', 'update'), asyncHandler(layerSeriesController.updateGroup));
+router.patch('/layer-groups/:group/reorder', verifyToken, requirePermission('map_layers', 'update'), asyncHandler(layerSeriesController.reorderSteps));
 router.delete('/layer-groups/:group', verifyToken, requirePermission('map_layers', 'delete'), asyncHandler(layerSeriesController.deleteGroup));
 
 router.get('/layers', optionalAuth, asyncHandler(mapController.listLayers));

@@ -50,6 +50,7 @@ const toStep = (layer) => {
         year_from: yearFrom,
         year_to: yearTo,
         label: yearFrom === yearTo ? String(yearFrom) : `${yearFrom}–${yearTo}`,
+        sort_order: layer.sort_order ?? 0,
         tile_url: buildTileUrl(layer),
     };
 };
@@ -82,7 +83,14 @@ const getTimeline = async (code, user, lang) => {
         throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
     }
     const steps = (await layersFor(group, user)).map(toStep).filter((step) => step.year_from && step.year_to);
-    steps.sort((a, b) => a.year_to - b.year_to || a.year_from - b.year_from || a.layer_code.localeCompare(b.layer_code));
+    // Ưu tiên sort_order (thứ tự admin đã kéo thả). Fallback về năm khi
+    // sort_order bằng nhau (thường là 0 — chưa reorder).
+    steps.sort((a, b) =>
+        (a.sort_order - b.sort_order)
+        || (a.year_to - b.year_to)
+        || (a.year_from - b.year_from)
+        || a.layer_code.localeCompare(b.layer_code)
+    );
     return {
         group: {
             code, name_vi: group.name_vi, name_en: group.name_en,
@@ -148,6 +156,14 @@ const deleteGroup = async (code, lang) => {
     return deleted;
 };
 
+const reorderSteps = async (code, order, lang) => {
+    if (!await repo.findGroupByCode(code)) {
+        throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
+    }
+    const updated = await repo.reorderSourceLayers({ groupCode: code, order });
+    return { updated_count: updated, order };
+};
+
 module.exports = {
     buildTileUrl,
     createGroup,
@@ -155,5 +171,6 @@ module.exports = {
     getTimeline,
     listGroups,
     periodOf,
+    reorderSteps,
     updateGroup,
 };

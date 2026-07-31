@@ -24,6 +24,11 @@ const createGroup = Joi.object({
     is_public: Joi.boolean().optional(),
 });
 
+const reorderSteps = Joi.object({
+    // Danh sách layer_code theo đúng thứ tự mới muốn hiển thị timeline.
+    order: Joi.array().items(Joi.string().max(60)).min(1).required(),
+});
+
 const updateGroup = Joi.object({
     name_vi: Joi.string().trim().max(200).optional(),
     name_en: Joi.string().trim().max(200).allow('', null).optional(),
@@ -34,4 +39,4 @@ const updateGroup = Joi.object({
     is_public: Joi.boolean().optional(),
 }).min(1);
 
-module.exports = { createGroup, groupParams, updateGroup };
+module.exports = { createGroup, groupParams, reorderSteps, updateGroup };

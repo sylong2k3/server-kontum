@@ -95,7 +95,7 @@ const findFirstSourceLayer = async (groupCode) => {
 const listSourceLayers = async ({ sourceGroups, includePrivate = false }) => {
     const { rows } = await db.query(
         `SELECT id, code, name_vi, name_en, geoserver_layer, default_style,
-                data_year, layer_group
+                data_year, layer_group, sort_order
          FROM gis.layer_registry
          WHERE geometry_type = 'RASTER'
            AND geoserver_layer IS NOT NULL
@@ -103,10 +103,42 @@ const listSourceLayers = async ({ sourceGroups, includePrivate = false }) => {
            AND layer_group = ANY($1::text[])
            AND is_active = true
            AND ($2::boolean = true OR is_public = true)
-         ORDER BY data_year ASC NULLS LAST, code ASC`,
+         ORDER BY sort_order ASC, data_year ASC NULLS LAST, code ASC`,
         [sourceGroups, includePrivate]
     );
     return rows;
+};
+
+// Đặt lại sort_order cho các layer con của 1 nhóm theo thứ tự mới.
+// Chỉ update các code thuộc `layer_group = groupCode` để tránh admin lỡ tay
+// đổi thứ tự của layer thuộc nhóm khác.
+const reorderSourceLayers = async ({ groupCode, order }) => {
+    if (!Array.isArray(order) || order.length === 0) return 0;
+    const client = await db.pool.connect();
+    try {
+        await client.query('BEGIN');
+        // sort_order bắt đầu từ 10, bước 10 — chừa chỗ cho lần insert sau
+        // dùng midpoint trước khi phải renumber toàn bộ.
+        let updated = 0;
+        for (let i = 0; i < order.length; i += 1) {
+            const { rowCount } = await client.query(
+                `UPDATE gis.layer_registry
+                 SET sort_order = $1, updated_at = NOW()
+                 WHERE code = $2
+                   AND layer_group = $3
+                   AND deleted_at IS NULL`,
+                [(i + 1) * 10, order[i], groupCode]
+            );
+            updated += rowCount;
+        }
+        await client.query('COMMIT');
+        return updated;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 };
 
 module.exports = {
@@ -116,5 +148,6 @@ module.exports = {
     findGroupByCode,
     listGroups,
     listSourceLayers,
+    reorderSourceLayers,
     updateGroup,
 };
