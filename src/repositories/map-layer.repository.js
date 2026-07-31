@@ -31,6 +31,8 @@ const LAYER_COLUMNS = `
     CASE WHEN bbox IS NULL THEN NULL ELSE ST_AsGeoJSON(bbox)::json END AS bbox
 `;
 
+const ON_DEMAND_CATEGORIES = ['fire_risk_district', 'forest_district'];
+
 const buildLayerWhere = ({ isAdmin = false, filter = {} }, params) => {
     const where = ['($1::boolean = true OR (is_active = true AND is_public = true))', 'deleted_at IS NULL'];
     if (filter.q) {
@@ -60,6 +62,13 @@ const buildLayerWhere = ({ isAdmin = false, filter = {} }, params) => {
     if (typeof filter.is_public === 'boolean') {
         params.push(filter.is_public);
         where.push(`is_public = $${params.length}`);
+    }
+    if (filter.publish_data === true) {
+        const placeholders = ON_DEMAND_CATEGORIES.map((cat) => {
+            params.push(cat);
+            return `$${params.length}`;
+        }).join(',');
+        where.push(`(category IS NULL OR category NOT IN (${placeholders}))`);
     }
     return where;
 };

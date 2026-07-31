@@ -21,6 +21,7 @@ const listLayersQuery = Joi.object({
     data_year: Joi.number().integer().min(1900).max(2100),
     is_active: Joi.boolean(),
     is_public: Joi.boolean(),
+    publish_data: Joi.boolean(),
 });
 
 const createLayer = Joi.object({
