@@ -97,6 +97,31 @@ const getTimeline = async (code, user, lang) => {
     };
 };
 
+/**
+ * Suy ra 2 field kỹ thuật geoserver_store + geoserver_layer từ layer con của
+ * nhóm (nếu có), hoặc fallback về default GeoServer store + template
+ * `${workspace}:${code}`. Admin/UI không cần bận tâm.
+ */
+const resolveGeoserverRefs = async (payload) => {
+    const filled = { ...payload };
+    const hasStore = Boolean(filled.geoserver_store);
+    const hasLayer = Boolean(filled.geoserver_layer);
+    if (hasStore && hasLayer) return filled;
+
+    const firstChild = await repo.findFirstSourceLayer(filled.code);
+    if (!hasStore) {
+        filled.geoserver_store = firstChild?.geoserver_store
+            || geoserverConfig.datastore
+            || 'kontum_raster_store';
+    }
+    if (!hasLayer) {
+        const workspace = geoserverConfig.workspace || 'kontum';
+        filled.geoserver_layer = firstChild?.geoserver_layer
+            || `${workspace}:${filled.code}`;
+    }
+    return filled;
+};
+
 const createGroup = async (payload, lang) => {
     if (await repo.findGroupByCode(payload.code)) {
         throw new Api409Error(
@@ -104,7 +129,8 @@ const createGroup = async (payload, lang) => {
             ['LAYER_GROUP_CODE_EXISTS']
         );
     }
-    return repo.createGroup(payload);
+    const resolved = await resolveGeoserverRefs(payload);
+    return repo.createGroup(resolved);
 };
 
 const updateGroup = async (code, payload, lang) => {

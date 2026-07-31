@@ -75,6 +75,23 @@ const deleteGroup = async (code) => {
     return rows[0] || null;
 };
 
+// Tìm 1 layer con raster đầu tiên của nhóm — dùng để suy ra geoserver_store /
+// geoserver_layer template khi admin tạo nhóm không điền các field kỹ thuật.
+const findFirstSourceLayer = async (groupCode) => {
+    const { rows } = await db.query(
+        `SELECT geoserver_store, geoserver_layer
+         FROM gis.layer_registry
+         WHERE layer_group = $1
+           AND geometry_type = 'RASTER'
+           AND geoserver_layer IS NOT NULL
+           AND deleted_at IS NULL
+         ORDER BY data_year ASC NULLS LAST, code ASC
+         LIMIT 1`,
+        [groupCode]
+    );
+    return rows[0] || null;
+};
+
 const listSourceLayers = async ({ sourceGroups, includePrivate = false }) => {
     const { rows } = await db.query(
         `SELECT id, code, name_vi, name_en, geoserver_layer, default_style,
@@ -95,6 +112,7 @@ const listSourceLayers = async ({ sourceGroups, includePrivate = false }) => {
 module.exports = {
     createGroup,
     deleteGroup,
+    findFirstSourceLayer,
     findGroupByCode,
     listGroups,
     listSourceLayers,

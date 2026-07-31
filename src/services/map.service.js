@@ -158,7 +158,7 @@ const unpublishLayer = async (code, user, lang) => {
             console.warn(t('map_geoserver_layer_missing_mark_unpublish', lang, { layer: layer.geoserver_layer }));
         });
     }
-    const updated = await layerRepo.markUnpublished({ code, updatedAt: layer.updated_at, updatedBy: user?.id || null });
+    const updated = await layerRepo.markUnpublished({ code: layer.code, updatedAt: layer.updated_at, updatedBy: user?.id || null });
     if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict', lang), ['OPTIMISTIC_LOCK_CONFLICT']); }
     const client = await db.pool.connect();
     try { await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'unpublish', source: 'api', oldData: { geoserver_layer: layer.geoserver_layer }, changedBy: user?.id || null }); }
@@ -168,7 +168,7 @@ const unpublishLayer = async (code, user, lang) => {
 
 const setLayerActive = async (code, isActive, user, lang) => {
     const layer = await requireLayer(code, lang);
-    const updated = await layerRepo.setActive({ code, isActive, updatedAt: layer.updated_at, updatedBy: user?.id || null });
+    const updated = await layerRepo.setActive({ code: layer.code, isActive, updatedAt: layer.updated_at, updatedBy: user?.id || null });
     if (!updated) { throw new Api409Error(t('map_optimistic_lock_conflict', lang), ['OPTIMISTIC_LOCK_CONFLICT']); }
 
     if (layer.geoserver_layer) {

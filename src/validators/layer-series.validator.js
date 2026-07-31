@@ -14,8 +14,11 @@ const createGroup = Joi.object({
     code: code.required(),
     name_vi: Joi.string().trim().max(200).required(),
     name_en: Joi.string().trim().max(200).allow('', null).optional(),
-    geoserver_store: store.required(),
-    geoserver_layer: layer.required(),
+    // Các field GeoServer chỉ mang tính reference/metadata cho nhóm — không
+    // ảnh hưởng render (client tự sinh tile từ từng layer con). Nếu client
+    // không gửi, service tự suy ra từ layer con hoặc fallback về default.
+    geoserver_store: store.optional(),
+    geoserver_layer: layer.optional(),
     geoserver_style: Joi.string().trim().max(160).allow('', null).optional(),
     is_active: Joi.boolean().optional(),
     is_public: Joi.boolean().optional(),
