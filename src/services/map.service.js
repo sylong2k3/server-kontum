@@ -70,7 +70,14 @@ const updateLayer = async (code, payload, user, lang) => {
     try {
         await client.query('BEGIN');
         const oldLayer = await requireLayer(code, lang);
-        if (payload.table_name || payload.schema_name) {
+        // Chỉ kiểm tra bảng vật lý khi client thực sự đổi table_name hoặc schema_name.
+        // Trường hợp gửi lại giá trị cũ (form luôn include field) → bỏ qua để không
+        // chặn edit metadata trên layer shell chưa import dữ liệu.
+        const schemaChanged =
+            payload.schema_name && payload.schema_name !== oldLayer.schema_name;
+        const tableChanged =
+            payload.table_name && payload.table_name !== oldLayer.table_name;
+        if (schemaChanged || tableChanged) {
             const schema = payload.schema_name || oldLayer.schema_name;
             const table = payload.table_name || oldLayer.table_name;
             const tableExists = await layerRepo.physicalTableExists(schema, table, client);
