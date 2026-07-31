@@ -70,6 +70,9 @@ const updateLayer = async (code, payload, user, lang) => {
     try {
         await client.query('BEGIN');
         const oldLayer = await requireLayer(code, lang);
+        // URL param có thể là numeric id (admin truyền id thay vì code). Repo update
+        // chạy WHERE code = $1 nên phải dùng oldLayer.code đã resolve, không dùng URL thô.
+        const layerCode = oldLayer.code;
         // Chỉ kiểm tra bảng vật lý khi client thực sự đổi table_name hoặc schema_name.
         // Trường hợp gửi lại giá trị cũ (form luôn include field) → bỏ qua để không
         // chặn edit metadata trên layer shell chưa import dữ liệu.
@@ -83,7 +86,7 @@ const updateLayer = async (code, payload, user, lang) => {
             const tableExists = await layerRepo.physicalTableExists(schema, table, client);
             if (!tableExists) { throw new Api400Error(t('map_gis_table_not_found', lang), ['GIS_TABLE_NOT_FOUND']); }
         }
-        const updated = await layerRepo.updateLayer(client, code, { ...payload, userId: user?.id || null });
+        const updated = await layerRepo.updateLayer(client, layerCode, { ...payload, userId: user?.id || null });
         if (!updated) {
             // oldLayer đã xác nhận tồn tại ở trên → null nghĩa là expectedUpdatedAt lệch (conflict)
             if (payload.expectedUpdatedAt) { throw new Api409Error(t('map_optimistic_lock_conflict', lang), ['OPTIMISTIC_LOCK_CONFLICT']); }
@@ -109,7 +112,7 @@ const deleteLayer = async (code, user, lang) => {
         // History trước delete: sau khi layer bị xóa, FK ON DELETE SET NULL
         // giữ lại record history với layer_id = NULL (migration 013).
         await layerRepo.insertEditHistory(client, { layerId: layer.id, action: 'delete', source: 'api', oldData: layer, changedBy: user?.id || null });
-        const deleted = await layerRepo.deleteLayer(client, code);
+        const deleted = await layerRepo.deleteLayer(client, layer.code);
         await client.query('COMMIT');
         return deleted;
     } catch (error) {
@@ -134,7 +137,7 @@ const publishLayer = async (code, user, lang) => {
     const client = await db.pool.connect();
     try {
         await client.query('BEGIN');
-        const updated = await layerRepo.markPublished(client, { code, geoserverLayer: geoserverLayerName, geoserverStore: geoserverConfig.datastore, updatedBy: user?.id || null });
+        const updated = await layerRepo.markPublished(client, { code: layer.code, geoserverLayer: geoserverLayerName, geoserverStore: geoserverConfig.datastore, updatedBy: user?.id || null });
         await layerRepo.insertEditHistory(client, { layerId: updated.id, action: 'publish', source: 'api', newData: { geoserver_layer: geoserverLayerName }, changedBy: user?.id || null });
         await client.query('COMMIT');
         return updated;
