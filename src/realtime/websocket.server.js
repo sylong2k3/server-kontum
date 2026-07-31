@@ -71,7 +71,16 @@ function setupSocketState(ws, req) {
                 const requested = message.channels
                     .map((ch) => String(ch).trim())
                     .filter((ch) => ch && ch.length <= MAX_CHANNEL_LENGTH)
-                    .filter((ch) => !ch.startsWith('role:') || ch === `role:${ws._wsState.role}`);
+                    .filter((ch) => {
+                        if (ch.startsWith('role_')) {
+                            return ch === `role_${ws._wsState.role}`;
+                        }
+                        // Giữ tương thích với client cũ nhưng vẫn chặn subscribe vai trò khác.
+                        if (ch.startsWith('role:')) {
+                            return ch === `role:${ws._wsState.role}`;
+                        }
+                        return true;
+                    });
 
                 for (const channel of requested) {
                     if (ws._wsState.channels.size >= MAX_CHANNELS) { break; }

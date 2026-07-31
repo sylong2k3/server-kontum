@@ -112,23 +112,28 @@ const createFeedback = async (actor, payload, files = [], context = {}) => {
         createdBy: actor?.id || null,
     });
 
-    // Doc 14 §I1 — phản ánh cháy rừng broadcast ngay cho so_nnmt (WS + FCM topic role).
-    // Đối chiếu "gần vùng nguy cơ ≥ cấp 4" để nâng priority sẽ bổ sung khi EP-06 có dữ liệu fire.*.
-    if (feedback.category === 'chay_rung') {
-        dispatchSafe(() => notificationService.broadcastToRole('so_nnmt', {
-            channel: 'feedback',
-            type: 'feedback_fire_report',
-            title: t('feedback_notify_fire_title', context.lang),
-            body: t('feedback_notify_fire_body', context.lang, { title: feedback.title }),
-            data: {
-                feedbackId: feedback.id,
-                category: feedback.category,
-                priority: feedback.priority,
-                lng: feedback.lng,
-                lat: feedback.lat,
-            },
-        }, context));
-    }
+    // Mọi phản ánh mới đều cần xuất hiện tại cổng quản trị. Phản ánh cháy rừng
+    // vẫn dùng loại ưu tiên riêng để UI/push có thể nhấn mạnh mức độ khẩn cấp.
+    const isFireReport = feedback.category === 'chay_rung';
+    const notification = {
+        channel: 'feedback',
+        type: isFireReport ? 'feedback_fire_report' : 'feedback_created',
+        title: t(isFireReport ? 'feedback_notify_fire_title' : 'feedback_notify_new_title', context.lang),
+        body: t(isFireReport ? 'feedback_notify_fire_body' : 'feedback_notify_new_body', context.lang, {
+            title: feedback.title,
+        }),
+        data: {
+            feedbackId: feedback.id,
+            category: feedback.category,
+            priority: feedback.priority,
+            lng: feedback.lng,
+            lat: feedback.lat,
+            path: '/feedbacks',
+        },
+    };
+    STAFF_ROLES.forEach((roleCode) => {
+        dispatchSafe(() => notificationService.broadcastToRole(roleCode, notification, context));
+    });
 
     return {
         message: t('feedback_created_success', context.lang),
@@ -228,6 +233,7 @@ const updateStatus = async (actor, id, payload, context = {}) => {
                 fromStatus: existing.status,
                 toStatus: payload.toStatus,
                 note,
+                path: '/feedback/mine',
             },
         }, context));
     }

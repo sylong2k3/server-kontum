@@ -1,4 +1,5 @@
 const newsRepository = require('../repositories/news.repository');
+const notificationService = require('./notification.service');
 const db = require('../configs/database');
 const { Api404Error, Api403Error, Api409Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
@@ -16,6 +17,38 @@ const canCreateNews = (actor) => hasPermission(actor, 'news', 'create');
 const canUpdateNews = (actor) => hasPermission(actor, 'news', 'update');
 const canDeleteNews = (actor) => hasPermission(actor, 'news', 'delete');
 const canViewInternal = (actor) => actor && INTERNAL_ROLES.includes(actor.role);
+
+// Gửi notification là best-effort; lỗi push/realtime không được rollback nghiệp vụ CMS.
+const dispatchSafe = (fn) => {
+    try {
+        const result = fn();
+        if (result && typeof result.catch === 'function') {
+            result.catch((err) => console.error('[NEWS] notify error:', err.message));
+        }
+    } catch (err) {
+        console.error('[NEWS] notify error:', err.message);
+    }
+};
+
+const pickNewsTranslation = (translations = {}, lang = 'vi') =>
+    translations[lang] || translations.vi || translations.en || Object.values(translations)[0] || {};
+
+const notifyPublishedNews = (news, context = {}) => {
+    if (!news?.id || !news?.title) {return;}
+    dispatchSafe(() => notificationService.broadcastToRole('citizen', {
+        channel: 'news',
+        type: 'news_published',
+        title: t('news_notify_published_title', context.lang),
+        body: t('news_notify_published_body', context.lang, { title: news.title }),
+        data: {
+            newsId: news.id,
+            newsTitle: news.title,
+            newsSlug: news.slug,
+            category: news.category,
+            path: news.slug ? `/news/${news.slug}` : '/news',
+        },
+    }, context));
+};
 
 // ─── Response mappers ─────────────────────────────────────────────────────────
 
@@ -134,20 +167,26 @@ const createNews = async (actor, payload, file, context = {}) => {
         content,
     });
 
+    const createdNews = {
+        id: meta.id,
+        coverUrl: meta.cover_url,
+        status: meta.status,
+        category: meta.category,
+        lang: translation.lang,
+        title: translation.title,
+        slug: translation.slug,
+        summary: translation.summary,
+        publishedAt: meta.published_at,
+        createdAt: meta.created_at,
+    };
+
+    if (status === 'published') {
+        notifyPublishedNews(createdNews, context);
+    }
+
     return {
         message: t('news_created_success', context.lang),
-        news: {
-            id: meta.id,
-            coverUrl: meta.cover_url,
-            status: meta.status,
-            category: meta.category,
-            lang: translation.lang,
-            title: translation.title,
-            slug: translation.slug,
-            summary: translation.summary,
-            publishedAt: meta.published_at,
-            createdAt: meta.created_at,
-        },
+        news: createdNews,
     };
 };
 
@@ -178,6 +217,17 @@ const updateNewsMeta = async (actor, id, payload, file, context = {}) => {
 
     const updated = await newsRepository.updateMeta(id, updatePayload);
     if (!updated) {throw new Api409Error(t('news_optimistic_lock_conflict', context.lang));}
+
+    if (existing.status !== 'published' && updated.status === 'published') {
+        const detail = await newsRepository.findAdminById(id);
+        const translation = pickNewsTranslation(detail?.translations, context.lang);
+        notifyPublishedNews({
+            id: updated.id,
+            title: translation.title,
+            slug: translation.slug,
+            category: updated.category,
+        }, context);
+    }
 
     return { message: t('news_updated_success', context.lang), news: { id: updated.id, status: updated.status, category: updated.category, coverUrl: updated.cover_url } };
 };
@@ -286,6 +336,15 @@ const updateNewsFull = async (actor, id, payload, file, context = {}) => {
 
     // 3. Trả về admin detail đầy đủ
     const updated = await newsRepository.findAdminById(id);
+    if (existing.status !== 'published' && updated?.status === 'published') {
+        const translation = pickNewsTranslation(updated.translations, context.lang);
+        notifyPublishedNews({
+            id: updated.id,
+            title: translation.title,
+            slug: translation.slug,
+            category: updated.category,
+        }, context);
+    }
     return {
         message: t('news_updated_success', context.lang),
         news: toAdminDetail(updated),

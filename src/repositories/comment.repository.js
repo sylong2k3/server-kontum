@@ -3,9 +3,16 @@ const db = require('../configs/database');
 const COMMENT_SELECT = `
     SELECT c.id, c.news_id AS "newsId", c.user_id AS "userId", c.content, 
            c.is_approved AS "isApproved", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
-           u.full_name AS "userName", u.avatar_url AS "userAvatar"
+           u.full_name AS "userName", u.avatar_url AS "userAvatar",
+           nt.title AS "newsTitle", nt.slug AS "newsSlug"
     FROM cms.comments c
     LEFT JOIN auth.users u ON c.user_id = u.id
+    LEFT JOIN LATERAL (
+        SELECT title, slug FROM cms.news_translations t
+        WHERE t.news_id = c.news_id
+        ORDER BY (t.lang = 'vi') DESC
+        LIMIT 1
+    ) nt ON true
 `;
 
 const findById = async (id) => {
