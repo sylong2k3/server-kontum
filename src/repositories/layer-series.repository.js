@@ -95,7 +95,7 @@ const findFirstSourceLayer = async (groupCode) => {
 const listSourceLayers = async ({ sourceGroups, includePrivate = false }) => {
     const { rows } = await db.query(
         `SELECT id, code, name_vi, name_en, geoserver_layer, default_style,
-                data_year, layer_group, sort_order
+                data_year, layer_group, sort_order, legend_config
          FROM gis.layer_registry
          WHERE geometry_type = 'RASTER'
            AND geoserver_layer IS NOT NULL

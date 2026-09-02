@@ -24,6 +24,52 @@ const listLayersQuery = Joi.object({
     publish_data: Joi.boolean(),
 });
 
+const legendConfig = Joi.object({
+    entries: Joi.array().items(
+        Joi.object({
+            label: Joi.string().trim().min(1).max(200).required(),
+            color: Joi.string()
+                .trim()
+                .pattern(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/)
+                .required(),
+        })
+    ).min(1).max(50).required(),
+}).allow(null).default(null);
+
+const hexColor = Joi.string().trim().pattern(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/);
+const opacity = Joi.number().min(0).max(1);
+const nonNegative = Joi.number().min(0);
+const defaultStyle = Joi.object({
+    fillColor: hexColor,
+    fillOpacity: opacity,
+    fillAntialias: Joi.boolean(),
+    strokeColor: hexColor,
+    strokeOpacity: opacity,
+    strokeWidth: Joi.number().min(0).max(24),
+    strokeBlur: Joi.number().min(0).max(24),
+    strokeDasharray: Joi.array().items(nonNegative).max(8),
+    strokeOffset: Joi.number().min(-24).max(24),
+    lineCap: Joi.string().valid('butt', 'round', 'square'),
+    lineJoin: Joi.string().valid('bevel', 'round', 'miter'),
+    circleColor: hexColor,
+    circleOpacity: opacity,
+    circleRadius: Joi.number().min(0).max(50),
+    circleBlur: Joi.number().min(-1).max(1),
+    circleStrokeColor: hexColor,
+    circleStrokeOpacity: opacity,
+    circleStrokeWidth: Joi.number().min(0).max(24),
+    opacity,
+    rasterOpacity: opacity,
+    brightnessMin: opacity,
+    brightnessMax: opacity,
+    contrast: Joi.number().min(-1).max(1),
+    saturation: Joi.number().min(-1).max(1),
+    hueRotate: Joi.number().min(-360).max(360),
+    fadeDuration: Joi.number().integer().min(0).max(60000),
+    resampling: Joi.string().valid('linear', 'nearest'),
+    visible_by_default: Joi.boolean(),
+}).unknown(false).allow(null).default({});
+
 const createLayer = Joi.object({
     code: code.required(),
     name_vi: Joi.string().min(1).max(200).required(),
@@ -38,7 +84,7 @@ const createLayer = Joi.object({
     geoserver_layer: Joi.string().max(255).allow('', null),
     geoserver_store: Joi.string().max(120).allow('', null),
     source_url: Joi.string().allow('', null),
-    default_style: Joi.object().default({}),
+    default_style: defaultStyle,
     min_zoom: Joi.number().integer().min(0).max(24).default(1),
     max_zoom: Joi.number().integer().min(0).max(24).default(22),
     label_field: Joi.string().max(60).allow('', null),
@@ -53,6 +99,8 @@ const createLayer = Joi.object({
     is_public: Joi.boolean().default(false),
     is_editable: Joi.boolean().default(true),
     layer_permissions: Joi.object().default({}),
+    legend_config: legendConfig,
+    legendConfig: legendConfig,
 }).custom((value, helpers) => {
     if (value.min_zoom > value.max_zoom) { return helpers.error('any.invalid'); }
     return value;
@@ -71,7 +119,7 @@ const updateLayer = Joi.object({
     geoserver_layer:   Joi.string().max(255).allow('', null),
     geoserver_store:   Joi.string().max(120).allow('', null),
     source_url:        Joi.string().allow('', null),
-    default_style:     Joi.object(),
+    default_style:     defaultStyle,
     min_zoom:          Joi.number().integer().min(0).max(24),
     max_zoom:          Joi.number().integer().min(0).max(24),
     label_field:       Joi.string().max(60).allow('', null),
@@ -86,6 +134,8 @@ const updateLayer = Joi.object({
     is_public:         Joi.boolean(),
     is_editable:       Joi.boolean(),
     layer_permissions: Joi.object(),
+    legend_config:     legendConfig,
+    legendConfig:      legendConfig,
     // Optimistic locking (optional): nếu client gửi, backend chỉ update khi updated_at khớp.
     expectedUpdatedAt: Joi.date().iso(),
 }).min(1);
@@ -130,6 +180,7 @@ const importPayload = Joi.object({
 module.exports = {
     activeLayer,
     createLayer,
+    defaultStyle,
     featureInfoQuery,
     featurePayload,
     importPayload,

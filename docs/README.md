@@ -21,6 +21,7 @@
 | 12 | [GeoServer Integration](./modules/12-geoserver-integration-design.md) | Metadata layer, publish/unpublish, GeoServer REST, public OGC endpoints |
 | 13 | [GeoServer + PostGIS & GeoTIFF Guide](./guides/13-geoserver-postgis-setup-guide.md) | Hướng dẫn thực hành: vector PostGIS + raster GeoTIFF/ImageMosaic → Mapbox |
 | 13A | [Mapbox Layer Timeline](./guides/mapbox-layer-timeline-integration.md) | Contract API timeline, slider snap, thay raster source, Play/Pause |
+| 13B | [Time-series: Server → Client porting guide](./guides/time-series-server-client-porting-guide.md) | Runbook port toàn bộ luồng raster theo thời gian: DB, service, API, GeoServer, Zustand, Mapbox, checklist và gotchas |
 | 14 | [Functional Spec chi tiết](./14-functional-spec-detailed.md) | Đặc tả field-level từng chức năng (input/validate/nghiệp vụ/lỗi) |
 | 15 | [Dev Workflow: Debug & Review](./15-dev-workflow-debug-review.md) | Vòng đời Story, bước debug, checklist code review, branch protection |
 | 16 | [Hướng dẫn sử dụng Postman Collection](./guides/16-postman-guide.md) | Import, đăng nhập lấy token, chạy Runner/Newman, đọc test 400, checklist đồng bộ khi thêm endpoint |

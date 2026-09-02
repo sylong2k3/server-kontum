@@ -55,6 +55,51 @@ const toStep = (layer) => {
     };
 };
 
+const aggregateLegend = (layers = []) => {
+    const seen = new Set();
+    const uniqueEntries = [];
+
+    for (const layer of layers) {
+        if (!layer || !layer.legend_config) continue;
+        let config = layer.legend_config;
+        if (typeof config === 'string') {
+            try {
+                config = JSON.parse(config);
+            } catch {
+                continue;
+            }
+        }
+        if (!config) continue;
+        const entries = Array.isArray(config)
+            ? config
+            : (Array.isArray(config.entries) ? config.entries : (Array.isArray(config.items) ? config.items : []));
+
+        for (const entry of entries) {
+            if (!entry) continue;
+            const label = String(entry.label || entry.name || entry.title || '').trim();
+            const color = String(entry.color || entry.fill || '').trim();
+            if (!label && !color) continue;
+
+            const key = `${label.toLowerCase()}|||${color.toLowerCase()}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueEntries.push({
+                    label: label || color,
+                    color: color || '#000000',
+                    ...(entry.value !== undefined ? { value: entry.value } : {}),
+                    ...(entry.opacity !== undefined ? { opacity: entry.opacity } : {}),
+                });
+            }
+        }
+    }
+
+    if (!uniqueEntries.length) return null;
+    return {
+        type: 'custom',
+        entries: uniqueEntries,
+    };
+};
+
 const sourceGroupsFor = (code) => code === 'dien_bien_nhiet_do'
     ? ['dien_bien_nhiet_do', 'bien_dong_nhiet_do']
     : [code];
@@ -67,13 +112,16 @@ const layersFor = (group, user) => repo.listSourceLayers({
 const listGroups = async (user) => {
     const groups = await repo.listGroups({ includePrivate: isAdmin(user) });
     return Promise.all(groups.map(async (group) => {
-    const steps = (await layersFor(group, user)).map(toStep).filter((step) => step.year_from && step.year_to);
-    return {
-        ...group,
-        step_count: steps.length,
-        min_year: steps.length ? Math.min(...steps.map((step) => step.year_from)) : null,
-        max_year: steps.length ? Math.max(...steps.map((step) => step.year_to)) : null,
-    };
+        const rawLayers = await layersFor(group, user);
+        const steps = rawLayers.map(toStep).filter((step) => step.year_from && step.year_to);
+        const legend = aggregateLegend(rawLayers);
+        return {
+            ...group,
+            legend,
+            step_count: steps.length,
+            min_year: steps.length ? Math.min(...steps.map((step) => step.year_from)) : null,
+            max_year: steps.length ? Math.max(...steps.map((step) => step.year_to)) : null,
+        };
     }));
 };
 
@@ -82,7 +130,10 @@ const getTimeline = async (code, user, lang) => {
     if (!group || (!isAdmin(user) && (!group.is_active || !group.is_public))) {
         throw new Api404Error(t('layer_series_group_not_found', lang), ['GROUP_NOT_FOUND']);
     }
-    const steps = (await layersFor(group, user)).map(toStep).filter((step) => step.year_from && step.year_to);
+    const rawLayers = await layersFor(group, user);
+    const steps = rawLayers.map(toStep).filter((step) => step.year_from && step.year_to);
+    const legend = aggregateLegend(rawLayers);
+
     // Ưu tiên sort_order (thứ tự admin đã kéo thả). Fallback về năm khi
     // sort_order bằng nhau (thường là 0 — chưa reorder).
     steps.sort((a, b) =>
@@ -96,7 +147,9 @@ const getTimeline = async (code, user, lang) => {
             code, name_vi: group.name_vi, name_en: group.name_en,
             geoserver_layer: group.geoserver_layer,
             default_style: group.geoserver_style,
+            legend,
         },
+        legend,
         mode: 'discrete', snap: 'nearest',
         default_index: steps.length ? steps.length - 1 : null,
         min_year: steps.length ? Math.min(...steps.map((step) => step.year_from)) : null,

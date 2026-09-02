@@ -27,7 +27,7 @@ const LAYER_COLUMNS = `
     default_style, min_zoom, max_zoom, label_field, category, layer_kind,
     layer_group, data_year, source_dataset, source_layer_name, sort_order,
     is_active, is_public, is_editable, layer_permissions, remote_sensing_image_id,
-    feature_count, last_updated_at, created_at, updated_at,
+    feature_count, last_updated_at, legend_config, created_at, updated_at,
     CASE WHEN bbox IS NULL THEN NULL ELSE ST_AsGeoJSON(bbox)::json END AS bbox
 `;
 
@@ -149,8 +149,8 @@ const createLayer = async (client, payload) => {
             geometry_column, geometry_type, epsg_code, geoserver_layer, geoserver_store, source_url,
             default_style, min_zoom, max_zoom, label_field, category, layer_kind, layer_group,
             data_year, source_dataset, source_layer_name, sort_order, is_active, is_public,
-            is_editable, layer_permissions, created_by, updated_by
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$29)
+            is_editable, layer_permissions, legend_config, created_by, updated_by
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$30)
         RETURNING ${LAYER_COLUMNS}`,
         [payload.code, payload.name_vi, payload.name_en || null, payload.description_vi || null,
             payload.description_en || null, payload.schema_name || 'gis', payload.table_name,
@@ -161,13 +161,17 @@ const createLayer = async (client, payload) => {
             payload.layer_group || null, payload.data_year || null, payload.source_dataset || null,
             payload.source_layer_name || null, payload.sort_order ?? 0, payload.is_active ?? true,
             payload.is_public ?? false, payload.is_editable ?? true, payload.layer_permissions || {},
+            payload.legend_config !== undefined ? payload.legend_config : (payload.legendConfig !== undefined ? payload.legendConfig : null),
             payload.userId || null]
     );
     return rows[0];
 };
 
 const updateLayer = async (client, code, payload) => {
-    const allowed = ['name_vi','name_en','description_vi','description_en','schema_name','table_name','geometry_column','geometry_type','epsg_code','geoserver_layer','geoserver_store','source_url','default_style','min_zoom','max_zoom','label_field','category','layer_kind','layer_group','data_year','source_dataset','source_layer_name','sort_order','is_active','is_public','is_editable','layer_permissions'];
+    const allowed = ['name_vi','name_en','description_vi','description_en','schema_name','table_name','geometry_column','geometry_type','epsg_code','geoserver_layer','geoserver_store','source_url','default_style','min_zoom','max_zoom','label_field','category','layer_kind','layer_group','data_year','source_dataset','source_layer_name','sort_order','is_active','is_public','is_editable','layer_permissions','legend_config'];
+    if (payload.legendConfig !== undefined && payload.legend_config === undefined) {
+        payload.legend_config = payload.legendConfig;
+    }
     const sets = [];
     const params = [code];
     allowed.forEach((field) => {
