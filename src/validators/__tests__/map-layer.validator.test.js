@@ -115,3 +115,71 @@ describe('map-layer.validator - legend_config', () => {
         expect(error).toBeDefined();
     });
 });
+
+describe('map-layer.validator - default_style', () => {
+    const validBaseCreate = {
+        code: 'style_layer',
+        name_vi: 'Lớp style',
+        table_name: 'style_layer',
+        geometry_type: 'POLYGON',
+    };
+
+    test('accepts the canonical polygon style', () => {
+        const { error, value } = schemas.createLayer.validate({
+            ...validBaseCreate,
+            default_style: {
+                fillColor: '#f0f0f0',
+                fillOpacity: 0.15,
+                strokeColor: '#333333',
+                strokeWidth: 2,
+                lineCap: 'round',
+                lineJoin: 'round',
+            },
+        });
+        expect(error).toBeUndefined();
+        expect(value.default_style.fillOpacity).toBe(0.15);
+    });
+
+    test('accepts line and raster properties', () => {
+        expect(schemas.createLayer.validate({
+            ...validBaseCreate,
+            geometry_type: 'LINESTRING',
+            default_style: {
+                strokeDasharray: [2, 2],
+                lineCap: 'square',
+                lineJoin: 'bevel',
+            },
+        }).error).toBeUndefined();
+        expect(schemas.createLayer.validate({
+            ...validBaseCreate,
+            geometry_type: 'RASTER',
+            default_style: {
+                opacity: 0.5,
+                brightnessMin: 0.1,
+                brightnessMax: 0.9,
+                contrast: 0.2,
+                saturation: -0.2,
+                hueRotate: 45,
+                fadeDuration: 250,
+                resampling: 'nearest',
+            },
+        }).error).toBeUndefined();
+    });
+
+    test('accepts null style and update payload', () => {
+        expect(schemas.createLayer.validate({ ...validBaseCreate, default_style: null }).error).toBeUndefined();
+        expect(schemas.updateLayer.validate({ default_style: { strokeColor: '#123456', strokeWidth: 3 } }).error).toBeUndefined();
+    });
+
+    test.each([
+        ['invalid hex color', { fillColor: 'green' }],
+        ['opacity outside range', { fillOpacity: 1.2 }],
+        ['negative width', { strokeWidth: -1 }],
+        ['invalid line cap', { lineCap: 'dotted' }],
+        ['invalid dash array', { strokeDasharray: [2, -1] }],
+        ['unknown key', { fillPattern: 'dots' }],
+    ])('rejects %s', (_label, default_style) => {
+        const { error } = schemas.createLayer.validate({ ...validBaseCreate, default_style });
+        expect(error).toBeDefined();
+    });
+});
