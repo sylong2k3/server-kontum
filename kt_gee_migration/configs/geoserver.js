@@ -1,4 +1,4 @@
-﻿require('dotenv').config({ quiet: true });
+require('dotenv').config({ quiet: true });
 
 const DEFAULT_ALLOWED_PARAMS = new Set([
     'service', 'version', 'request', 'layers', 'query_layers', 'bbox', 'width', 'height',

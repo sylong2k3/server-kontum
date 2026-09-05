@@ -1,4 +1,4 @@
-﻿# Mobile API Update Log: News Comments by Slug
+# Mobile API Update Log: News Comments by Slug
 
 Ngày cập nhật: 2026-07-05
 

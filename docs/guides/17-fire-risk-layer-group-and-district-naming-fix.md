@@ -1,4 +1,4 @@
-﻿# Fix: nhóm layer cháy rừng/phân loại rừng + tên huyện thật (28/07/2026)
+# Fix: nhóm layer cháy rừng/phân loại rừng + tên huyện thật (28/07/2026)
 
 > Bối cảnh: layer cháy rừng theo huyện đang hiển thị tên **"Huyện 1"…"Huyện 10"** và
 > rơi vào nhóm "Khác" (không tên) trong layer picker mobile, đứng lẫn phía trên các

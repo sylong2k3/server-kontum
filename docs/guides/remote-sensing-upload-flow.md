@@ -1,4 +1,4 @@
-﻿# Flow upload ảnh GeoTIFF lớn
+# Flow upload ảnh GeoTIFF lớn
 
 Base path: `/api/v1/remote-sensing`
 

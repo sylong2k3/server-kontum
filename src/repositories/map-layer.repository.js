@@ -2,7 +2,7 @@
 
 /**
  * Map Layer Repository
- * Chá»‰ chá»©a SQL, khÃ´ng chá»©a business logic.
+ * Chỉ chứa SQL, không chứa business logic.
  */
 
 const db = require('../configs/database');
