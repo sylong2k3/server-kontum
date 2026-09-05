@@ -176,7 +176,8 @@ const updateLayer = async (client, code, payload) => {
     const params = [code];
     allowed.forEach((field) => {
         if (Object.prototype.hasOwnProperty.call(payload, field)) {
-            params.push(payload[field] === '' ? null : payload[field]);
+            const value = field === 'default_style' && payload[field] === null ? {} : payload[field];
+            params.push(value === '' ? null : value);
             sets.push(`${field} = $${params.length}`);
         }
     });
