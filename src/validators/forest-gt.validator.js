@@ -45,7 +45,7 @@ const pointBulk = Joi.object({
 
 const listQuery = Joi.object({
     page:     Joi.number().integer().min(1).default(1),
-    limit:    Joi.number().integer().min(1).max(200).default(50),
+    limit:    Joi.number().integer().min(1).max(2000).default(50),
     from:     Joi.date().iso(),
     to:       Joi.date().iso(),
     classId:  classId,
