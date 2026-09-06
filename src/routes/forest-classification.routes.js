@@ -58,12 +58,15 @@ const gt = (h) => [verifyToken, requirePermission('forest_classification', 'grou
 // Zones (polygon labels)
 router.post  ('/ground-truth/zones',       ...gt(gtCtrl.createZone));
 router.post  ('/ground-truth/zones/bulk',  ...gt(gtCtrl.bulkZone));
+// Đăng ký trước '/zones/:id' để Express không khớp 'bulk-delete' thành :id.
+router.post  ('/ground-truth/zones/bulk-delete', ...gt(gtCtrl.bulkDeleteZones));
 router.get   ('/ground-truth/zones',       ...gt(gtCtrl.listZones));
 router.delete('/ground-truth/zones/:id',   ...gt(gtCtrl.deleteZone));
 
 // Points (single field samples)
 router.post  ('/ground-truth/points',      ...gt(gtCtrl.createPoint));
 router.post  ('/ground-truth/points/bulk', ...gt(gtCtrl.bulkPoint));
+router.post  ('/ground-truth/points/bulk-delete', ...gt(gtCtrl.bulkDeletePoints));
 router.get   ('/ground-truth/points',      ...gt(gtCtrl.listPoints));
 router.delete('/ground-truth/points/:id',  ...gt(gtCtrl.deletePoint));
 

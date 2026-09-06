@@ -45,8 +45,25 @@ async function listZones(query) { return repo.listZones(query); }
 
 async function deleteZone(id) {
     const ok = await repo.softDeleteZone(Number(id));
-    if (!ok) throw new Api404Error('Zone không tồn tại.', ['NOT_FOUND']);
+    if (!ok) {throw new Api404Error('Zone không tồn tại.', ['NOT_FOUND']);}
     return { deleted: true, id: Number(id) };
+}
+
+/**
+ * Xóa nhiều zone trong 1 statement. Trả về cả `skipped` (id không tồn tại hoặc
+ * đã bị xóa trước đó) để UI báo chính xác thay vì chỉ đếm số lượng. Chỉ ném 404
+ * khi không id nào hợp lệ — thành công một phần vẫn là 200.
+ */
+async function deleteZonesBulk(ids) {
+    const unique = [...new Set(ids.map(Number))];
+    const deletedIds = await repo.softDeleteZoneBulk(unique);
+    const deleted = deletedIds.map(Number);
+    const skipped = unique.filter((id) => !deleted.includes(id));
+    dbg(`deleteZonesBulk requested=${unique.length} deleted=${deleted.length}`);
+    if (!deleted.length) {
+        throw new Api404Error('Không có vùng nào để xóa.', ['NOT_FOUND']);
+    }
+    return { deleted: deleted.length, ids: deleted, skipped };
 }
 
 // ── POINTS ───────────────────────────────────────────────────────────────────
@@ -65,8 +82,20 @@ async function listPoints(query) { return repo.listPoints(query); }
 
 async function deletePoint(id) {
     const ok = await repo.softDeletePoint(Number(id));
-    if (!ok) throw new Api404Error('Point không tồn tại.', ['NOT_FOUND']);
+    if (!ok) {throw new Api404Error('Point không tồn tại.', ['NOT_FOUND']);}
     return { deleted: true, id: Number(id) };
+}
+
+async function deletePointsBulk(ids) {
+    const unique = [...new Set(ids.map(Number))];
+    const deletedIds = await repo.softDeletePointBulk(unique);
+    const deleted = deletedIds.map(Number);
+    const skipped = unique.filter((id) => !deleted.includes(id));
+    dbg(`deletePointsBulk requested=${unique.length} deleted=${deleted.length}`);
+    if (!deleted.length) {
+        throw new Api404Error('Không có điểm nào để xóa.', ['NOT_FOUND']);
+    }
+    return { deleted: deleted.length, ids: deleted, skipped };
 }
 
 // ── For pipeline: get GT for the analysis window ─────────────────────────────
@@ -83,7 +112,7 @@ async function getGtForAnalysis(analysisEndDate, windowDays = Number(process.env
 }
 
 module.exports = {
-    createZone, bulkZoneFromFeatureCollection, listZones, deleteZone,
-    createPoint, bulkPoint, listPoints, deletePoint,
+    createZone, bulkZoneFromFeatureCollection, listZones, deleteZone, deleteZonesBulk,
+    createPoint, bulkPoint, listPoints, deletePoint, deletePointsBulk,
     getGtForAnalysis,
 };

@@ -46,6 +46,15 @@ const deleteZone = async (req, res) => {
     OK(res, 'Đã xóa vùng.', result);
 };
 
+// Dùng POST thay vì DELETE-with-body: nhiều proxy và HTTP client loại bỏ body
+// của DELETE nên danh sách ids có thể không tới được server.
+const bulkDeleteZones = async (req, res) => {
+    const { ids } = validate(schemas.idList, req.body || {}, req.lang);
+    const result = await svc.deleteZonesBulk(ids);
+    console.log(`[FOREST-GT-CTL] zone BULK-DELETE deleted=${result.deleted} skipped=${result.skipped.length} user=${req.user?.id}`);
+    OK(res, `Đã xóa ${result.deleted} vùng mẫu.`, result);
+};
+
 // ── POINTS ───────────────────────────────────────────────────────────────────
 
 const createPoint = async (req, res) => {
@@ -74,7 +83,14 @@ const deletePoint = async (req, res) => {
     OK(res, 'Đã xóa điểm.', result);
 };
 
+const bulkDeletePoints = async (req, res) => {
+    const { ids } = validate(schemas.idList, req.body || {}, req.lang);
+    const result = await svc.deletePointsBulk(ids);
+    console.log(`[FOREST-GT-CTL] point BULK-DELETE deleted=${result.deleted} skipped=${result.skipped.length} user=${req.user?.id}`);
+    OK(res, `Đã xóa ${result.deleted} điểm mẫu.`, result);
+};
+
 module.exports = {
-    createZone, bulkZone, listZones, deleteZone,
-    createPoint, bulkPoint, listPoints, deletePoint,
+    createZone, bulkZone, listZones, deleteZone, bulkDeleteZones,
+    createPoint, bulkPoint, listPoints, deletePoint, bulkDeletePoints,
 };

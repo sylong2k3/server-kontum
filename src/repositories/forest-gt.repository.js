@@ -108,6 +108,24 @@ const softDeleteZone = async (id) => {
     return rowCount > 0;
 };
 
+/**
+ * Soft-delete nhiều zone trong 1 statement. `RETURNING id` cho biết chính xác
+ * id nào thực sự đổi trạng thái — id không tồn tại hoặc đã xóa trước đó sẽ
+ * không xuất hiện, để controller báo lại phần bị bỏ qua.
+ */
+const softDeleteZoneBulk = async (ids) => {
+    if (!ids?.length) {return [];}
+    dbg(`softDeleteZoneBulk count=${ids.length}`);
+    const { rows } = await db.query(
+        `UPDATE forest.forest_gt_zones
+            SET is_active = FALSE, updated_at = NOW()
+          WHERE id = ANY($1::bigint[]) AND is_active = TRUE
+      RETURNING id`,
+        [ids],
+    );
+    return rows.map((r) => r.id);
+};
+
 // ── POINTS ───────────────────────────────────────────────────────────────────
 
 const insertPoint = async ({ observedAt, classId, lng, lat, source, photoUrl, reporterName, notes, createdBy }) => {
@@ -192,6 +210,20 @@ const softDeletePoint = async (id) => {
     return rowCount > 0;
 };
 
+// Bảng points không có cột updated_at (migration 033) nên không set như zones.
+const softDeletePointBulk = async (ids) => {
+    if (!ids?.length) {return [];}
+    dbg(`softDeletePointBulk count=${ids.length}`);
+    const { rows } = await db.query(
+        `UPDATE forest.forest_gt_points
+            SET is_active = FALSE
+          WHERE id = ANY($1::bigint[]) AND is_active = TRUE
+      RETURNING id`,
+        [ids],
+    );
+    return rows.map((r) => r.id);
+};
+
 // ── For pipeline: fetch GT active trong cửa sổ [from, to) ────────────────────
 
 const getGtForWindow = async ({ from, to }) => {
@@ -252,7 +284,7 @@ const getGtForWindow = async ({ from, to }) => {
 };
 
 module.exports = {
-    insertZone, insertZoneBulk, listZones, softDeleteZone,
-    insertPoint, insertPointBulk, listPoints, softDeletePoint,
+    insertZone, insertZoneBulk, listZones, softDeleteZone, softDeleteZoneBulk,
+    insertPoint, insertPointBulk, listPoints, softDeletePoint, softDeletePointBulk,
     getGtForWindow,
 };

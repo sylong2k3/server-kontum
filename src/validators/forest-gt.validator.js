@@ -51,4 +51,11 @@ const listQuery = Joi.object({
     classId:  classId,
 });
 
-module.exports = { zoneCreate, featureCollection, pointCreate, pointBulk, listQuery };
+// Bulk delete: cùng trần 1000 với bulk insert để giới hạn kích thước payload.
+const idList = Joi.object({
+    ids: Joi.array()
+        .items(Joi.number().integer().positive().required())
+        .min(1).max(1000).required(),
+});
+
+module.exports = { zoneCreate, featureCollection, pointCreate, pointBulk, listQuery, idList };
