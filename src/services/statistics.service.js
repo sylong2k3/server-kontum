@@ -32,7 +32,7 @@ const _buildFireRiskDashboard = async () => {
         const { items } = await fireRiskRepo.listCompleted({ page: 1, limit: 1 });
         const snap = items?.[0];
         if (!snap) {
-            return { available: false, note: 'Chưa có snapshot fire-risk.' };
+            return { available: false, note: 'Chưa có kết quả phân tích cho kỳ này.' };
         }
         const summary = snap.province_summary || {};
         const dist    = summary.riskLevelDist || {};

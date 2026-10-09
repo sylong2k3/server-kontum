@@ -1056,9 +1056,8 @@ function _formatDateVN(dateLike) {
     return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
-    const notifSvc = require('./notification.service');
-    const dateStr  = _formatDateVN(snapshot.analysis_date);
+function buildFireRiskCompletedNotification(snapshot, provinceSummary) {
+    const dateStr = _formatDateVN(snapshot.analysis_date);
     const dist    = provinceSummary?.riskLevelDist || {};
 
     // Min/max/avg từ province summary (đã tính trong pipeline).
@@ -1073,21 +1072,25 @@ async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
     const type   = isHigh ? 'fire_risk_high' : 'fire_risk_completed';
     const title  = isHigh
         ? `⚠ Cảnh báo cháy rừng cao ngày ${dateStr}`
-        : `Cảnh báo cháy rừng ${dateStr} hoàn thành`;
+        : `Đã cập nhật dữ liệu nguy cơ cháy rừng ngày ${dateStr}`;
     const body   = `Cấp: ${minLvl ?? '—'}–${maxLvl ?? '—'} (TB ${avg?.toFixed?.(2) ?? '—'}). `
                  + `Xem chi tiết trong "Cảnh báo cháy rừng".`;
     const data   = {
-        snapshotId: snapshot.id, analysisDate: dateStr,
+        snapshotId: snapshot?.id, analysisDate: dateStr,
         avgLevel: avg, minLevel: minLvl, maxLevel: maxLvl,
     };
+
+    return { type, title, body, data, channel: isHigh ? 'alert' : 'system' };
+}
+
+async function _notifyFireRiskCompleted(snapshot, provinceSummary) {
+    const notifSvc = require('./notification.service');
+    const payload = buildFireRiskCompletedNotification(snapshot, provinceSummary);
 
     // Gửi tới các role liên quan. Bỏ role phân quyền check ở đây — RBAC
     // audience decoupled với việc tạo notification.
     for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
-        await notifSvc.broadcastToRole(role, {
-            type, title, body, data,
-            channel: isHigh ? 'alert' : 'system',
-        }).catch((e) => console.warn(`[FIRE-RISK] notify role=${role} failed:`, e.message));
+        await notifSvc.broadcastToRole(role, payload).catch((e) => console.warn(`[FIRE-RISK] notify role=${role} failed:`, e.message));
     }
 }
 
@@ -1376,4 +1379,5 @@ module.exports = {
     todayUtc,
     fmtDate,
     formatDateVN: _formatDateVN,
+    buildFireRiskCompletedNotification,
 };

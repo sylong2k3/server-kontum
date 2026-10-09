@@ -180,7 +180,7 @@ async function sendTop3ChangesAlert(snapshot, prevSnapshot, provinceSummary) {
                    `(${c.prevHa.toLocaleString('vi')} → ${c.currHa.toLocaleString('vi')} ha)`;
         });
         const title = `Cảnh báo biến động rừng ${period}`;
-        const body = `So sánh với ${prevPeriod}. Top 3 lớp biến động mạnh nhất:\n${lines.join('\n')}`;
+        const body = `So sánh với ${prevPeriod}. Ba nhóm có diện tích thay đổi lớn nhất:\n${lines.join('\n')}`;
         for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
             await notifSvc.broadcastToRole(role, {
                 type: 'forest_change_alert',

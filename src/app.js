@@ -189,7 +189,7 @@ const expensiveLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     success: false,
-    message: "Too many expensive requests.",
+    message: "Bạn gửi quá nhiều yêu cầu xử lý. Hãy thử lại sau.",
     errors: ["TOO_MANY_REQUESTS"],
   },
 });

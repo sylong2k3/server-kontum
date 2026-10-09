@@ -583,6 +583,8 @@ const _sanitizeUser = (user, lang = 'vi') => {
         email_verified: user.email_verified,
         must_change_password: user.must_change_password || false,
         has_password: Boolean(user.password_hash),
+        created_at: user.created_at || null,
+        last_login_at: user.last_login_at || null,
     };
 };
 

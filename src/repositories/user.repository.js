@@ -88,6 +88,7 @@ const findByIdSafe = async (userId) => {
         `SELECT u.id, u.email, u.full_name, u.phone, u.avatar_url,
                 u.role_id, r.code AS role, r.name_vi AS role_name_vi, r.name_en AS role_name_en, r.permissions AS role_permissions,
                 u.is_active, u.email_verified, u.email_verified_at, u.last_login_at,
+                (u.password_hash IS NOT NULL) AS has_password,
                 u.must_change_password, u.created_at, u.updated_at,
                 (
                     SELECT json_agg(json_build_object(
@@ -172,6 +173,7 @@ const findAll = async ({ roleCode, roleCodes, isActive, q, email, page = 1, limi
         `SELECT u.id, u.email, u.full_name, u.phone, u.avatar_url,
                 u.role_id, r.code AS role, r.name_vi AS role_name_vi, r.name_en AS role_name_en,
                 u.is_active, u.email_verified, u.last_login_at,
+                (u.password_hash IS NOT NULL) AS has_password,
                 u.must_change_password, u.created_at, u.updated_at,
                 COUNT(*) OVER()::int AS total_count
          FROM auth.users u

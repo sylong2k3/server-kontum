@@ -95,7 +95,7 @@ Gate quyền theo bảng role §1 — dùng `RoleGate` sẵn có (MB-010).
 | GPS accuracy > ngưỡng | Không chặn ghi điểm — hiện màu cảnh báo, cho phép đứng chờ tín hiệu tốt hơn rồi ghi lại (khớp server §1.1, ngưỡng nên lấy từ config chung, không hard-code riêng app) |
 | Toạ độ ngoài phạm vi Kon Tum | Validate client trước khi gửi (lng 106–109, lat 13–16.5 — khớp Joi validator server) để fail nhanh, không tốn round-trip mạng |
 | < 3 điểm khi bấm "Khép vùng" | Disable nút, không cho khép |
-| Mất mạng giữa lúc đo | Điểm vẫn ghi được (local); khi khép vùng, phiên đo vào outbox chờ sync — không có gì mất |
+| Mất mạng giữa lúc đo | Điểm được lưu trên thiết bị nếu thao tác lưu thành công; khi khép vùng, phiên đo vào outbox chờ đồng bộ khi có mạng. Hiển thị trạng thái đã lưu và đã đồng bộ riêng; cần kiểm thử app bị dừng, lỗi lưu và đồng bộ lại. |
 | `PATCH` sửa phiên đo khi đã `submitted`/`verified` | Server trả 400 (`field_measurement_invalid_transition`) — app disable nút Sửa/Xoá/Upload ảnh ngay khi status khác `draft`/`rejected`, tránh gọi API vô ích |
 | Trả lại (`rejected`) | Bắt buộc `reviewNote` phía admin; so_nnmt nhận thông báo kèm lý do, sửa lại rồi `submit` lại (không cần tạo phiên đo mới) |
 | Xoá | Chỉ cho phép khi `draft` — ẩn nút Xoá ở trạng thái khác |

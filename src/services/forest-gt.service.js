@@ -45,7 +45,7 @@ async function listZones(query) { return repo.listZones(query); }
 
 async function deleteZone(id) {
     const ok = await repo.softDeleteZone(Number(id));
-    if (!ok) {throw new Api404Error('Zone không tồn tại.', ['NOT_FOUND']);}
+    if (!ok) {throw new Api404Error('Không tìm thấy vùng mẫu.', ['NOT_FOUND']);}
     return { deleted: true, id: Number(id) };
 }
 
@@ -82,7 +82,7 @@ async function listPoints(query) { return repo.listPoints(query); }
 
 async function deletePoint(id) {
     const ok = await repo.softDeletePoint(Number(id));
-    if (!ok) {throw new Api404Error('Point không tồn tại.', ['NOT_FOUND']);}
+    if (!ok) {throw new Api404Error('Không tìm thấy điểm mẫu.', ['NOT_FOUND']);}
     return { deleted: true, id: Number(id) };
 }
 
