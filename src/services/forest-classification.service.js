@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Forest Classification Service (Phân loại lớp phủ rừng).
+ * Forest Classification Service (Phân loại lớp phủ).
  *
  * Implements the 13-class Kon Tum forest classification schema v5.3.
  * The scheduled/admin flow uses the same lite Random Forest mode as
@@ -766,7 +766,7 @@ async function _notifyForestClassificationCompleted(snapshot, provinceSummary) {
     for (const role of ['system_admin', 'so_nnmt', 'ubnd_tinh']) {
         await notifSvc.broadcastToRole(role, {
             type: 'forest_classification_completed',
-            title: `Phân loại lớp phủ rừng ${period} hoàn thành`,
+            title: `Phân loại lớp phủ ${period} hoàn thành`,
             body,
             data,
             channel: 'system',
@@ -782,7 +782,7 @@ async function _notifyForestClassificationFailed(year, month, errorMessage) {
     const publicError = toPublicProcessingError(errorMessage);
     await notifSvc.broadcastToRole('system_admin', {
         type: 'forest_classification_failed',
-        title: `Phân loại lớp phủ rừng ${period} thất bại`,
+        title: `Phân loại lớp phủ ${period} thất bại`,
         body: publicError,
         data: { year, month, period, error: publicError },
         channel: 'system',
@@ -799,7 +799,7 @@ async function _autoIngestDistrict(snapshot, districtRow, year, month) {
     const { job, deduplicated } = await ingestSvc.enqueue({
         sourceUrl:  districtRow.url,
         layerCode,
-        nameVi:     `Phân loại rừng ${year}-${String(month).padStart(2, '0')} — ${districtRow.name || code}`,
+        nameVi:     `Phân loại lớp phủ ${year}-${String(month).padStart(2, '0')} — ${districtRow.name || code}`,
         isPublic:   true,
         category:   'forest_district',
         requestParams: {
@@ -990,7 +990,7 @@ const getLatest = async () => {
         }
         dbgTime('GET_LATEST', 'no snapshot in DB → throw FC_NO_DATA', t0);
         throw new BusinessLogicError(
-            'Chưa có dữ liệu phân loại rừng. Vui lòng thử lại sau.',
+            'Chưa có dữ liệu phân loại lớp phủ. Vui lòng thử lại sau.',
             ['FC_NO_DATA'],
             StatusCodes.SERVICE_UNAVAILABLE,
         );

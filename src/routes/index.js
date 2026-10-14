@@ -54,7 +54,7 @@ router.use('/fire-risk', fireRiskRoutes);
 // ── Ảnh vệ tinh / Satellite imagery ──────────────────────────────────────────
 router.use('/satellite', satelliteRoutes);
 
-// ── Phân loại lớp phủ rừng / Forest Classification ───────────────────────────
+// ── Phân loại lớp phủ / Forest Classification ───────────────────────────
 router.use('/forest-classification', forestClassificationRoutes);
 
 // ── Đo đạc thực địa / Field Measurements (docs/modules/17) ───────────────────

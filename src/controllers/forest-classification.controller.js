@@ -301,7 +301,7 @@ const refresh = async (req, res) => {
     res.status(202).json({
         message: admission.deduplicated
             ? 'Yêu cầu phân loại kỳ này đã có trong hàng chờ xử lý.'
-            : 'Đã tiếp nhận yêu cầu phân loại lớp phủ rừng.',
+            : 'Đã tiếp nhận yêu cầu phân loại lớp phủ.',
         status: 202,
         data: {
             run: {
@@ -592,7 +592,7 @@ const publishRaster = async (req, res) => {
             const { job, deduplicated } = await ingestSvc.enqueue({
                 sourceUrl: source.url,
                 layerCode,
-                nameVi: `Phân loại rừng ${snap.year}-${String(snap.month).padStart(2, '0')} — ${row.district_name || districtCode}`,
+                nameVi: `Phân loại lớp phủ ${snap.year}-${String(snap.month).padStart(2, '0')} — ${row.district_name || districtCode}`,
                 isPublic: true,
                 category: 'forest_district',
                 requestParams: {

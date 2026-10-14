@@ -131,7 +131,7 @@ const _buildForestClassificationDashboard = async () => {
     try {
         const snap = await forestClassificationRepo.getLatestCompleted();
         if (!snap) {
-            return { available: false, note: 'Chưa có snapshot phân loại rừng.' };
+            return { available: false, note: 'Chưa có snapshot phân loại lớp phủ.' };
         }
 
         const summary = snap.province_summary || {};

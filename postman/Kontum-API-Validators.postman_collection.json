@@ -11183,8 +11183,8 @@
       ]
     },
     {
-      "name": "Phân loại rừng",
-      "description": "Phân loại lớp phủ rừng, lịch sử, snapshot và ground truth.",
+      "name": "Phân loại lớp phủ",
+      "description": "Phân loại lớp phủ, lịch sử, snapshot và ground truth.",
       "item": [
         {
           "name": "Hợp lệ",

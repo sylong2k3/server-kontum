@@ -4,7 +4,7 @@ const geeQueue = require('../queues/gee-task.queue');
 
 const PIPELINE_LABELS = {
     'fire-risk': 'Cảnh báo cháy rừng',
-    'forest-classification': 'Phân loại lớp phủ rừng',
+    'forest-classification': 'Phân loại lớp phủ',
 };
 
 const nonNegativeInteger = (value) => {
