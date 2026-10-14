@@ -1,0 +1,77 @@
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-CTL:DBG:LATEST] caller user=anon lang=vi
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-CTL:DBG:PUBLISHED_HISTORY] page=1 limit=24 user=anon
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-REPO:DBG:listCompleted] page=1 limit=24 filter=true WHERE=s.status IN ('completed','published') AND (
+0|gis-kontum  | 2026-07-29T14:32:42:         s.geoserver_layer IS NOT NULL
+0|gis-kontum  | 2026-07-29T14:32:42:         OR (
+0|gis-kontum  | 2026-07-29T14:32:42:         COALESCE(dp.district_total, 0) = 10
+0|gis-kontum  | 2026-07-29T14:32:42:         AND COALESCE(dp.district_code_count, 0) = 10
+0|gis-kontum  | 2026-07-29T14:32:42:         AND COALESCE(dp.district_ready_count, 0) = 10
+0|gis-kontum  | 2026-07-29T14:32:42:     )
+0|gis-kontum  | 2026-07-29T14:32:42:     )
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-REPO:DBG:getLatestCompleted] (7ms) → id=20 y/m=2026/6 status=published hasLayer=false hasDlUrl=false
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-REPO:DBG:listCompleted] (9ms) items=2 total=2 withGeoLayer=0
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-CLS:DBG:GET_HISTORY] page=1 limit=24 hasGeoserverLayer=true → items=2 total=2 (10ms)
+0|gis-kontum  | 2026-07-29T14:32:42: GET /api/v1/forest-classification/published-history?page=1&limit=24 200 11.816 ms - -
+0|gis-kontum  | 2026-07-29T14:32:42: [FOREST-CLS:DBG:GET_LATEST] snapshot=20 y/m=2026/6 status=published districts=10 hasLayer=false hasDlUrl=false (53ms)
+0|gis-kontum  | 2026-07-29T14:32:42: GET /api/v1/forest-classification/latest 200 55.781 ms - -
+0|gis-kontum  | 2026-07-29T14:32:42: GET /api/v1/forest-classification/snapshots/20/districts 200 15.425 ms - -
+0|gis-kontum  | 2026-07-29T14:32:42: GET /api/v1/forest-classification/snapshot/20 200 16.029 ms - -
+0|gis-kontum  | 2026-07-29T14:32:42: GET /api/v1/forest-classification/snapshots/20/districts 304 23.080 ms - -
+0|gis-kontum  | 2026-07-29T14:32:52: GET /api/v1/forest-classification/snapshots/21/districts 200 12.626 ms - -
+0|gis-kontum  | 2026-07-29T14:32:52: GET /api/v1/forest-classification/snapshot/21 200 21.990 ms - -
+0|gis-kontum  | 2026-07-29T14:33:01: GET /api/v1/map/layer-groups?lang=vi 304 38.938 ms - -
+0|gis-kontum  | 2026-07-29T14:33:02: GET /api/v1/map/layer-groups/bien_dong_lop_phu/timeline?lang=vi 304 16.647 ms - -
+0|gis-kontum  | 2026-07-29T14:33:30: [SATELLITE:PROCESS] 2026-07-29T07:33:30.239Z — → type=rgb {"startDate":"2026-06-28","endDate":"2026-07-29","collection":"S2","cloudCover":70}
+0|gis-kontum  | 2026-07-29T14:33:30: [SATELLITE:PROCESS] 2026-07-29T07:33:30.241Z — cache hash=76cde5a52c0a…
+0|gis-kontum  | 2026-07-29T14:33:30: [SATELLITE:PROCESS] 2026-07-29T07:33:30.333Z — cache MISS — computing via GEE
+0|gis-kontum  | 2026-07-29T14:33:30: [GEE-SAT] ✓ Province polygon: LOCAL_EPSG:4326 (C:\Users\Administrator\Documents\KonTum\server-kontum\data\RanhGioiTinh_Polygon.geojson)
+0|gis-kontum  | 2026-07-29T14:33:30: [SATELLITE:RGB] 2026-07-29T07:33:30.440Z — start — 2026-06-28 → 2026-07-29
+0|gis-kontum  | 2026-07-29T14:33:30: [SATELLITE:COLLECTION] 2026-07-29T07:33:30.441Z — building — collection=S2 dates=2026-06-28→2026-07-29 cloudCover≤70%
+0|gis-kontum  | 2026-07-29T14:33:30: [SATELLITE:COLLECTION] 2026-07-29T07:33:30.598Z — merged S2_SR_HARMONIZED
+0|gis-kontum  | 2026-07-29T14:33:38: [SATELLITE:RGB] 2026-07-29T07:33:38.543Z — collection size=11 (8103ms)
+0|gis-kontum  | 2026-07-29T14:33:38: [SATELLITE:RGB] 2026-07-29T07:33:38.592Z — done (8152ms)
+0|gis-kontum  | 2026-07-29T14:33:38: [SATELLITE:PROCESS] 2026-07-29T07:33:38.593Z — builder done — calling getEeMapId (8354ms)
+0|gis-kontum  | 2026-07-29T14:33:43: [FIRE-RISK-JOB] recovery watchdog SKIP — có completed attempt cho 2026-07-29
+0|gis-kontum  | 2026-07-29T14:33:43: [FOREST-JOB] recovery watchdog skip — period=2026/6 đã có completed attempt
+0|gis-kontum  | 2026-07-29T14:33:48: [SATELLITE:PROCESS] 2026-07-29T07:33:48.137Z — mapId obtained mapId=projects/ear… (17898ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:PROCESS] 2026-07-29T07:34:00.606Z — saved id=71 — done (30367ms)
+0|gis-kontum  | 2026-07-29T14:34:00: POST /api/v1/satellite/rgb 200 30383.778 ms - 618
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:PROCESS] 2026-07-29T07:34:00.646Z — → type=classified {"startDate":"2026-06-28","endDate":"2026-07-29","collection":"S2","cloudCover":70}
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:PROCESS] 2026-07-29T07:34:00.647Z — cache hash=de84b96c2247…
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:PROCESS] 2026-07-29T07:34:00.651Z — cache MISS — computing via GEE
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:CLASSIFIED] 2026-07-29T07:34:00.652Z — start — 13-class RF year=2026 region=Kon Tum groundTruth=none
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][A][  0.0s]   ▶ Build 27-band feature image (base+green+dry+defol+recent + DEM) [LAZY] — WIN base=12mo green=9-11 dry=3-4 defol=1-2
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][A][  0.1s]   ✓ done (49 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][B][  0.1s]   ▶ Build v5.3 13-class thresholds (naturalCore two-way exclusion) [LAZY]
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][B][  0.1s]   ✓ done (4 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][C][  0.1s]   ▶ Build permanent-water override (JRC GSW occ≥70 ∧ rec≥70) [LAZY]
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][C][  0.1s]   ✓ done (1 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][D][  0.1s]   ▶ Build hard masks + residual score + no-data/land/water overrides [LAZY]
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][D][  0.1s]   ✓ done (7 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][E][  0.1s]   • v5.3 priors — DynamicWorld built=true otherLandAsset=false minScore=0.7
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][F][  0.1s]   • RF quotas (LITE) — hasGT=false budget=1260 sqrtQuota=[0,112,157,197,60,311,60,60,126,72,60,76,60] rare=[4,6,7,10,12] trees=80
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][G][  0.1s]   ▶ Sample threshold pool (1351 pts) [LAZY] — scale=100m tileScale=8
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][G][  0.1s]   ✓ done (67 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][H][  0.1s]   ▶ Sample rare-class pool (300 pts @ 60m) [LAZY]
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][H][  0.2s]   ✓ done (42 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][I][  0.2s]   ▶ Assemble RF classifier graph (train + explain deferred) [LAZY] — trees=80 bag=0.7
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][I][  0.2s]   ✓ done (2 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][J][  0.2s]   ▶ Classify + JRC permanent-water override [LAZY]
+0|gis-kontum  | 2026-07-29T14:34:00: [FOREST-CLS-RF-LITE#2026-12][J][  0.2s]   ✓ done (1 ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:CLASSIFIED] 2026-07-29T07:34:00.835Z — RF graph built (stats skipped) (183ms)
+0|gis-kontum  | 2026-07-29T14:34:00: [SATELLITE:CLASSIFIED] 2026-07-29T07:34:00.835Z — computing areaByClass at scale=200m (coarse preview)
+0|gis-kontum  | 2026-07-29T14:34:17: [SATELLITE:CLASSIFIED] areaStats FAILED (non-fatal) — Image.unmask: Incompatible number of bands in the value image: 6. Expected 0 or 1.
+0|gis-kontum  | 2026-07-29T14:34:17: [SATELLITE:CLASSIFIED] 2026-07-29T07:34:17.478Z — vizParams built (16826ms)
+0|gis-kontum  | 2026-07-29T14:34:17: [SATELLITE:PROCESS] 2026-07-29T07:34:17.478Z — builder done — calling getEeMapId (16832ms)
+0|gis-kontum  | 2026-07-29T14:34:31: [ERROR] {
+0|gis-kontum  | 2026-07-29T14:34:31:   method: 'POST',
+0|gis-kontum  | 2026-07-29T14:34:31:   url: '/api/v1/satellite/classified',
+0|gis-kontum  | 2026-07-29T14:34:31:   status: 500,
+0|gis-kontum  | 2026-07-29T14:34:31:   message: 'Image.unmask: Incompatible number of bands in the value image: 6. Expected 0 or 1.',
+0|gis-kontum  | 2026-07-29T14:34:31:   stack: 'Error: Image.unmask: Incompatible number of bands in the value image: 6. Expected 0 or 1.\n' +
+0|gis-kontum  | 2026-07-29T14:34:31:     '    at module$contents$ee$apiclient_Call.callback (C:\\Users\\Administrator\\Documents\\KonTum\\server-kontum\\src\\utils\\gee-satellite.util.js:89:35)\n' +
+0|gis-kontum  | 2026-07-29T14:34:31:     '    at callback (C:\\Users\\Administrator\\Documents\\KonTum\\server-kontum\\node_modules\\.pnpm\\@google+earthengine@0.1.419\\node_modules\\@google\\earthengine\\build\\main.js:19914:45)\n' +
+0|gis-kontum  | 2026-07-29T14:34:31:     '    at C:\\Users\\Administrator\\Documents\\KonTum\\server-kontum\\node_modules\\.pnpm\\@google+earthengine@0.1.419\\node_modules\\@google\\earthengine\\build\\main.js:19922:16\n' +
+0|gis-kontum  | 2026-07-29T14:34:31:     '    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)'
+0|gis-kontum  | 2026-07-29T14:34:31: }
+0|gis-kontum  | 2026-07-29T14:34:31: POST /api/v1/satellite/classified 500 30344.549 ms - 844
