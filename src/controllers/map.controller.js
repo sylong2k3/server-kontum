@@ -6,17 +6,14 @@ const geoserver        = require('../utils/geoserver.client');
 const schemas          = require('../validators/map-layer.validator');
 const { geoImportPayload } = require('../validators/geo-import.validator');
 const { OK, OK_LIST, CREATED }  = require('../core/success.response');
+const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
 
 const validate = (schema, source, lang = 'vi') => {
     const { value, error } = schema.validate(source, { abortEarly: false, stripUnknown: true, convert: true });
     if (error) {
         const details = error.details.map((item) => item.message);
-        const err = new Error(t('invalid_data', lang));
-        err.status = 400;
-        err.messageKey = 'invalid_data';
-        err.errors = details;
-        throw err;
+        throw new Api400Error(t('invalid_data', lang), details);
     }
     return value;
 };
