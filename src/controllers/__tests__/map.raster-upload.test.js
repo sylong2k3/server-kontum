@@ -69,3 +69,23 @@ test('JSON metadata creation stays backward compatible', async () => {
     expect(service.createLayer).toHaveBeenCalled();
     expect(service.createRasterLayer).not.toHaveBeenCalled();
 });
+
+test('accepts the reported Kon Tum multipart fields and TIFF filename', async () => {
+    const fields = {
+        code: 'bien_dong_lop_phu_kon_tum_19912023test',
+        name_vi: 'Biến động lớp phủ Kon Tum 19912023test',
+        table_name: 'bien_dong_lop_phu_kon_tum_19912023test',
+        schema_name: 'gis', category: 'other', layer_kind: 'overlay',
+        geometry_type: 'RASTER', epsg_code: '4326',
+        is_active: 'true', is_public: 'false', is_editable: 'true',
+    };
+    let pending = request(app).post('/layers?lang=vi');
+    for (const [key, value] of Object.entries(fields)) { pending = pending.field(key, value); }
+    const response = await pending.attach('raster_file', Buffer.from([0x49, 0x49, 0x2a, 0]), 'BD_Bien dong_Lop phu_1991_2014_ver2.tif');
+    expect(response.status).toBe(201);
+    expect(service.createRasterLayer).toHaveBeenCalledWith(
+        expect.objectContaining({ ...fields, epsg_code: 4326, is_active: true, is_public: false, is_editable: true }),
+        expect.objectContaining({ size: 4 }), { id: 7 }, 'vi',
+    );
+    expect(service.createLayer).not.toHaveBeenCalled();
+});
