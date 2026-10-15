@@ -22,15 +22,11 @@ const { workerData, parentPort } = require('worker_threads');
 
         const round4 = (value) => Math.round(value * 10000) / 10000;
 
-        const buildHistogram = (data, min, max) => {
+        const buildHistogram = (data, min, max, validCount) => {
             if (!Number.isFinite(min) || !Number.isFinite(max)) { return { buckets: [], counts: [] }; }
             if (min === max) {
-                let count = 0;
-                for (let i = 0; i < data.length; i++) {
-                    const v = data[i];
-                    if (v !== null && v !== undefined && !Number.isNaN(v) && Number.isFinite(v)) { count++; }
-                }
-                return { buckets: [round4(min)], counts: [count] };
+                // readRasters returns numeric typed arrays; the first pass already counted finite pixels.
+                return { buckets: [round4(min)], counts: [validCount] };
             }
 
             const counts = Array(HISTOGRAM_BIN_COUNT).fill(0);
@@ -75,7 +71,7 @@ const { workerData, parentPort } = require('worker_threads');
 
                 const mean      = sum / validCount;
                 const std       = Math.sqrt(Math.abs(sumSq / validCount - mean * mean));
-                const histogram = buildHistogram(data, min, max);
+                const histogram = buildHistogram(data, min, max, validCount);
 
                 stats.push({
                     band_index:   b,
