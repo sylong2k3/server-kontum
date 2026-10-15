@@ -32,9 +32,26 @@ const getLayer = async (req, res) => {
 };
 
 const createLayer = async (req, res) => {
-    const payload = validate(schemas.createLayer, req.body || {}, req.lang);
-    const layer = await mapService.createLayer(payload, req.user, req.lang);
-    CREATED(res, t('map_layer_created_success', req.lang), layer);
+    try {
+        const source = { ...(req.body || {}) };
+        if (req.file) {
+            for (const field of ['default_style', 'legend_config', 'legendConfig', 'layer_permissions']) {
+                if (typeof source[field] === 'string') {
+                    try { source[field] = JSON.parse(source[field]); }
+                    catch { throw new Api400Error(t('invalid_data', req.lang), [`${field}: invalid JSON`]); }
+                }
+            }
+            // Multipart has no native null. Empty optional text fields retain their schema meaning.
+            if (source.data_year === '') { source.data_year = null; }
+        }
+        const payload = validate(schemas.createLayer, source, req.lang);
+        const layer = req.file
+            ? await mapService.createRasterLayer(payload, req.file, req.user, req.lang)
+            : await mapService.createLayer(payload, req.user, req.lang);
+        CREATED(res, t('map_layer_created_success', req.lang), layer);
+    } finally {
+        if (req.file?.path) { await fs.promises.unlink(req.file.path).catch(() => {}); }
+    }
 };
 
 const updateLayer = async (req, res) => {

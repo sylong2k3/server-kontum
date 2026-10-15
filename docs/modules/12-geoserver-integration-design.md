@@ -259,6 +259,16 @@ Các REST endpoint GeoServer dùng (nội bộ):
 | POST | `/api/v1/map/rasters/:coverageStore/harvest` | Harvest GeoTIFF mới vào ImageMosaic + truncate GWC nếu cần |
 | POST | `/api/v1/remote-sensing/images/:id/publish` | Publish ảnh GeoTIFF từ kho viễn thám (MinIO) → `GEOSERVER_DATA_DIR` → CoverageStore + Coverage. Layer liên kết ngược qua `layer_registry.remote_sensing_image_id` *(migration 022)* |
 
+**Tạo lớp GeoTIFF từ Admin:** `POST /api/v1/map/layers` hỗ trợ thêm `multipart/form-data`
+với `raster_file` bắt buộc và các field metadata của create-layer; quyền vẫn là
+`map_layers.create`. Object như `default_style`/`legend_config` gửi dưới dạng JSON string.
+Server kiểm tra TIFF và thông tin định vị/EPSG, lưu tệp vào `GEOSERVER_DATA_DIR`, tự gán
+`source_url`, `epsg_code` và `is_editable=false`, rồi trả layer theo response 201 hiện có.
+Không tự công bố; thao tác công bố vẫn qua endpoint riêng. Thư mục phải cho Node ghi và
+GeoServer đọc được (mount cùng đường dẫn nếu chạy container). Upload dùng disk storage,
+giới hạn `UPLOAD_RASTER_MULTIPART_MAX_MB` hiện có; lỗi validation/DB dọn tệp mới của request.
+JSON create metadata, PATCH metadata và pipeline kho ảnh viễn thám không đổi.
+
 **Nguyên tắc:**
 - Node.js không expose `/api/v1/map/wms`, `/api/v1/map/wfs`, `/api/v1/map/wmts`.
 - Frontend gọi trực tiếp GeoServer public URL cho các layer công khai/chỉ đọc.

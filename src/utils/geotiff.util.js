@@ -33,4 +33,27 @@ const isTiffBuffer = (buf) => {
     return TIFF_MAGICS.some((magic) => head.equals(magic));
 };
 
-module.exports = { isTiffBuffer, TIFF_MAGIC_LENGTH };
+const inspectGeoTiffFile = async (filePath, lang = 'vi') => {
+    const { Api400Error } = require('../core/error.response');
+    const { t } = require('./i18n.util');
+    const { fromFile } = await import('geotiff');
+    let reader;
+    try {
+        reader = await fromFile(filePath);
+        const image = await reader.getImage();
+        const keys = image.getGeoKeys() || {};
+        const epsgCode = Number(keys.ProjectedCSTypeGeoKey || keys.GeographicTypeGeoKey);
+        const bounds = image.getBoundingBox();
+        if (!Number.isInteger(epsgCode) || epsgCode < 1 || epsgCode === 32767
+            || !bounds.every(Number.isFinite) || bounds[0] === bounds[2] || bounds[1] === bounds[3]) {
+            throw new Error('Missing supported EPSG or georeferencing');
+        }
+        return { epsgCode };
+    } catch {
+        throw new Api400Error(t('map_raster_georeference_required', lang), ['INVALID_GEOTIFF_GEOREFERENCE']);
+    } finally {
+        if (reader) { await reader.close(); }
+    }
+};
+
+module.exports = { isTiffBuffer, TIFF_MAGIC_LENGTH, inspectGeoTiffFile };

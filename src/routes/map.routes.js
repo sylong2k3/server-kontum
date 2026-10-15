@@ -6,6 +6,7 @@ const mapController = require('../controllers/map.controller');
 const rasterIngestController = require('../controllers/raster-ingest.controller');
 const layerSeriesController = require('../controllers/layer-series.controller');
 const { uploadGeoFile } = require('../middlewares/uploadGeoFile.middleware');
+const { uploadLayerRaster } = require('../middlewares/uploadRaster.middleware');
 const { verifyToken, optionalAuth, requirePermission } = require('../middlewares/auth.middleware');
 
 const router = Router();
@@ -19,7 +20,7 @@ router.delete('/layer-groups/:group', verifyToken, requirePermission('map_layers
 
 router.get('/layers', optionalAuth, asyncHandler(mapController.listLayers));
 router.get('/layers/:code', optionalAuth, asyncHandler(mapController.getLayer));
-router.post('/layers', verifyToken, requirePermission('map_layers', 'create'), asyncHandler(mapController.createLayer));
+router.post('/layers', verifyToken, requirePermission('map_layers', 'create'), uploadLayerRaster, asyncHandler(mapController.createLayer));
 router.patch('/layers/:code', verifyToken, requirePermission('map_layers', 'update'), asyncHandler(mapController.updateLayer));
 router.delete('/layers/:code', verifyToken, requirePermission('map_layers', 'delete'), asyncHandler(mapController.deleteLayer));
 

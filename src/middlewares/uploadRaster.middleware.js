@@ -11,6 +11,9 @@
  */
 
 const path    = require('path');
+const fs      = require('fs');
+const os      = require('os');
+const { randomUUID } = require('crypto');
 const multer  = require('multer');
 const { Api400Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
@@ -197,7 +200,37 @@ const handleRasterUploadError = (err, req, _res, next) => {
     next(err);
 };
 
+/** Optional multipart upload on layer creation; JSON clients bypass multer. */
+const layerRasterUploader = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, cb) => {
+            const directory = process.env.GEO_UPLOAD_TEMP_DIR || path.join(os.tmpdir(), 'kontum_geo_uploads');
+            fs.mkdir(directory, { recursive: true }, error => cb(error, directory));
+        },
+        filename: (_req, _file, cb) => cb(null, `${randomUUID()}.tif`),
+    }),
+    limits: { fileSize: RASTER_MULTIPART_MAX_SIZE, files: 1, fields: 40, parts: 41, fieldSize: MULTIPART_FIELD_MAX_SIZE },
+    fileFilter: (req, file, cb) => cb(isRasterFile(file) ? null : new Api400Error(
+        t('remote_sensing_not_geotiff', req.lang), ['NOT_GEOTIFF'],
+    ), isRasterFile(file)),
+});
+
+const uploadLayerRaster = (req, res, next) => {
+    if (!req.is('multipart/form-data')) { return next(); }
+    layerRasterUploader.single('raster_file')(req, res, error => {
+        if (error) {
+            if (req.file?.path) { fs.unlink(req.file.path, () => {}); }
+            return handleRasterUploadError(error, req, res, next);
+        }
+        if (!req.file) {
+            return next(new Api400Error(t('remote_sensing_file_required', req.lang), ['RASTER_FILE_REQUIRED']));
+        }
+        next();
+    });
+};
+
 module.exports = {
+    uploadLayerRaster,
     uploadSingleRaster,
     uploadRasterFields,
     requireRasterFile,

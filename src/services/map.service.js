@@ -1,3 +1,8 @@
+const fs = require('fs');
+const path = require('path');
+const { randomUUID } = require('crypto');
+const { pathToFileURL } = require('url');
+const { isTiffBuffer, TIFF_MAGIC_LENGTH, inspectGeoTiffFile } = require('../utils/geotiff.util');
 const db = require('../configs/database');
 const { geoserverConfig } = require('../configs/geoserver');
 const { Api400Error, Api403Error, Api404Error, Api409Error } = require('../core/error.response');
@@ -62,6 +67,40 @@ const createLayer = async (payload, user, lang) => {
         throw error;
     } finally {
         client.release();
+    }
+};
+
+const createRasterLayer = async (payload, file, user, lang) => {
+    if (payload.geometry_type !== 'RASTER') {
+        throw new Api400Error(t('invalid_data', lang), ['RASTER_GEOMETRY_REQUIRED']);
+    }
+    const directory = process.env.GEOSERVER_DATA_DIR;
+    if (!directory) { throw new Api400Error(t('map_geo_raster_dir_missing', lang), ['RASTER_DIR_MISSING']); }
+    const handle = await fs.promises.open(file.path, 'r');
+    try {
+        const header = Buffer.alloc(TIFF_MAGIC_LENGTH);
+        await handle.read(header, 0, header.length, 0);
+        if (!isTiffBuffer(header)) {
+            throw new Api400Error(t('remote_sensing_not_geotiff', lang), ['NOT_GEOTIFF']);
+        }
+    } finally { await handle.close(); }
+    const { epsgCode } = await inspectGeoTiffFile(file.path, lang);
+    await fs.promises.mkdir(directory, { recursive: true });
+    // Unique filename and exclusive copy: never overwrite a pre-existing raster.
+    const destination = path.resolve(directory, `${randomUUID()}.tif`);
+    let copied = false;
+    try {
+        await fs.promises.copyFile(file.path, destination, fs.constants.COPYFILE_EXCL);
+        copied = true;
+        return await createLayer({
+            ...payload,
+            geometry_type: 'RASTER', epsg_code: epsgCode, is_editable: false,
+            source_url: pathToFileURL(destination).href,
+            geoserver_layer: null, geoserver_store: null,
+        }, user, lang);
+    } catch (error) {
+        if (copied) { await fs.promises.unlink(destination).catch(() => {}); }
+        throw error;
     }
 };
 
@@ -198,6 +237,7 @@ const getImportJob = async (id, lang) => {
 
 module.exports = {
     createLayer, deleteLayer, getImportJob,
+    createRasterLayer,
     getLayer, listImportJobs, listLayers, publishLayer, setLayerActive,
     unpublishLayer, updateLayer,
 };
