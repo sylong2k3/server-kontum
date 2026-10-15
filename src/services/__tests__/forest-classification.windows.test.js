@@ -1,7 +1,6 @@
 'use strict';
-function makeEe() {
+function makeEe(acquisitions = ['2025-01-01','2025-01-31','2025-02-01','2025-03-01','2025-03-31','2025-04-01','2024-02-29','2024-03-01']) {
     const trace = [];
-    const acquisitions = ['2025-01-01','2025-01-31','2025-02-01','2025-03-01','2025-03-31','2025-04-01','2024-02-29','2024-03-01'];
     function date(value) {
         if (value?.iso) return value;
         const time = new Date(value).getTime();
@@ -24,8 +23,8 @@ function makeEe() {
     }
     return { trace, ee:{Date:date,Algorithms:{If:(c,a,b)=>c?a:b},Image:image,ImageCollection:id=>collection(id),Filter:{lt:()=>({})},Reducer:{min:()=>({}),stdDev:()=>({})},Kernel:{square:()=>({})},Terrain:{slope:image,aspect:image}} };
 }
-function load(overrides={}) {
-    jest.resetModules();const mock=makeEe();
+function load(overrides={}, acquisitions) {
+    jest.resetModules();const mock=makeEe(acquisitions);
     const config={...jest.requireActual('../../configs/forest-classification'),...overrides};
     jest.doMock('../../configs/forest-classification',()=>config);
     jest.doMock('../../configs/gge',()=>({ee:mock.ee}));
@@ -65,5 +64,10 @@ describe('F01 actual buildFeatureImage date support',()=>{
     ])('configurable earliest period %j',(cfg,month,start)=>{const {pipeline,trace}=load(cfg);pipeline.buildFeatureImage(2026,month,{});expect(trace.filter(t=>t.depth===0).every(t=>t.start===start)).toBe(true);});
     test.each([[2025,12,'2026-01-01'],[2026,12,'2027-01-01'],[2027,1,'2027-02-01']])('rollover %i/%i',(year,month,end)=>{const {pipeline,trace}=load();pipeline.buildFeatureImage(year,month,{});expect(trace.filter(t=>t.depth===0).every(t=>t.end===end)).toBe(true);});
     test.each([2012,2015,2016])('historical dispatch %i',year=>{const {pipeline,trace}=load();pipeline.buildFeatureImage(year,3,{});expect(trace.filter(t=>t.depth===0)).toHaveLength(year<=2012?4:year>=2016?3:2);});
+    test('empty source retains zero observation count and builds mask/fallback graph locally',()=>{
+        const {pipeline,trace,remote}=load({},[]);const result=pipeline.buildFeatureImage(2026,1,{});
+        expect(result.nImages).toBe(0);expect(result.dataMask).toBeDefined();
+        expect(trace.every(row=>row.selected.length===0)).toBe(true);expect(remote).not.toHaveBeenCalled();
+    });
     test.each([true,false])('texture %s preserves dates',flag=>{const {pipeline,trace}=load({USE_TEXTURE:flag});expect(pipeline.buildFeatureImage(2026,1,{}).hasTexture).toBe(flag);expect(trace[0].start).toBe('2025-01-01');});
 });

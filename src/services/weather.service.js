@@ -123,6 +123,17 @@ const getPoint = async ({ lng, lat, lang }) => {
 // ══════════════════════════════════════════════════════════════════════════════
 //  WIND GRID — lưới gió (Open-Meteo, không cần OpenWeather key)
 // ══════════════════════════════════════════════════════════════════════════════
+// Age is evaluated at response time, not frozen when the cache row was fetched.
+const windResponse = (data, flags) => {
+    const now = Date.now();
+    const points = (data.points || []).map(point => {
+        const time = point.observedAt ? Date.parse(point.observedAt) : NaN;
+        return { ...point, observationAgeSeconds: Number.isFinite(time) ? Math.round((now - time) / 1000) : null };
+    });
+    return { ...data, ...flags, points,
+        freshness: { ...data.freshness, ageEvaluatedAt: new Date(now).toISOString() } };
+};
+
 const getWindGrid = async ({ bbox, grid, lang }) => {
     const box  = parseBbox(bbox, lang);
     const size = grid ? Math.max(2, Math.min(Number(grid), cfg.WIND_GRID_MAX)) : cfg.WIND_GRID_SIZE;
@@ -133,7 +144,7 @@ const getWindGrid = async ({ bbox, grid, lang }) => {
 
     const fresh = await repo.getFresh(cacheKey);
     if (fresh) {
-        return { ...fresh.payload, cached: true, stale: false, fetchedAt: fresh.fetched_at };
+        return windResponse(fresh.payload, { cached: true, stale: false, fetchedAt: fresh.fetched_at });
     }
 
     try {
@@ -148,11 +159,11 @@ const getWindGrid = async ({ bbox, grid, lang }) => {
             observed_at: data.observedAt,
             expires_at:  expires,
         });
-        return { ...data, cached: false, stale: false };
+        return windResponse(data, { cached: false, stale: false });
     } catch (err) {
         const latest = await repo.getLatest(cacheKey);
         if (latest) {
-            return { ...latest.payload, cached: true, stale: true, fetchedAt: latest.fetched_at };
+            return windResponse(latest.payload, { cached: true, stale: true, fetchedAt: latest.fetched_at });
         }
         throw new BusinessLogicError(
             t('weather_upstream_failed', lang, { msg: err.message }),

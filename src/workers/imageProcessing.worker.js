@@ -96,9 +96,13 @@ const calcStatistics = (filePath) => new Promise((resolve, reject) => {
     });
 
     worker.once('message', ({ stats, error, code }) => {
-        if (error) { reject(Object.assign(new Error(error), { code })); } else { resolve(stats); }
+        if (error) { reject(Object.assign(new Error(error), { code })); }
+        else if (!Array.isArray(stats) || stats.length === 0) {
+            reject(Object.assign(new Error('Statistics worker returned no band statistics.'), { code: 'RASTER_STATISTICS_FAILED' }));
+        } else { resolve(stats); }
     });
     worker.once('error', reject);
+    worker.once('exit', () => reject(Object.assign(new Error('Statistics worker exited before returning a result.'), { code: 'RASTER_STATISTICS_FAILED' })));
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -201,8 +205,8 @@ const processJob = async (job) => {
                     })),
                 });
             } catch (statsErr) {
-                if (['RASTER_VALIDITY_UNSUPPORTED', 'RASTER_STATISTICS_FAILED'].includes(statsErr.code)) throw statsErr;
-                console.warn(t('worker_stats_failed', WORKER_LANG), statsErr.message);
+                // Statistics are required for these job types; never report completion after a failed band/write.
+                throw statsErr;
             }
         }
 

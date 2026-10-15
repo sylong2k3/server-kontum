@@ -6,6 +6,7 @@ const ingestSvc = require('../services/raster-ingest.service');
 const { OK, CREATED } = require('../core/success.response');
 const { Api400Error, Api404Error } = require('../core/error.response');
 const { t } = require('../utils/i18n.util');
+const { publicationProvenance, scientificSignature } = require('../utils/satellite-provenance.util');
 
 // ── POST /satellite/rgb ───────────────────────────────────────────────────────
 const getRgb = async (req, res) => {
@@ -88,6 +89,7 @@ const publishToRaster = async (req, res) => {
         });
     }
 
+    const provenance = publicationProvenance(result);
     const downloadUrl = result.metadata?.downloadUrl || null;
     if (!downloadUrl) {
         throw new Api400Error(
@@ -116,6 +118,10 @@ const publishToRaster = async (req, res) => {
             // raster-ingest.service._backLinkResource → sẽ tự update
             // satellite.image_results.geoserver_layer khi job xong.
             linkedResource: { type: 'satellite', id },
+            effectiveRequest: provenance,
+            scientificSignature: scientificSignature(provenance),
+            // This route ingests the display download, not the raw float export.
+            outputProduct: provenance.products.download,
             image_type:     result.image_type,
             start_date:     result.start_date,
             end_date:       result.end_date,

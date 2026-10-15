@@ -8,7 +8,7 @@
  *  - Credential DB qua biến môi trường PGPASSWORD (không xuất hiện trong log).
  *  - filePath và table_name được whitelist trước khi truyền.
  *
- * Fallback: .geojson được xử lý native (không cần GDAL) qua PostGIS ST_GeomFromGeoJSON.
+ * Fallback: .geojson/.json được xử lý native (không cần GDAL) qua PostGIS ST_GeomFromGeoJSON.
  * Yêu cầu môi trường cho các format khác: `gdal-bin` (ogr2ogr, ogrinfo) phải được cài sẵn.
  *   Docker: RUN apt-get install -y gdal-bin
  */
@@ -21,7 +21,7 @@ const { t }      = require('./i18n.util');
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const IDENTIFIER_RE     = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-const SAFE_PATH_RE      = /^[\w\-. /\\:()[\]{}~]+$/;   // cho phép đường dẫn hệ thống thông thường (kể cả Windows 8.3 short path ~)
+const SAFE_PATH_RE      = /^[\p{L}\p{N}_\-. /\\:()[\]{}~@]+$/u; // Unicode và @ hợp lệ; spawn không dùng shell.
 const GEOM_TYPE_MAP     = {
     point:           'POINT',
     multipoint:      'MULTIPOINT',
@@ -107,14 +107,78 @@ const buildPgConn = (lang = 'vi') => {
 
 // ── Native GeoJSON fallback (không cần GDAL) ─────────────────────────────────
 
-const inspectGeoJSON = (filePath) => {
-    const gj = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
+const MULTI_PROMOTE = { POINT: 'MULTIPOINT', LINESTRING: 'MULTILINESTRING', POLYGON: 'MULTIPOLYGON' };
+const GEOJSON_GEOMETRY_TYPES = new Set([
+    'Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon', 'GeometryCollection',
+]);
+const isGeoJSONPath = (filePath) => ['.geojson', '.json'].includes(path.extname(filePath).toLowerCase());
 
-    let geometryType = 'GEOMETRY';
-    if (features.length > 0 && features[0].geometry) {
-        geometryType = normalizeGeomType(features[0].geometry.type);
+const readGeoJSONFeatures = (filePath) => {
+    let gj;
+    try {
+        gj = JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+    } catch (err) {
+        throw new Error(`GeoJSON: ${err.message}`);
     }
+    if (!gj || typeof gj !== 'object' || Array.isArray(gj)) {
+        throw new Error('GeoJSON: expected a FeatureCollection, Feature or geometry');
+    }
+
+    const validateGeometry = (geometry) => {
+        if (geometry === null) { return; }
+        if (!geometry || !GEOJSON_GEOMETRY_TYPES.has(geometry.type)) {
+            throw new Error('GeoJSON: invalid geometry type');
+        }
+        if (geometry.type === 'GeometryCollection') {
+            if (!Array.isArray(geometry.geometries)) {
+                throw new Error('GeoJSON: GeometryCollection.geometries must be an array');
+            }
+            geometry.geometries.forEach((child) => {
+                if (child === null) { throw new Error('GeoJSON: GeometryCollection cannot contain null'); }
+                validateGeometry(child);
+            });
+        } else if (!Array.isArray(geometry.coordinates)) {
+            throw new Error('GeoJSON: geometry.coordinates must be an array');
+        }
+    };
+
+    let features;
+    if (gj.type === 'FeatureCollection') {
+        if (!Array.isArray(gj.features)) {
+            throw new Error('GeoJSON: FeatureCollection.features must be an array');
+        }
+        features = gj.features;
+    } else if (gj.type === 'Feature') {
+        features = [gj];
+    } else if (GEOJSON_GEOMETRY_TYPES.has(gj.type)) {
+        features = [{ type: 'Feature', properties: {}, geometry: gj }];
+    } else {
+        throw new Error('GeoJSON: expected a FeatureCollection, Feature or geometry');
+    }
+
+    for (const feature of features) {
+        if (!feature || feature.type !== 'Feature') {
+            throw new Error('GeoJSON: invalid FeatureCollection member');
+        }
+        validateGeometry(feature.geometry);
+        if (feature.properties !== null && (typeof feature.properties !== 'object' || Array.isArray(feature.properties))) {
+            throw new Error('GeoJSON: Feature.properties must be an object or null');
+        }
+    }
+    return features;
+};
+
+const geoJSONGeometryType = (features) => {
+    const types = new Set(features.filter(f => f.geometry).map((f) => {
+        const base = normalizeGeomType(f.geometry.type);
+        return MULTI_PROMOTE[base] || base;
+    }));
+    return types.size === 1 ? [...types][0] : 'GEOMETRY';
+};
+
+const inspectGeoJSON = (filePath) => {
+    const features = readGeoJSONFeatures(filePath);
+    const geometryType = geoJSONGeometryType(features);
 
     const layerName = path.basename(filePath, path.extname(filePath)).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
 
@@ -127,36 +191,41 @@ const inspectGeoJSON = (filePath) => {
     };
 };
 
-const loadGeoJSONToPostgis = async ({ filePath, schema, table, mode = 'overwrite', onProgress, lang = 'vi' }) => {
+const loadGeoJSONToPostgis = async ({ filePath, schema, table, sridInput = 4326, mode = 'overwrite', onProgress, lang = 'vi' }) => {
     const safeSchema = assertIdentifier(schema, 'schema');
     const safeTable  = assertIdentifier(table, 'table');
+    const sourceSrid = Number(sridInput);
+    if (!Number.isInteger(sourceSrid) || sourceSrid < 1) {
+        throw new Error('GeoJSON: invalid source SRID');
+    }
 
     const { getClient } = require('../configs/database');
 
-    if (onProgress) { onProgress(5, t('ogr_prepare', lang)); }
+    if (onProgress) { await onProgress(5, t('ogr_prepare', lang)); }
 
-    const gj = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    const features = gj.type === 'FeatureCollection' ? gj.features : [gj];
+    const features = readGeoJSONFeatures(filePath);
 
     if (features.length === 0) {
         throw new Error(t('ogrinfo_failed', lang, { msg: 'GeoJSON has no features' }));
     }
 
-    // Collect property keys (chỉ giữ tên hợp lệ làm identifier)
+    // Collect property keys; từ chối tên không hỗ trợ thay vì âm thầm bỏ thuộc tính.
     const propKeySet = new Set();
     for (const f of features) {
         if (f.properties) { Object.keys(f.properties).forEach(k => propKeySet.add(k)); }
     }
-    const propKeys = [...propKeySet].filter(k => IDENTIFIER_RE.test(k));
+    const propKeys = [...propKeySet];
+    for (const key of propKeys) {
+        // Không bỏ thuộc tính hoặc để PostgreSQL cắt tên cột gây trùng/mất dữ liệu.
+        if (!IDENTIFIER_RE.test(key) || Buffer.byteLength(key, 'utf8') > 63 || ['id', 'geom'].includes(key)) {
+            throw new Error(`GeoJSON: unsupported property column "${key}"; use a unique SQL identifier other than id/geom`);
+        }
+    }
 
-    // Xác định kiểu geometry từ feature đầu tiên có geometry
-    // Dùng MULTI type để khớp với ST_Multi() khi INSERT
-    const firstGeom = features.find(f => f.geometry);
-    const baseGeomType = firstGeom ? normalizeGeomType(firstGeom.geometry.type) : 'GEOMETRY';
-    const MULTI_PROMOTE = { POINT: 'MULTIPOINT', LINESTRING: 'MULTILINESTRING', POLYGON: 'MULTIPOLYGON' };
-    const geomType = MULTI_PROMOTE[baseGeomType] || baseGeomType;
+    // Xác định kiểu geometry từ toàn bộ file; cùng họ được promote, khác họ dùng GEOMETRY.
+    const geomType = geoJSONGeometryType(features);
 
-    if (onProgress) { onProgress(10, t('ogr_loading_postgis', lang)); }
+    if (onProgress) { await onProgress(10, t('ogr_loading_postgis', lang)); }
 
     const client = await getClient();
     try {
@@ -179,29 +248,31 @@ const loadGeoJSONToPostgis = async ({ filePath, schema, table, mode = 'overwrite
         for (let i = 0; i < features.length; i += BATCH) {
             const batch = features.slice(i, i + BATCH);
             for (const feat of batch) {
-                if (!feat.geometry) { continue; }
                 const props = feat.properties || {};
-                const vals  = propKeys.map(c => (props[c] != null ? String(props[c]) : null));
-                const geomJson = JSON.stringify(feat.geometry);
+                const vals  = propKeys.map((c) => {
+                    const value = props[c];
+                    return value == null ? null : typeof value === 'object' ? JSON.stringify(value) : String(value);
+                });
+                const geomJson = feat.geometry === null ? null : JSON.stringify(feat.geometry);
 
                 if (propKeys.length > 0) {
                     const colList   = propKeys.map(c => `"${c}"`).join(', ');
                     const paramList = propKeys.map((_, idx) => `$${idx + 1}`).join(', ');
                     await client.query(
                         `INSERT INTO "${safeSchema}"."${safeTable}" (${colList}, geom)
-                         VALUES (${paramList}, ST_Multi(ST_GeomFromGeoJSON($${propKeys.length + 1})))`,
-                        [...vals, geomJson],
+                         VALUES (${paramList}, ST_Multi(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($${propKeys.length + 1}), $${propKeys.length + 2}), 4326)))`,
+                        [...vals, geomJson, sourceSrid],
                     );
                 } else {
                     await client.query(
                         `INSERT INTO "${safeSchema}"."${safeTable}" (geom)
-                         VALUES (ST_Multi(ST_GeomFromGeoJSON($1)))`,
-                        [geomJson],
+                         VALUES (ST_Multi(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON($1), $2), 4326)))`,
+                        [geomJson, sourceSrid],
                     );
                 }
             }
             if (onProgress) {
-                onProgress(10 + Math.round(((i + batch.length) / features.length) * 65), t('ogr_loading_postgis', lang));
+                await onProgress(10 + Math.round(((i + batch.length) / features.length) * 65), t('ogr_loading_postgis', lang));
             }
         }
 
@@ -217,14 +288,14 @@ const loadGeoJSONToPostgis = async ({ filePath, schema, table, mode = 'overwrite
         client.release();
     }
 
-    if (onProgress) { onProgress(80, t('ogr_load_completed', lang)); }
+    if (onProgress) { await onProgress(80, t('ogr_load_completed', lang)); }
 };
 
 // ── Inspect (ogrinfo) ─────────────────────────────────────────────────────────
 
 /**
  * Lấy thông tin lớp đầu tiên (hoặc `layerName` cụ thể) trong file geo.
- * .geojson dùng native parser (không cần GDAL).
+ * .geojson/.json dùng native parser (không cần GDAL).
  *
  * @param {string} filePath    - Đường dẫn tuyệt đối đến file (.zip/.geojson/.kml/.tif...)
  * @param {string} [layerName] - Tên layer con trong FileGDB/KML nhiều layer (không bắt buộc)
@@ -239,7 +310,7 @@ const loadGeoJSONToPostgis = async ({ filePath, schema, table, mode = 'overwrite
 const inspect = async (filePath, layerName = null, lang = 'vi') => {
     const safePath = assertSafePath(filePath);
 
-    if (safePath.toLowerCase().endsWith('.geojson')) {
+    if (isGeoJSONPath(safePath)) {
         return inspectGeoJSON(safePath);
     }
 
@@ -297,7 +368,7 @@ const inspect = async (filePath, layerName = null, lang = 'vi') => {
 
 /**
  * Nạp dữ liệu vector từ file vào bảng PostGIS.
- * .geojson dùng native loader (không cần GDAL).
+ * .geojson/.json dùng native loader (không cần GDAL).
  * Tự tạo bảng nếu chưa có (chế độ overwrite/-overwrite).
  *
  * @param {object} opts
@@ -324,8 +395,8 @@ const loadToPostgis = async ({
     const safeSchema = assertIdentifier(schema, 'schema');
     const safeTable  = assertIdentifier(table, 'table');
 
-    if (safePath.toLowerCase().endsWith('.geojson')) {
-        return loadGeoJSONToPostgis({ filePath: safePath, schema: safeSchema, table: safeTable, mode, onProgress, lang });
+    if (isGeoJSONPath(safePath)) {
+        return loadGeoJSONToPostgis({ filePath: safePath, schema: safeSchema, table: safeTable, sridInput, mode, onProgress, lang });
     }
 
     const connStr = buildPgConn(lang);

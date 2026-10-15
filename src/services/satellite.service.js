@@ -22,7 +22,7 @@
 const crypto = require('crypto');
 const { ndviCacheHash, effectiveNdviThreshold } = require('../utils/satellite-identity.util');
 
-const { effectiveRequest, scientificSignature } = require('../utils/satellite-provenance.util');
+const { effectiveRequest, scientificSignature, publicationProvenance } = require('../utils/satellite-provenance.util');
 
 const DEBUG = process.env.SATELLITE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
 function dbg(tag, msg, data) {
@@ -683,15 +683,7 @@ async function publishResult(resultId) {
         return result;  // already published
     }
 
-    // Never guess scientific parameters for historical rows lacking provenance.
-    const meta = result.metadata || {};
-    if (!meta.effectiveRequest || !meta.scientificSignature) {
-        throw new BusinessLogicError('Tạo lại bản xem trước trước khi xuất bản kết quả cũ.', ['PUBLICATION_PROVENANCE_REQUIRED'], 409);
-    }
-    const provenance = effectiveRequest(meta.effectiveRequest.params);
-    if (scientificSignature(provenance) !== meta.scientificSignature) {
-        throw new BusinessLogicError('Quy trình xử lý đã thay đổi. Hãy tạo lại bản xem trước.', ['PUBLICATION_SIGNATURE_MISMATCH'], 409);
-    }
+    const provenance = publicationProvenance(result);
     if (result.status === 'exporting' && result.gee_task_id) return result;
     const params = provenance.params;
     const handler = IMAGE_BUILDERS[result.image_type];

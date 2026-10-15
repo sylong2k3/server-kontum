@@ -614,6 +614,13 @@ const getStatistics = async (idOrUuid, user, lang) => {
         throw new Api403Error(t('remote_sensing_no_stats_login', lang));
     }
 
+    if (image.status === 'failed') {
+        throw new Api409Error(t('remote_sensing_stats_failed', lang));
+    }
+    if (image.status !== 'completed') {
+        throw new Api409Error(t('remote_sensing_stats_pending', lang));
+    }
+
     const stats = await repo.findStatsByImageId(image.id);
     const statistics = stats.map((s) => ({
         ...s,

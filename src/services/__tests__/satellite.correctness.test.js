@@ -132,3 +132,36 @@ test('F22 changed signature fails before new export',async()=>{
  repo.getById.mockResolvedValue({image_type:'rgb',metadata:{effectiveRequest:e,scientificSignature:'old-version'}});
  await expect(service.publishResult('r')).rejects.toThrow();expect(ee.batch.Export.image.toCloudStorage).not.toHaveBeenCalled();
 });
+
+// Actual Express route/controller/service boundary; auth/storage/EE are isolated doubles.
+jest.mock('../../middlewares/auth.middleware',()=>({optionalAuth:(req,res,next)=>next(),verifyToken:(req,res,next)=>{req.user={id:1};next();},requirePermission:()=>((req,res,next)=>next())}));
+jest.mock('../raster-ingest.service',()=>({enqueue:jest.fn()}));
+const request=require('supertest');const express=require('express');
+const app=express();app.use(express.json());app.use((req,res,next)=>{req.lang='vi';next();});
+app.use('/api/v1/satellite',require('../../routes/satellite.routes'));app.use(require('../../middlewares/error-handler').errorHandler);
+test.each([0,.3,.8])('HTTP NDVI threshold %s traverses normalizer/cache/builder/response',async threshold=>{
+ util.eeEval.mockResolvedValueOnce(2).mockResolvedValueOnce({groups:[]}).mockResolvedValueOnce({NDVI:4});
+ const r=await request(app).post('/api/v1/satellite/ndvi').send({...base,ndviMinThresh:threshold});
+ expect(r.status).toBe(200);expect(r.body.data.stats).toMatchObject({ndviThreshUsed:threshold,vegetationHa:0,validPixels:4});expect(image.gt).toHaveBeenCalledWith(threshold);
+});
+test('HTTP invalid threshold is 400 before cache/GEE',async()=>{const r=await request(app).post('/api/v1/satellite/ndvi').send({...base,ndviMinThresh:'bad'});expect(r.status).toBe(400);expect(repo.getByHash).not.toHaveBeenCalled();expect(util.eeEval).not.toHaveBeenCalled();});
+test('HTTP masked NDVI stays null and missing LST stays null',async()=>{
+ util.eeEval.mockResolvedValueOnce(2).mockResolvedValueOnce({groups:[]}).mockResolvedValueOnce({NDVI:0});
+ const ndvi=await request(app).post('/api/v1/satellite/ndvi').send(base);expect(ndvi.body.data.stats.vegetationHa).toBeNull();
+ util.eeEval.mockResolvedValueOnce(1).mockResolvedValueOnce({});const lst=await request(app).post('/api/v1/satellite/heat-map').send(base);expect(lst.body.data.stats.lstMeanC).toBeNull();
+});
+test('HTTP obsolete preview returns actionable 409 with no export',async()=>{repo.getById.mockResolvedValue({image_type:'ndvi',metadata:{}});const r=await request(app).post('/api/v1/satellite/publish').send({resultId:1});expect(r.status).toBe(409);expect(r.body.success).toBe(false);expect(ee.batch.Export.image.toCloudStorage).not.toHaveBeenCalled();});
+
+test('HTTP raster-ingest publication also rejects historical missing provenance',async()=>{
+ repo.getById.mockResolvedValue({image_type:'ndvi',metadata:{downloadUrl:'https://invalid.test/display.zip'}});
+ const r=await request(app).post('/api/v1/satellite/results/1/publish-raster');
+ expect(r.status).toBe(409);expect(require('../raster-ingest.service').enqueue).not.toHaveBeenCalled();
+});
+test('HTTP raster-ingest preserves validated provenance and identifies display raster product',async()=>{
+ const e=effectiveRequest(service.normalizeParams({...base,imageType:'ndvi',ndviMinThresh:.8}));
+ repo.getById.mockResolvedValue({image_type:'ndvi',start_date:'2025-01-01',metadata:{downloadUrl:'https://invalid.test/display.zip',effectiveRequest:e,scientificSignature:scientificSignature(e)}});
+ const ingest=require('../raster-ingest.service');ingest.enqueue.mockResolvedValue({job:{id:1,status:'pending'},deduplicated:false});
+ const r=await request(app).post('/api/v1/satellite/results/1/publish-raster');expect(r.status).toBe(201);
+ expect(ingest.enqueue.mock.calls[0][0].requestParams).toMatchObject({scientificSignature:scientificSignature(e),effectiveRequest:e,outputProduct:'visualized-rgb-tiff-zip'});
+});
+test('HTTP raster-ingest already-published historical layer remains idempotent',async()=>{repo.getById.mockResolvedValue({geoserver_layer:'kontum:existing'});const r=await request(app).post('/api/v1/satellite/results/1/publish-raster');expect(r.status).toBe(200);expect(r.body.data.alreadyPublished).toBe(true);});

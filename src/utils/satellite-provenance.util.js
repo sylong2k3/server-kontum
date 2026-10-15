@@ -44,4 +44,17 @@ function stable(value) {
 function scientificSignature(effective) {
     return crypto.createHash('sha256').update(JSON.stringify(stable(effective))).digest('hex');
 }
-module.exports = { effectiveRequest, scientificSignature };
+// Shared guard for GCS rebuild and cached-download raster ingest.
+function publicationProvenance(result) {
+    const { BusinessLogicError } = require('../core/error.response');
+    const meta = result.metadata || {};
+    if (!meta.effectiveRequest || !meta.scientificSignature) {
+        throw new BusinessLogicError('Tạo lại bản xem trước trước khi xuất bản kết quả cũ.', ['PUBLICATION_PROVENANCE_REQUIRED'], 409);
+    }
+    const provenance = effectiveRequest(meta.effectiveRequest.params);
+    if (provenance.params.imageType !== result.image_type || scientificSignature(provenance) !== meta.scientificSignature) {
+        throw new BusinessLogicError('Quy trình xử lý đã thay đổi. Hãy tạo lại bản xem trước.', ['PUBLICATION_SIGNATURE_MISMATCH'], 409);
+    }
+    return provenance;
+}
+module.exports = { effectiveRequest, scientificSignature, publicationProvenance };
