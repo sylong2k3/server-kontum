@@ -9,6 +9,7 @@
  */
 
 const { workerData, parentPort } = require('worker_threads');
+const { rasterValidity } = require('../utils/raster-validity.util');
 
 (async () => {
     try {
@@ -17,15 +18,16 @@ const { workerData, parentPort } = require('worker_threads');
         const tiff      = await fromFile(workerData.filePath);
         const image     = await tiff.getImage();
         const bandCount = image.getSamplesPerPixel();
+        const validityForBand = await rasterValidity(tiff, image, workerData.filePath);
         const stats     = [];
         const HISTOGRAM_BIN_COUNT = 64;
 
         const round4 = (value) => Math.round(value * 10000) / 10000;
 
-        const buildHistogram = (data, min, max, validCount) => {
+        const buildHistogram = (data, min, max, validCount, isValid) => {
             if (!Number.isFinite(min) || !Number.isFinite(max)) { return { buckets: [], counts: [] }; }
             if (min === max) {
-                // readRasters returns numeric typed arrays; the first pass already counted finite pixels.
+                // readRasters returns numeric typed arrays; the first pass already counted metadata-valid pixels.
                 return { buckets: [round4(min)], counts: [validCount] };
             }
 
@@ -34,7 +36,7 @@ const { workerData, parentPort } = require('worker_threads');
 
             for (let i = 0; i < data.length; i++) {
                 const v = data[i];
-                if (v === null || v === undefined || Number.isNaN(v) || !Number.isFinite(v)) { continue; }
+                if (!isValid(v, i)) { continue; }
                 const idx = Math.min(HISTOGRAM_BIN_COUNT - 1, Math.floor((v - min) / step));
                 counts[idx]++;
             }
@@ -49,6 +51,7 @@ const { workerData, parentPort } = require('worker_threads');
             try {
                 const rasters = await image.readRasters({ samples: [b - 1] });
                 const data    = rasters[0];
+                const isValid = validityForBand(b - 1);
 
                 let min = Infinity, max = -Infinity, sum = 0, sumSq = 0;
                 let validCount = 0;
@@ -56,7 +59,7 @@ const { workerData, parentPort } = require('worker_threads');
 
                 for (let i = 0; i < total; i++) {
                     const v = data[i];
-                    if (v === null || v === undefined || isNaN(v) || !isFinite(v)) { continue; }
+                    if (!isValid(v, i)) { continue; }
                     if (min > v) { min = v; }
                     if (max < v) { max = v; }
                     sum   += v;
@@ -71,7 +74,7 @@ const { workerData, parentPort } = require('worker_threads');
 
                 const mean      = sum / validCount;
                 const std       = Math.sqrt(Math.abs(sumSq / validCount - mean * mean));
-                const histogram = buildHistogram(data, min, max, validCount);
+                const histogram = buildHistogram(data, min, max, validCount, isValid);
 
                 stats.push({
                     band_index:   b,
@@ -84,12 +87,13 @@ const { workerData, parentPort } = require('worker_threads');
                     histogram,
                 });
             } catch (bandErr) {
-                console.warn(`[calcStats.thread] Band ${b} error:`, bandErr.message);
+                bandErr.code = bandErr.code || 'RASTER_STATISTICS_FAILED';
+                throw bandErr;
             }
         }
 
         parentPort.postMessage({ stats });
     } catch (err) {
-        parentPort.postMessage({ error: err.message });
+        parentPort.postMessage({ error: err.message, code: err.code || 'RASTER_STATISTICS_FAILED' });
     }
 })();

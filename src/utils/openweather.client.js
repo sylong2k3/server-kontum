@@ -125,25 +125,35 @@ const getWindGrid = async (bbox, size = cfg.WIND_GRID_SIZE) => {
     // Open-Meteo trả mảng khi nhiều toạ độ, object đơn khi 1 toạ độ.
     const entries = Array.isArray(data) ? data : [data];
 
-    const points = entries.map((entry) => {
-        const speed = entry.current?.wind_speed_10m ?? 0;
-        const deg   = entry.current?.wind_direction_10m ?? 0;
-        const rad   = (deg * Math.PI) / 180;
+    if (entries.length !== lats.length) throw new Error('Wind grid response cardinality mismatch');
+    const fetchedAt = new Date().toISOString();
+    const points = entries.map((entry, index) => {
+        const rawSpeed = entry?.current?.wind_speed_10m;
+        const rawDeg = entry?.current?.wind_direction_10m;
+        const speed = Number.isFinite(rawSpeed) && rawSpeed >= 0 ? rawSpeed : null;
+        const deg = Number.isFinite(rawDeg) && rawDeg >= 0 && rawDeg <= 360 ? rawDeg : null;
+        const valid = speed !== null && (speed === 0 || deg !== null);
+        const rad = deg === null ? null : (deg * Math.PI) / 180;
+        const rawTime = entry?.current?.time;
+        const parsedTime = rawTime ? Date.parse(/Z$|[+-]\d{2}:\d{2}$/.test(rawTime) ? rawTime : rawTime + 'Z') : NaN;
+        const observedAt = Number.isFinite(parsedTime) ? new Date(parsedTime).toISOString() : null;
         return {
-            lat:   entry.latitude,
-            lng:   entry.longitude,
-            speed,
-            deg,
-            u:     Number((-speed * Math.sin(rad)).toFixed(3)),
-            v:     Number((-speed * Math.cos(rad)).toFixed(3)),
+            lat: Number.isFinite(entry?.latitude) ? entry.latitude : lats[index],
+            lng: Number.isFinite(entry?.longitude) ? entry.longitude : lngs[index],
+            speed, deg, valid, observedAt,
+            observationAgeSeconds: observedAt ? Math.round((Date.parse(fetchedAt) - parsedTime) / 1000) : null,
+            u: !valid ? null : speed === 0 ? 0 : Number((-speed * Math.sin(rad)).toFixed(3)),
+            v: !valid ? null : speed === 0 ? 0 : Number((-speed * Math.cos(rad)).toFixed(3)),
         };
     });
-
+    const times = points.map(p => p.observedAt).filter(Boolean).sort();
     return {
-        gridSize:   n,
-        bbox,
-        unit:       'm/s',
-        observedAt: entries[0]?.current?.time || null,
+        gridSize: n, bbox, unit: 'm/s',
+        observedAt: times.length === points.length ? times[0] : null,
+        fetchedAt, expectedPointCount: lats.length,
+        validPointCount: points.filter(p => p.valid).length,
+        freshness: { oldestObservedAt: times[0] || null, newestObservedAt: times.at(-1) || null,
+            missingTimestampCount: points.length - times.length },
         points,
     };
 };

@@ -129,7 +129,7 @@ const getWindGrid = async ({ bbox, grid, lang }) => {
 
     // Cache theo bbox đã làm tròn + kích thước lưới.
     const keyBox   = box.map((n) => round(n, 3)).join(',');
-    const cacheKey = `wind_grid:${keyBox}:${size}`;
+    const cacheKey = `wind_grid:v2-validity:${keyBox}:${size}`;
 
     const fresh = await repo.getFresh(cacheKey);
     if (fresh) {
@@ -175,7 +175,7 @@ const refreshCache = async ({ lang = 'vi' } = {}) => {
     const windTask = async () => {
         const data = await owm.getWindGrid(cfg.KONTUM_BBOX, cfg.WIND_GRID_SIZE);
         await repo.upsert({
-            cache_key:   `wind_grid:${keyBox}:${cfg.WIND_GRID_SIZE}`,
+            cache_key:   `wind_grid:v2-validity:${keyBox}:${cfg.WIND_GRID_SIZE}`,
             data_type:   'wind_grid',
             bbox:        cfg.KONTUM_BBOX,
             payload:     data,

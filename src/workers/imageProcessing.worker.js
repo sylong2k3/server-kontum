@@ -95,8 +95,8 @@ const calcStatistics = (filePath) => new Promise((resolve, reject) => {
         resourceLimits: { maxOldGenerationSizeMb: STATS_WORKER_MAX_OLD_MB },
     });
 
-    worker.once('message', ({ stats, error }) => {
-        if (error) { reject(new Error(error)); } else { resolve(stats); }
+    worker.once('message', ({ stats, error, code }) => {
+        if (error) { reject(Object.assign(new Error(error), { code })); } else { resolve(stats); }
     });
     worker.once('error', reject);
 });
@@ -201,6 +201,7 @@ const processJob = async (job) => {
                     })),
                 });
             } catch (statsErr) {
+                if (['RASTER_VALIDITY_UNSUPPORTED', 'RASTER_STATISTICS_FAILED'].includes(statsErr.code)) throw statsErr;
                 console.warn(t('worker_stats_failed', WORKER_LANG), statsErr.message);
             }
         }

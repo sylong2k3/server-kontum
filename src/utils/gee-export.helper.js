@@ -68,27 +68,27 @@ async function publishRasterToMinio({
     // Use OS tmpdir so this works on Windows dev as well as Linux prod.
     const localTmp    = path.join(os.tmpdir(), fileName);
 
-    // Download from GCS.
-    await storage.bucket(bucket).file(`${gcsPath}.tif`).download({ destination: localTmp });
+    try {
+        // Download from GCS.
+        await storage.bucket(bucket).file(`${gcsPath}.tif`).download({ destination: localTmp });
 
-    // Upload to MinIO.
-    await minioSvc.uploadFile(minioBucket, minioKey, localTmp, 'image/tiff');
+        // Upload to MinIO.
+        await minioSvc.uploadFile(minioBucket, minioKey, localTmp, 'image/tiff');
 
-    // Harvest into GeoServer.
-    if (harvest) {
-        await geoserver.harvestGeoTiff(storeName, localTmp);
+        // Harvest into GeoServer.
+        if (harvest) {
+            await geoserver.harvestGeoTiff(storeName, localTmp);
+        }
+
+        const workspace = process.env.GEOSERVER_WORKSPACE || 'kontum';
+        return {
+            minioKey,
+            geoserverStore: storeName,
+            geoserverLayer: harvest ? `${workspace}:${storeName}` : null,
+        };
+    } finally {
+        await require('fs/promises').unlink(localTmp).catch(() => {});
     }
-
-    // Cleanup.
-    const fs = require('fs/promises');
-    await fs.unlink(localTmp).catch(() => {});
-
-    const workspace = process.env.GEOSERVER_WORKSPACE || 'kontum';
-    return {
-        minioKey,
-        geoserverStore: storeName,
-        geoserverLayer: `${workspace}:${storeName}`,
-    };
 }
 
 module.exports = { pollGeeTask, publishRasterToMinio };

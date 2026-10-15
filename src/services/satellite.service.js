@@ -20,8 +20,9 @@
  */
 
 const crypto = require('crypto');
-const os     = require('os');
-const path   = require('path');
+const { ndviCacheHash, effectiveNdviThreshold } = require('../utils/satellite-identity.util');
+
+const { effectiveRequest, scientificSignature } = require('../utils/satellite-provenance.util');
 
 const DEBUG = process.env.SATELLITE_DEBUG === 'true' || process.env.NODE_ENV === 'development';
 function dbg(tag, msg, data) {
@@ -102,19 +103,8 @@ function validateParams(imageType, params) {
 }
 
 function hashParams(params) {
-    const str = JSON.stringify({
-        t: params.imageType, c: params.collection, cc: params.cloudCover,
-        sd: params.startDate, ed: params.endDate, m: params.month,
-        g: params.geometry,
-        // Ground-truth params affect classification output, so include in cache key.
-        gt: params.groundTruthAssetId || null,
-        gb: params.groundTruthAssetId ? params.gtBufferM : null,
-        // Fire warning params.
-        ad: params.analysisDate || null,
-        rf: params.enableRf,
-        ifa: params.inputFireAssetId || null,
-        fl: params.fireLayer,
-    });
+    if (params.imageType === 'ndvi') return ndviCacheHash(params);
+    const str = scientificSignature(effectiveRequest(params));
     return crypto.createHash('sha256').update(str).digest('hex');
 }
 
@@ -224,22 +214,28 @@ async function buildNdvi(params, region) {
     const vizParams = { bands: ['NDVI'], min: -0.2, max: 0.8,
         palette: ['#d73027', '#fee08b', '#ffffbf', '#90ee90', '#1a9641'] };
 
-    const ndviThresh = parseFloat(params.ndviMinThresh) || 0.3;
+    const ndviThresh = effectiveNdviThreshold(params.ndviMinThresh);
     dbg('NDVI', `computing area stats with thresh=${ndviThresh}`);
     const areaStats  = await computeAreaStats(
         eeImage.gt(ndviThresh).selfMask().toByte(), region, 2);
-    dbgTime('NDVI', `vegetationHa=${areaStats[1] || 0}`, t0);
+    const support = await eeEval(eeImage.reduceRegion({
+        reducer: ee.Reducer.count(), geometry: region, scale: 100,
+        bestEffort: true, maxPixels: 1e12, tileScale: 8,
+    }));
+    const validPixels = Number.isFinite(support?.NDVI) && support.NDVI >= 0 ? support.NDVI : null;
+    const vegetationHa = validPixels === 0 || validPixels == null ? null : (areaStats[1] ?? 0);
+    dbgTime('NDVI', `vegetationHa=${vegetationHa}`, t0);
 
     return {
         eeImage,
         vizParams,
-        stats:  { imageCount: imgCount, vegetationHa: areaStats[1] || 0, ndviThreshUsed: ndviThresh },
+        stats:  { imageCount: imgCount, vegetationHa, ndviThreshUsed: ndviThresh, validPixels },
         legend: [
-            { color: '#d73027', label: 'NDVI < 0' },
-            { color: '#fee08b', label: '0 – 0.2' },
-            { color: '#ffffbf', label: '0.2 – 0.4' },
-            { color: '#90ee90', label: '0.4 – 0.6' },
-            { color: '#1a9641', label: '> 0.6 (rừng dày)' },
+            { color: '#d73027', label: 'NDVI −0.2' },
+            { color: '#fee08b', label: 'NDVI 0.05' },
+            { color: '#ffffbf', label: 'NDVI 0.3' },
+            { color: '#90ee90', label: 'NDVI 0.55' },
+            { color: '#1a9641', label: 'NDVI 0.8' },
         ],
         metadata: { startDate: params.startDate, endDate: params.endDate },
     };
@@ -252,6 +248,7 @@ async function buildHeatmap(params, region) {
         .filterBounds(region).filterDate(params.startDate, params.endDate);
     const imgCount = await eeEval(modis.size());
     dbgTime('HEATMAP', `MODIS images=${imgCount}`, t0);
+    assertNonEmpty(imgCount, params.startDate, params.endDate, params.cloudCover);
     const eeImage  = modis.select('LST_Day_1km').mean()
         .multiply(0.02).subtract(273.15).rename('LST_C').clip(region);
     const vizParams = { bands: ['LST_C'], min: 20, max: 45,
@@ -262,21 +259,22 @@ async function buildHeatmap(params, region) {
         reducer: ee.Reducer.mean().combine(ee.Reducer.minMax(), null, true),
         geometry: region, scale: 1000, bestEffort: true, maxPixels: 1e12,
     }));
-    dbgTime('HEATMAP', `LST mean=${r.LST_C_mean?.toFixed(2)}°C min=${r.LST_C_min?.toFixed(2)} max=${r.LST_C_max?.toFixed(2)}`, t0);
+    const nullableTemperature = value => Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+    dbgTime('HEATMAP', `LST mean=${r?.LST_C_mean ?? 'missing'}`, t0);
 
     return {
         eeImage,
         vizParams,
         stats: {
             imageCount: imgCount,
-            lstMeanC:   Math.round((r.LST_C_mean || 0) * 100) / 100,
-            lstMinC:    Math.round((r.LST_C_min  || 0) * 100) / 100,
-            lstMaxC:    Math.round((r.LST_C_max  || 0) * 100) / 100,
+            lstMeanC:   nullableTemperature(r?.LST_C_mean),
+            lstMinC:    nullableTemperature(r?.LST_C_min),
+            lstMaxC:    nullableTemperature(r?.LST_C_max),
         },
         legend: [
-            { color: '#313695', label: '< 20°C' }, { color: '#74add1', label: '20–30°C' },
-            { color: '#fed976', label: '30–35°C' }, { color: '#fd8d3c', label: '35–40°C' },
-            { color: '#d73027', label: '> 40°C' },
+            { color: '#313695', label: '20°C' }, { color: '#74add1', label: '26.25°C' },
+            { color: '#fed976', label: '32.5°C' }, { color: '#fd8d3c', label: '38.75°C' },
+            { color: '#d73027', label: '45°C' },
         ],
         metadata: { source: 'MODIS MOD11A1', startDate: params.startDate, endDate: params.endDate },
     };
@@ -373,7 +371,7 @@ async function buildClassified(params, region) {
         stats:  {
             year,
             month,
-            oobAccuracyPct:  Math.round((oobPct || 0) * 100) / 100,
+            oobAccuracyPct:  Number.isFinite(oobPct) ? Math.round(oobPct * 100) / 100 : null,
             testAccuracyPct: testAccuracyPct != null ? Math.round(testAccuracyPct * 100) / 100 : null,
             testKappa:       testKappa != null ? Math.round(testKappa * 1000) / 1000 : null,
             hasGroundTruth:  hasGT,
@@ -558,7 +556,9 @@ async function processRequest(imageType, rawParams) {
             ['INVALID_IMAGE_TYPE'], StatusCodes.BAD_REQUEST);
     }
 
-    const params = normalizeParams({ ...rawParams, imageType: normalType });
+    const normalized = normalizeParams({ ...rawParams, imageType: normalType });
+    const params = effectiveRequest(normalized).params;
+    const provenance = effectiveRequest(params);
     validateParams(normalType, params);
     const hash   = hashParams(params);
     dbg('PROCESS', `cache hash=${hash.slice(0, 12)}…`);
@@ -643,7 +643,8 @@ async function processRequest(imageType, rawParams) {
         tile_url:     tileUrl,
         map_id:       mapId || null,
         stats, legend,
-        metadata: { ...metadata, downloadUrl, downloadFilename },
+        metadata: { ...metadata, effectiveRequest: provenance, scientificSignature: scientificSignature(provenance),
+            requestedParameters: Object.fromEntries(Object.keys(normalized).filter(key => Object.hasOwn(rawParams, key)).map(key => [key, rawParams[key]])), downloadUrl, downloadFilename },
     }).catch((err) => {
         console.warn('[SATELLITE] Cache write failed:', err.message);
         return { id: null, tile_url: tileUrl, geoserver_layer: null };
@@ -657,7 +658,7 @@ async function processRequest(imageType, rawParams) {
         geoserverLayer: null,
         downloadUrl,
         downloadFilename,   // gợi ý FE dùng cho <a download>
-        stats, legend, metadata,
+        stats, legend, metadata: { ...metadata, effectiveRequest: provenance, scientificSignature: scientificSignature(provenance) },
         cached: false,
     };
 }
@@ -682,19 +683,17 @@ async function publishResult(resultId) {
         return result;  // already published
     }
 
-    // Re-build the EE image to export (cannot reuse mapId image object).
-    // Restore any per-type extras (ground-truth for classified) from metadata.
+    // Never guess scientific parameters for historical rows lacking provenance.
     const meta = result.metadata || {};
-    const params  = normalizeParams({
-        imageType:          result.image_type,
-        collection:         result.collection,
-        startDate:          result.start_date,
-        endDate:            result.end_date,
-        geometry:           result.geometry,
-        groundTruthAssetId: meta.groundTruthAssetId || '',
-        gtBufferM:          meta.gtBufferM,
-        month:              meta.month,
-    });
+    if (!meta.effectiveRequest || !meta.scientificSignature) {
+        throw new BusinessLogicError('Tạo lại bản xem trước trước khi xuất bản kết quả cũ.', ['PUBLICATION_PROVENANCE_REQUIRED'], 409);
+    }
+    const provenance = effectiveRequest(meta.effectiveRequest.params);
+    if (scientificSignature(provenance) !== meta.scientificSignature) {
+        throw new BusinessLogicError('Quy trình xử lý đã thay đổi. Hãy tạo lại bản xem trước.', ['PUBLICATION_SIGNATURE_MISMATCH'], 409);
+    }
+    if (result.status === 'exporting' && result.gee_task_id) return result;
+    const params = provenance.params;
     const handler = IMAGE_BUILDERS[result.image_type];
     const region  = toEeGeometry(params.geometry);
     const { eeImage } = await handler(params, region);
@@ -726,10 +725,13 @@ async function publishResult(resultId) {
  * Poll all 'exporting' satellite results and publish to GeoServer when done.
  * Called by cron job or periodic worker.
  */
+const publishing = new Set();
 async function pollPublishes() {
     const exporting = await repo.listExporting();
     dbg('POLL', `checking ${exporting.length} exporting result(s)`);
     for (const r of exporting) {
+        if (publishing.has(r.id)) continue;
+        publishing.add(r.id);
         try {
             const state = await pollGeeTask(r.gee_task_id);
             dbg('POLL', `id=${r.id} taskId=${r.gee_task_id} state=${state}`);
@@ -751,26 +753,18 @@ async function pollPublishes() {
                     harvest:     false,
                 });
 
-                if (published) {
-                    // Create standalone GeoTIFF coverage store in GeoServer.
-                    // Use os.tmpdir() so Windows dev also works.
-                    const localTmp = path.join(os.tmpdir(), fileName);
-                    const gsLayer  = await geoserver.publishRasterLayer({
-                        geoserver_store: storeName,
-                        source_url:      localTmp,
-                        name_vi:         `Ảnh vệ tinh ${r.image_type} ${r.start_date}`,
-                    }).catch((e) => {
-                        console.warn('[SATELLITE] GeoServer publish failed:', e.message);
-                        return null;
-                    });
-
-                    await repo.updatePublish(r.id, {
-                        status:         'published',
-                        minio_key:      published.minioKey,
-                        geoserver_store: storeName,
-                        geoserver_layer: gsLayer || null,
-                    });
-                }
+                if (!published?.minioKey) throw new Error('Raster publication returned no artifact');
+                // Persist partial progress without claiming GeoServer readiness.
+                await repo.updatePublish(r.id, { minio_key: published.minioKey, geoserver_store: storeName });
+                const gsLayer = await geoserver.publishS3GeoTiffLayer({
+                    storeName, s3Bucket: SATELLITE_MINIO_BUCKET, s3Key: published.minioKey,
+                    title: `Ảnh vệ tinh ${r.image_type} ${r.start_date}`,
+                });
+                if (!gsLayer) throw new Error('GeoServer returned no published layer');
+                await repo.updatePublish(r.id, {
+                    status: 'published', minio_key: published.minioKey,
+                    geoserver_store: storeName, geoserver_layer: gsLayer, publish_error: null,
+                });
             } else if (['FAILED', 'CANCELLED', 'TIMEOUT'].includes(state)) {
                 await repo.updatePublish(r.id, {
                     status:        'failed',
@@ -779,6 +773,9 @@ async function pollPublishes() {
             }
         } catch (err) {
             console.error(`[SATELLITE] pollPublishes error id=${r.id}:`, err.message);
+            await repo.updatePublish(r.id, { status: 'failed', publish_error: err.message });
+        } finally {
+            publishing.delete(r.id);
         }
     }
 }

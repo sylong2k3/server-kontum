@@ -2,6 +2,7 @@
 
 const { BusinessLogicError } = require('../core/error.response');
 const { StatusCodes } = require('../core/http-status-code');
+const { effectiveNdviThreshold } = require('./satellite-identity.util');
 
 function normalizeParams(raw) {
     const endDate = raw.endDate || null;
@@ -23,7 +24,9 @@ function normalizeParams(raw) {
         // bằng month=1..12; giữ lại giá trị này xuyên suốt cache/publish.
         month:       requestedMonth ?? endDateMonth,
         geometry:    raw.geometry    || null,
-        ndviMinThresh: raw.ndviMinThresh != null ? Number(raw.ndviMinThresh) : null,
+        ndviMinThresh: raw.imageType === 'ndvi'
+            ? effectiveNdviThreshold(raw.ndviMinThresh)
+            : (raw.ndviMinThresh != null ? Number(raw.ndviMinThresh) : null),
         // Forest classification v3 ground-truth params (used by /classified).
         groundTruthAssetId: raw.groundTruthAssetId ? String(raw.groundTruthAssetId).trim() : '',
         gtBufferM:          raw.gtBufferM != null ? Number(raw.gtBufferM) : 60,

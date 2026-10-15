@@ -7,6 +7,11 @@ const { Worker } = require('worker_threads');
 const workerPath = path.resolve(__dirname, '../calcStats.thread.js');
 const cases = [
     ['zero', [0, 0, 0, 0], 0, 0, 0, 4],
+    ['nodata255', [0, 10, 20, 255], 0, 20, 10, 3, 255],
+    ['nodata-zero', [0, 10, 20, 0], 10, 20, 15, 2, 0],
+    ['nodata-negative', [-9999, 0, 10, 20], 0, 20, 10, 3, -9999],
+    ['all-nodata', [255, 255, 255, 255], null, null, null, 0, 255],
+    ['constant-valid-nodata', [7, 255, 7, 7], 7, 7, 7, 3, 255],
     ['constant', [7, 7, 7, 7], 7, 7, 7, 4],
     ['negative', [-2, -2, -2, -2], -2, -2, -2, 4],
     ['masked-constant', [5, 'NaN', 'Infinity', 5], 5, 5, 5, 2],
@@ -23,13 +28,16 @@ beforeAll(() => {
         const fs = require('fs'); const path = require('path');
         import('geotiff').then(({ writeArrayBuffer }) => {
             const fixtures = ${JSON.stringify(cases)};
-            for (const [name, values] of fixtures) {
+            for (const [name, values, , , , , noData] of fixtures) {
                 const buffer = writeArrayBuffer(new Float64Array(values.map(Number)), {
                     width: 2, height: 2, GeographicTypeGeoKey: 4326,
+                    ...(noData !== undefined ? { GDAL_NODATA: String(noData) } : {}),
                     ModelPixelScale: [1, 1, 0], ModelTiepoint: [0, 0, 0, 107, 15, 0],
                 });
                 fs.writeFileSync(path.join(process.argv[1], name + '.tif'), Buffer.from(buffer));
             }
+            fs.writeFileSync(path.join(process.argv[1], 'multiband.tif'), Buffer.from(writeArrayBuffer([[[0,10],[20,255]],[[255,5],[15,25]]], { GDAL_NODATA:'255', GeographicTypeGeoKey:4326 })));
+            fs.writeFileSync(path.join(process.argv[1], 'alpha.tif'), Buffer.from(writeArrayBuffer([[[0,10],[20,30]],[[255,0],[255,255]]], { ExtraSamples:[2], GeographicTypeGeoKey:4326 })));
         }).catch(error => { console.error(error); process.exitCode = 1; });
     `;
     const generated = spawnSync(process.execPath, ['-e', generator, fixtureDir], {
@@ -70,6 +78,16 @@ describe('GeoTIFF statistics worker histogram equivalence', () => {
             expect(band.histogram.buckets).toHaveLength(64);
             expect(band.histogram.counts.reduce((sum, n) => sum + n, 0)).toBe(count);
         }
+    });
+    test('actual multiband TIFF honors shared scalar NoData independently', async () => {
+        const result = await runWorker(path.join(fixtureDir, 'multiband.tif'));
+        expect(result.error).toBeUndefined();expect(result.stats).toHaveLength(2);
+        expect(result.stats[0]).toMatchObject({mean:10,valid_pixels:3,min:0,max:20});
+        expect(result.stats[1]).toMatchObject({mean:15,valid_pixels:3,min:5,max:25});
+    });
+    test('actual alpha TIFF fails closed instead of ignoring mask', async () => {
+        const result = await runWorker(path.join(fixtureDir, 'alpha.tif'));
+        expect(result.code).toBe('RASTER_VALIDITY_UNSUPPORTED');expect(result.stats).toBeUndefined();
     });
     test('missing file remains an error rather than successful empty statistics', async () => {
         const result = await runWorker(path.join(fixtureDir, 'absent.tif'));

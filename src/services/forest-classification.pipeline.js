@@ -179,9 +179,12 @@ function buildFeatureImage(year, month, region) {
     const d = seasonWindow(year, month, cfg.WIN_DRY_START,   cfg.WIN_DRY_END);
     const f = seasonWindow(year, month, cfg.WIN_DEFOL_START, cfg.WIN_DEFOL_END);
 
-    // Master phủ cả nền 12 tháng LẪN các cửa sổ mùa (mùa có thể lùi 1 năm).
-    const masterStart = ee.Date(ee.Algorithms.If(
-        g.start.difference(baseStart, 'day').lt(0), g.start, baseStart));
+    // Master covers base, recent and every required seasonal window.
+    const masterStart = [recStart, g.start, d.start, f.start].reduce(
+        (earliest, start) => ee.Date(ee.Algorithms.If(
+            start.difference(earliest, 'day').lt(0), start, earliest)),
+        baseStart,
+    );
 
     const master = masterCollection(masterStart, anchorEnd, year, region);
 
@@ -980,7 +983,7 @@ async function runRfClassification(year, region, regionGeom, opts = {}) {
         inputTestSamples,
         // NEW v4.1 diagnostics
         modelMeta: {
-            pipelineVersion:  'v5.3-2026-07-24',
+            pipelineVersion:  'v5.3-f01-seasonal-window-v1',
             month,
             windows:          F.windows,
             sampleBudget,
