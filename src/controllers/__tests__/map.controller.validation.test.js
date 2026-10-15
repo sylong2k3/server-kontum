@@ -1,13 +1,15 @@
 'use strict';
 
 jest.mock('../../services/map.service', () => ({ createLayer: jest.fn(), updateLayer: jest.fn() }));
-jest.mock('../../services/geo-import.service', () => ({}));
+jest.mock('../../services/geo-import.service', () => ({ enqueueImport: jest.fn() }));
 jest.mock('../../utils/geoserver.client', () => ({}));
 
 const express = require('express');
 const request = require('supertest');
+const fs = require('fs');
 const controller = require('../map.controller');
 const mapService = require('../../services/map.service');
+const geoImportService = require('../../services/geo-import.service');
 const asyncHandler = require('../../helpers/async-handler');
 const { errorHandler } = require('../../middlewares/error-handler');
 
@@ -24,6 +26,10 @@ const app = express();
 app.use(express.json());
 app.use((req, res, next) => { req.lang = 'vi'; next(); });
 app.post('/api/v1/map/layers', asyncHandler(controller.createLayer));
+app.post('/api/v1/map/layers/import-file', (req, res, next) => {
+    req.geoFile = { path: 'test-only.geojson' };
+    next();
+}, asyncHandler(controller.importGeoFile));
 app.patch('/api/v1/map/layers/:code', asyncHandler(controller.updateLayer));
 app.use(errorHandler);
 
@@ -32,7 +38,9 @@ describe('map controller validation in production', () => {
     beforeEach(() => {
         process.env.NODE_ENV = 'production';
         jest.clearAllMocks();
+        jest.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
     });
+    afterEach(() => jest.restoreAllMocks());
     afterAll(() => {
         if (originalNodeEnv === undefined) { delete process.env.NODE_ENV; }
         else { process.env.NODE_ENV = originalNodeEnv; }
@@ -57,6 +65,29 @@ describe('map controller validation in production', () => {
         expect(mapService.createLayer).toHaveBeenCalledWith(
             expect.objectContaining(corrected), undefined, 'vi'
         );
+    });
+
+    test('parses shared form metadata and multipart booleans before enqueueing', async () => {
+        geoImportService.enqueueImport.mockResolvedValue({ job_id: '7', code: 'forest-2026', status: 'pending', sync: false });
+        const response = await request(app).post('/api/v1/map/layers/import-file').send({
+            code: 'forest-2026', table_name: 'forest_2026', source_format: 'geojson', new_layer: 'true',
+            is_active: 'false', default_style: '{"fillColor":"#008800"}', legend_config: 'null',
+        });
+        expect(response.status).toBe(202);
+        expect(response.body.data.job_id).toBe('7');
+        expect(geoImportService.enqueueImport).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({
+            new_layer: true, is_active: false, default_style: { fillColor: '#008800' }, legend_config: null,
+        }) }));
+    });
+
+    test('rejects malformed JSON metadata before creating any job', async () => {
+        const response = await request(app).post('/api/v1/map/layers/import-file').send({
+            code: 'forest', source_format: 'geojson', default_style: '{',
+        });
+        expect(response.status).toBe(400);
+        expect(response.body.errors).toEqual(['default_style: invalid JSON']);
+        expect(geoImportService.enqueueImport).not.toHaveBeenCalled();
+        expect(fs.unlinkSync).toHaveBeenCalledWith('test-only.geojson');
     });
 
     test('also preserves update validation errors without exposing a production stack', async () => {

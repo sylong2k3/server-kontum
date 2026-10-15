@@ -20,6 +20,7 @@ const geoserver = require('../utils/geoserver.client');
 const layerRepo = require('../repositories/map-layer.repository');
 const { geoserverConfig } = require('../configs/geoserver');
 const { t } = require('../utils/i18n.util');
+const { Api409Error } = require('../core/error.response');
 
 const GEO_IMPORT_SYNC_MAX_BYTES = Number(process.env.GEO_IMPORT_SYNC_MAX_BYTES || 5 * 1024 * 1024); // 5 MB
 
@@ -44,7 +45,17 @@ const enqueueImport = async ({ file, payload, user, lang }) => {
 
         // Upsert layer trước để có layer_id hợp lệ cho FK của import_jobs.
         // geometry_type='GEOMETRY' là placeholder — runImportJob sẽ cập nhật đúng sau ogr2ogr.
-        const layerRow = await layerRepo.upsertLayerByCode(client, {
+        if (payload.new_layer) {
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`geo-import:gis.${tableName}`]);
+            if (await layerRepo.findByCode(code, client)) {
+                throw new Api409Error(t('map_layer_code_exists', lang), ['LAYER_CODE_EXISTS']);
+            }
+            if (await layerRepo.physicalTableExists('gis', tableName, client) || await layerRepo.findByTableName(tableName, client)) {
+                throw new Api409Error(t('map_layer_table_already_used', lang), ['LAYER_TABLE_ALREADY_USED']);
+            }
+        }
+        const registerLayer = payload.new_layer ? layerRepo.createLayer : layerRepo.upsertLayerByCode;
+        const layerRow = await registerLayer(client, {
             code,
             name_vi:        payload.name_vi || code,
             name_en:        payload.name_en || null,
@@ -57,7 +68,8 @@ const enqueueImport = async ({ file, payload, user, lang }) => {
             layer_group:    payload.layer_group || null,
             data_year:      payload.data_year || null,
             source_dataset: payload.source_dataset || null,
-            is_active:      true,
+            is_active:      payload.new_layer ? payload.is_active : true,
+            ...(payload.new_layer && { default_style: payload.default_style, legend_config: payload.legend_config }),
             is_public:      payload.is_public ?? false,
             is_editable:    true,
             userId,
@@ -223,7 +235,7 @@ const _upsertAndRefresh = async ({ code, tableName, payload, geometryType, epsgC
             data_year:         payload.data_year || null,
             source_dataset:    payload.source_dataset || 'postgis',
             source_layer_name: payload.source_layer_name || null,
-            is_active:         true,
+            is_active:         payload.new_layer ? payload.is_active : true,
             is_public:         payload.is_public ?? false,
             is_editable:       geometryType !== 'RASTER',
             source_url:        sourceUrl,

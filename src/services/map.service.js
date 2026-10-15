@@ -127,6 +127,9 @@ const publishLayer = async (code, user, lang) => {
     const layer = await requireLayer(code, lang);
     if (layer.is_active !== true) { throw new Api400Error(t('map_layer_inactive', lang), ['LAYER_INACTIVE']); }
     if (layer.geoserver_layer) { throw new Api400Error(t('map_layer_already_published', lang), ['LAYER_ALREADY_PUBLISHED']); }
+    if (layer.geometry_type === 'RASTER' && !String(layer.source_url || '').trim()) {
+        throw new Api400Error(t('map_raster_source_required', lang), ['RASTER_SOURCE_REQUIRED']);
+    }
     if (layer.geometry_type !== 'RASTER') {
         const exists = await layerRepo.physicalTableExists(layer.schema_name, layer.table_name);
         if (!exists) { throw new Api400Error(t('map_gis_table_not_found', lang), ['GIS_TABLE_NOT_FOUND']); }

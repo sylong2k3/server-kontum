@@ -117,9 +117,9 @@ const findByCode = async (code, client = null) => {
     return rows[0] || null;
 };
 
-const findByTableName = async (tableName) => {
+const findByTableName = async (tableName, client = null) => {
     const normalized = tableName.includes(':') ? tableName.split(':').pop() : tableName;
-    const { rows } = await db.query(
+    const { rows } = await exec(client)(
         `SELECT ${LAYER_COLUMNS} FROM gis.layer_registry WHERE (table_name = $1 OR geoserver_layer = $2) AND deleted_at IS NULL`,
         [normalized, tableName]
     );

@@ -147,3 +147,34 @@ test('rejected progress updates propagate without leaving an unhandled promise',
         .rejects.toThrow('progress update failed');
     expect(db.getClient).not.toHaveBeenCalled();
 });
+
+test.each([{}, { elevation: 123.4 }])('3D GeoJSON uses a Z column and retains altitude with properties %j', async properties => {
+    const geometry = { type: 'Point', coordinates: [108, 14, 123.4] };
+    source(collection(feature(geometry, properties)));
+    await load();
+    expect(sqlCalls().find(sql => /CREATE TABLE/.test(sql))).toContain('geometry(MULTIPOINTZ, 4326)');
+    const [sql, params] = client.query.mock.calls.find(([statement]) => /INSERT INTO/.test(statement));
+    expect(params).toContain(JSON.stringify(geometry));
+    expect(sql).not.toContain('ST_Force2D');
+});
+test('mixed 2D/3D features preserve both rows without a dimension typmod', async () => {
+    const elevated = { type: 'Point', coordinates: [108, 14, 100] };
+    source(collection(feature(point), feature(elevated)));
+    await load();
+    const ddl = sqlCalls().find(sql => /CREATE TABLE/.test(sql));
+    expect(ddl).toContain('geom geometry CHECK (ST_SRID(geom) = 4326)');
+    expect(ddl).toContain("CHECK (GeometryType(geom) = 'MULTIPOINT')");
+    const inserts = client.query.mock.calls.filter(([sql]) => /INSERT INTO/.test(sql));
+    expect(inserts).toHaveLength(2);
+    expect(inserts[1][1]).toContain(JSON.stringify(elevated));
+});
+test('nested 3D collections use a Z-compatible geometry column', async () => {
+    source({ type: 'GeometryCollection', geometries: [{ type: 'GeometryCollection', geometries: [{ type: 'Point', coordinates: [108, 14, 100] }] }] });
+    await load();
+    expect(sqlCalls().find(sql => /CREATE TABLE/.test(sql))).toContain('geometry(GEOMETRYZ, 4326)');
+});
+test('unsupported coordinate dimensions are rejected before overwrite', async () => {
+    source(feature({ type: 'Point', coordinates: [108, 14, 100, 5] }));
+    await expect(load()).rejects.toThrow(/two or three/);
+    expect(db.getClient).not.toHaveBeenCalled();
+});

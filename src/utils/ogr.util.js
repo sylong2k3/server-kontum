@@ -176,6 +176,28 @@ const geoJSONGeometryType = (features) => {
     return types.size === 1 ? [...types][0] : 'GEOMETRY';
 };
 
+const geoJSONDimensions = (features) => {
+    const dimensions = new Set();
+    const coordinates = (value) => {
+        if (!Array.isArray(value)) { throw new Error('GeoJSON: invalid coordinates'); }
+        if (typeof value[0] === 'number') {
+            if (![2, 3].includes(value.length) || !value.every(Number.isFinite)) {
+                throw new Error('GeoJSON: positions must contain two or three finite coordinates');
+            }
+            dimensions.add(value.length);
+        } else {
+            value.forEach(coordinates);
+        }
+    };
+    const geometry = (value) => {
+        if (!value) { return; }
+        if (value.type === 'GeometryCollection') { value.geometries.forEach(geometry); }
+        else { coordinates(value.coordinates); }
+    };
+    features.forEach(feature => geometry(feature.geometry));
+    return dimensions;
+};
+
 const inspectGeoJSON = (filePath) => {
     const features = readGeoJSONFeatures(filePath);
     const geometryType = geoJSONGeometryType(features);
@@ -224,6 +246,12 @@ const loadGeoJSONToPostgis = async ({ filePath, schema, table, sridInput = 4326,
 
     // Xác định kiểu geometry từ toàn bộ file; cùng họ được promote, khác họ dùng GEOMETRY.
     const geomType = geoJSONGeometryType(features);
+    const dimensions = geoJSONDimensions(features);
+    // Preserve Z values. Mixed 2D/3D features need an unconstrained dimension,
+    // while retaining the canonical SRID and geometry family constraints.
+    const geomColumn = dimensions.size > 1
+        ? `geometry CHECK (ST_SRID(geom) = 4326)${geomType === 'GEOMETRY' ? '' : ` CHECK (GeometryType(geom) = '${geomType}')`}`
+        : `geometry(${geomType}${dimensions.has(3) ? 'Z' : ''}, 4326)`;
 
     if (onProgress) { await onProgress(10, t('ogr_loading_postgis', lang)); }
 
@@ -240,7 +268,7 @@ const loadGeoJSONToPostgis = async ({ filePath, schema, table, sridInput = 4326,
             CREATE TABLE IF NOT EXISTS "${safeSchema}"."${safeTable}" (
                 id   SERIAL PRIMARY KEY
                 ${colDefs ? ', ' + colDefs : ''}
-                , geom geometry(${geomType}, 4326)
+                , geom ${geomColumn}
             )
         `);
 

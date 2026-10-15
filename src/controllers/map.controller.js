@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+
 const mapService       = require('../services/map.service');
 const geoImportService = require('../services/geo-import.service');
 const geoserver        = require('../utils/geoserver.client');
@@ -73,11 +75,27 @@ const getImportJob = async (req, res) => {
 };
 
 const importGeoFile = async (req, res) => {
-    const payload = validate(geoImportPayload, req.body || {}, req.lang);
+    const source = { ...(req.body || {}) };
+    let payload;
+    try {
+        for (const field of ['default_style', 'legend_config']) {
+            if (typeof source[field] === 'string') {
+                try { source[field] = JSON.parse(source[field]); }
+                catch { throw new Api400Error(t('invalid_data', req.lang), [`${field}: invalid JSON`]); }
+            }
+        }
+        payload = validate(geoImportPayload, source, req.lang);
+    } catch (error) {
+        if (req.geoFile?.path) {
+            try { fs.unlinkSync(req.geoFile.path); } catch { /* already removed */ }
+        }
+        throw error;
+    }
     const result  = await geoImportService.enqueueImport({
         file:    req.geoFile,
         payload,
         user:    req.user,
+        lang:    req.lang,
     });
     res.status(202).json({
         success: true,

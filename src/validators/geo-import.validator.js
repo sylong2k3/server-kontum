@@ -1,6 +1,7 @@
 'use strict';
 
 const Joi = require('joi');
+const { createLayer } = require('./map-layer.validator');
 
 const code = Joi.string().pattern(/^[a-zA-Z0-9_-]+$/).min(2).max(60);
 const identifier = Joi.string().pattern(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
@@ -11,6 +12,10 @@ const geoImportPayload = Joi.object({
     name_en:           Joi.string().max(200).allow('', null),
     description_vi:    Joi.string().allow('', null),
     table_name:        identifier.max(120),
+    new_layer:         Joi.boolean().default(false),
+    default_style:     createLayer.extract('default_style'),
+    legend_config:     createLayer.extract('legend_config'),
+    is_active:         Joi.boolean().default(true),
     // GeoTIFF không import qua đây — upload vào kho viễn thám rồi dùng
     // POST /remote-sensing/images/:id/publish để đưa lên GeoServer
     source_format:     Joi.string().valid('shapefile', 'geojson', 'kml', 'filegdb').required(),
