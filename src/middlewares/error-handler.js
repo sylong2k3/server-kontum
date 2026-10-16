@@ -14,6 +14,17 @@ const errorHandler = (err, req, res, next) => {
     if (res.headersSent) {return next(err);}
 
     if (err instanceof BaseError) {
+        if (err.geotiffDiagnostics && err.errors?.includes('INVALID_GEOTIFF_GEOREFERENCE')) {
+            console.error('[ERROR]', {
+                event: 'GEOTIFF_GEOREFERENCE_REJECTED',
+                method: req.method,
+                url: req.path,
+                status: err.status,
+                message: err.message,
+                errors: err.errors,
+                geotiff: err.geotiffDiagnostics,
+            });
+        }
         if (Number.isFinite(err.retryAfterMs) && err.retryAfterMs > 0) {
             res.setHeader('Retry-After', String(Math.ceil(err.retryAfterMs / 1000)));
         }

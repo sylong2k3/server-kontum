@@ -38,19 +38,39 @@ const inspectGeoTiffFile = async (filePath, lang = 'vi') => {
     const { t } = require('./i18n.util');
     const { fromFile } = await import('geotiff');
     let reader;
+    const diagnostics = { stage: 'read_metadata', reasons: [] };
     try {
         reader = await fromFile(filePath);
         const image = await reader.getImage();
+        diagnostics.stage = 'validate_georeference';
+        diagnostics.width = image.getWidth();
+        diagnostics.height = image.getHeight();
         const keys = image.getGeoKeys() || {};
         const epsgCode = Number(keys.ProjectedCSTypeGeoKey || keys.GeographicTypeGeoKey);
-        const bounds = image.getBoundingBox();
-        if (!Number.isInteger(epsgCode) || epsgCode < 1 || epsgCode === 32767
-            || !bounds.every(Number.isFinite) || bounds[0] === bounds[2] || bounds[1] === bounds[3]) {
+        diagnostics.epsgCode = Number.isFinite(epsgCode) ? epsgCode : null;
+        if (!Number.isInteger(epsgCode) || epsgCode < 1) {
+            diagnostics.reasons.push('MISSING_OR_INVALID_EPSG');
+        } else if (epsgCode === 32767) {
+            diagnostics.reasons.push('USER_DEFINED_CRS_WITHOUT_EPSG');
+        }
+        try {
+            const bounds = image.getBoundingBox();
+            if (!bounds.every(Number.isFinite) || bounds[0] === bounds[2] || bounds[1] === bounds[3]) {
+                diagnostics.reasons.push('INVALID_GEOREFERENCE_BOUNDS');
+            }
+        } catch {
+            diagnostics.reasons.push('MISSING_OR_INVALID_GEOREFERENCE_TRANSFORM');
+        }
+        if (diagnostics.reasons.length) {
             throw new Error('Missing supported EPSG or georeferencing');
         }
         return { epsgCode };
     } catch {
-        throw new Api400Error(t('map_raster_georeference_required', lang), ['INVALID_GEOTIFF_GEOREFERENCE']);
+        if (!diagnostics.reasons.length) { diagnostics.reasons.push('GEOTIFF_METADATA_READ_FAILED'); }
+        const error = new Api400Error(t('map_raster_georeference_required', lang), ['INVALID_GEOTIFF_GEOREFERENCE']);
+        // Server-only diagnostics: never include paths, raw parser messages or pixel data.
+        error.geotiffDiagnostics = diagnostics;
+        throw error;
     } finally {
         if (reader) { await reader.close(); }
     }
